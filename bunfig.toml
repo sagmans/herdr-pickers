@@ -1,0 +1,4 @@
+# Supply-chain guard: only install npm package versions published at least
+# seven days ago (Bun expects seconds).
+[install]
+minimumReleaseAge = 604800
