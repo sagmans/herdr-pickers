@@ -1,0 +1,6 @@
+# Exact contributor/CI toolchain, mirroring the tested system installs.
+# herdr is only needed to run the PTY smoke against a real runtime.
+[tools]
+bun = "1.3.14"
+fzf = "0.55.0"
+herdr = "0.8.2"
