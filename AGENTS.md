@@ -4,7 +4,7 @@
 
 Herdr Pickers is a Bun/TypeScript Herdr plugin. Herdr runs it unsandboxed as the current user, directly from TypeScript; there is no build step and no runtime npm dependency.
 
-Use [README.md](README.md) for user-facing behavior and [SECURITY.md](SECURITY.md) for private vulnerability reporting.
+Use [README.md](README.md) for user-facing behavior and [SECURITY.md](SECURITY.md) for private vulnerability reporting. Follow [RELEASE.md](RELEASE.md) for every release.
 
 ## Repository map
 
