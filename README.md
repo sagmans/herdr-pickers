@@ -198,6 +198,11 @@ bun run typecheck
 bun run smoke   # PTY smoke against a disposable isolated Herdr runtime
 ```
 
+The smoke automates dispatch, toggling, reload, and teardown, but two
+behaviors only a human can verify: mouse click/double-click/wheel selection
+and visual fidelity in a real terminal emulator. Give both a quick pass in a
+disposable session before trusting a release.
+
 ## Trust
 
 Herdr plugins run unsandboxed as your user. This plugin invokes only the
