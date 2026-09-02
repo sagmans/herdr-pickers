@@ -1,0 +1,74 @@
+id = "herdr-pickers"
+name = "Herdr Pickers"
+version = "0.1.0"
+min_herdr_version = "0.8.0"
+description = "Mouse-aware Herdr navigation and agent pickers with fzf-backed ranking."
+platforms = ["macos", "linux"]
+
+[[actions]]
+id = "all"
+title = "Fuzzy navigate all targets"
+command = ["bun", "src/actions/open.ts", "all"]
+
+[[actions]]
+id = "projects"
+title = "Fuzzy navigate projects"
+command = ["bun", "src/actions/open.ts", "projects"]
+
+[[actions]]
+id = "workspaces"
+title = "Fuzzy navigate workspaces"
+command = ["bun", "src/actions/open.ts", "workspaces"]
+
+[[actions]]
+id = "repo-workspaces"
+title = "Navigate workspaces in current repository"
+contexts = ["workspace"]
+command = ["bun", "src/actions/open.ts", "repo-workspaces"]
+
+[[actions]]
+id = "worktrees"
+title = "Fuzzy navigate worktrees"
+command = ["bun", "src/actions/open.ts", "worktrees"]
+
+[[actions]]
+id = "repo-worktrees"
+title = "Navigate worktrees in current repository"
+contexts = ["workspace"]
+command = ["bun", "src/actions/open.ts", "repo-worktrees"]
+
+[[actions]]
+id = "agents"
+title = "Fuzzy pick an agent"
+command = ["bun", "src/actions/open.ts", "agents"]
+
+[[actions]]
+id = "repo-agents"
+title = "Pick an agent in current repository"
+contexts = ["workspace"]
+command = ["bun", "src/actions/open.ts", "repo-agents"]
+
+# Herdr has no native previous-workspace action, so focus and close events keep
+# the two-slot history required for tmux-style toggling.
+[[actions]]
+id = "last-workspace"
+title = "Switch to last focused workspace"
+contexts = ["global", "workspace"]
+command = ["bun", "src/actions/last-workspace.ts", "toggle"]
+
+[[events]]
+on = "workspace.focused"
+command = ["bun", "src/actions/last-workspace.ts", "focused"]
+
+[[events]]
+on = "workspace.closed"
+command = ["bun", "src/actions/last-workspace.ts", "closed"]
+
+[[panes]]
+id = "picker"
+title = "Herdr Picker"
+placement = "popup"
+# Herdr owns popup geometry because pane-open has no width or height flags.
+width = "75%"
+height = "75%"
+command = ["bun", "src/pane.ts"]
