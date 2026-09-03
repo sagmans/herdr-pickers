@@ -21,6 +21,7 @@ const CSI_PREFIX = "\x1b[";
 const KEY_UP_FINAL = "A";
 const DELAYED_SEQUENCE_MILLISECONDS = 75;
 const VIM_KEYMAP_TOML = '[keymap]\nup = ["up", "ctrl-k"]\ndown = ["down", "ctrl-j"]\n';
+const BACKGROUND_FAILURE_TIMEOUT_MILLISECONDS = 100;
 const AGENT_NOUN = "agents";
 const NO_AGENTS_MESSAGE = "No agents found.";
 const AGENT_PICKER_OPTIONS = { noun: AGENT_NOUN, live: true, emptyMessage: NO_AGENTS_MESSAGE } as const;
@@ -494,4 +495,104 @@ describe("terminal picker session", () => {
     sendClose("\x03");
     await run;
   });
+test("keeps input responsive while the initial reload is pending", async () => {
+    let sendQuery!: (value: string) => void;
+    let sendAccept!: (value: string) => void;
+    let resolveReload!: (rows: { readonly items: readonly PickerItem[]; readonly focusedId?: string }) => void;
+    let markEmptyQueryRanked!: () => void;
+    let markLoadedQueryRanked!: () => void;
+    const queryInput = new Promise<string>((resolve) => { sendQuery = resolve; });
+    const acceptInput = new Promise<string>((resolve) => { sendAccept = resolve; });
+    const emptyQueryRanked = new Promise<void>((resolve) => { markEmptyQueryRanked = resolve; });
+    const loadedQueryRanked = new Promise<void>((resolve) => { markLoadedQueryRanked = resolve; });
+    const terminal = new FakeTerminal([queryInput, acceptInput]);
+    const loaded: PickerItem = {
+      id: "workspace:beta",
+      searchText: "beta",
+      display: "beta",
+      target: "workspace:beta",
+    };
+
+    const run = runTerminalPicker({
+      prompt: "workspaces › ",
+      noun: "workspaces",
+      emptyMessage: "No workspaces found.",
+      items: [],
+      loadOnStart: true,
+      terminal,
+      reload: () => new Promise((resolve) => { resolveReload = resolve; }),
+      ranker: async (query, items) => {
+        if (query === "beta" && items.length === 0) markEmptyQueryRanked();
+        if (query === "beta" && items.length === 1) markLoadedQueryRanked();
+        return items.filter((item) => item.searchText.includes(query));
+      },
+    });
+
+    expect(plain(terminal.writes.at(-1) ?? "")).toContain("Loading…");
+    sendQuery("beta");
+    await emptyQueryRanked;
+    resolveReload({ items: [loaded], focusedId: loaded.id });
+    await loadedQueryRanked;
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    sendAccept("\r");
+
+    expect((await run)?.target).toBe(loaded.target);
+  });
+
+  test("replaces loading copy with the configured empty message", async () => {
+    const terminal = new FakeTerminal([], VIEWPORT, true);
+    const run = runTerminalPicker({
+      prompt: "workspaces › ",
+      noun: "workspaces",
+      emptyMessage: "No workspaces found.",
+      items: [],
+      loadOnStart: true,
+      terminal,
+      reload: async () => ({ items: [] }),
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    const latestFrame = plain(terminal.writes.filter((write) => write.includes("\x1b[2J")).at(-1) ?? "");
+    expect(latestFrame).toContain("No workspaces found.");
+    expect(latestFrame).not.toContain("Loading…");
+
+    terminal.finish();
+    await run;
+  });
+
+  test("restores terminal state after an initial reload failure", async () => {
+    const terminal = new FakeTerminal([], VIEWPORT, true);
+    const run = runTerminalPicker({
+      prompt: "workspaces › ",
+      noun: "workspaces",
+      emptyMessage: "No workspaces found.",
+      items: [],
+      loadOnStart: true,
+      terminal,
+      reload: async () => { throw new Error("initial load failed"); },
+    });
+    const outcome = await Promise.race([
+      run.then(
+        () => ({ type: "resolved" as const }),
+        (error: unknown) => ({ type: "rejected" as const, error }),
+      ),
+      Bun.sleep(BACKGROUND_FAILURE_TIMEOUT_MILLISECONDS).then(() => ({ type: "timed-out" as const })),
+    ]);
+
+    terminal.finish();
+    await run.catch(() => {});
+    expect(outcome.type).toBe("rejected");
+    if (outcome.type !== "rejected") throw new Error("picker did not reject");
+    expect(outcome.error).toBeInstanceOf(Error);
+    expect((outcome.error as Error).message).toBe("initial load failed");
+    expect(terminal.rawModes).toEqual([true, false]);
+    expect(terminal.writes.join("")).toContain("\x1b[?1049l");
+  });
 });
+
