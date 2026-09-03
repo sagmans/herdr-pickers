@@ -1,5 +1,6 @@
 import { Herdr } from "./client/herdr.ts";
 import { closePopup } from "./client/popup.ts";
+import { loadConfig } from "./config/config.ts";
 import { parseMode, runPicker } from "./picker.ts";
 import { color, dim } from "./style.ts";
 import { boundedTerminalBlock } from "./util/terminal-text.ts";
@@ -13,7 +14,8 @@ async function main(): Promise<void> {
   try {
     await withPopupClose(async () => {
       const mode = parseMode(process.env[MODE_ENV]);
-      const outcome = await runPicker(mode, { herdr: new Herdr(), env: process.env });
+      const config = loadConfig(process.env);
+      const outcome = await runPicker(mode, { herdr: new Herdr(), env: process.env, config });
       if (outcome === "no-agents") {
         console.log(dim(mode === "repo-agents" ? "No repository agents found." : "No agents found."));
       }

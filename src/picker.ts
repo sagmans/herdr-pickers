@@ -1,6 +1,7 @@
 import { Herdr, type CommandRunner } from "./client/herdr.ts";
 import { readAgentList, readWorkspaces, readWorktreeScope } from "./client/types.ts";
 import { buildAgentTargets, currentContextFromEnv, type AgentTarget, type CurrentContext } from "./catalog.ts";
+import type { HerdrPickersConfig } from "./config/config.ts";
 import { dispatchAgent, dispatchNavigationTarget } from "./dispatch.ts";
 import { loadNavigationTargets, type NavigationMode } from "./navigation.ts";
 import type { PickerItem } from "./picker-row.ts";
@@ -43,6 +44,7 @@ export interface PickerRuntime {
   readonly env?: Record<string, string | undefined> | undefined;
   readonly gitRunner?: CommandRunner | undefined;
   readonly pickerRunner?: PickerRunner | undefined;
+  readonly config?: HerdrPickersConfig | undefined;
 }
 
 export type PickerOutcome = "dispatched" | "cancelled" | "no-agents";
@@ -103,6 +105,7 @@ export async function runAgentPicker(mode: AgentMode, runtime: PickerRuntime): P
     emptyMessage: NO_AGENTS_MESSAGE,
     items: rendered.items,
     focusedId: rendered.focusedId,
+    keymap: runtime.config?.keymap,
     reload: async () => renderAgentRows(await loadAgentTargets(mode, runtime.herdr, runtime.env)),
     refreshIntervalMilliseconds: AGENT_REFRESH_INTERVAL_MILLISECONDS,
   });
@@ -123,6 +126,7 @@ async function runNavigationPicker(mode: NavigationMode, runtime: PickerRuntime)
     emptyMessage: presentation.emptyMessage,
     items: rendered.items,
     focusedId: rendered.focusedId,
+    keymap: runtime.config?.keymap,
     reload: async () => {
       targets = await loadNavigationTargets(mode, navigationRuntime(runtime));
       return renderNavigationRows(mode, targets);
@@ -140,6 +144,7 @@ function navigationRuntime(runtime: PickerRuntime) {
     herdr: runtime.herdr,
     env: runtime.env,
     gitRunner: runtime.gitRunner,
+    projectRoots: runtime.config?.projects.roots,
   };
 }
 
