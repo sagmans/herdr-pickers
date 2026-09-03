@@ -121,13 +121,40 @@ roots = ["~/projects", "~/work"]
 | typing | Fuzzy search visible repository, identity, relation, and detail text |
 | `Ctrl-n` / `↓` | Move selection down |
 | `Ctrl-p` / `↑` | Move selection up |
-| `Enter` | Dispatch highlighted target |
+| `Enter` / `Ctrl-j` | Dispatch highlighted target |
 | mouse click | Move selection |
 | mouse double-click | Dispatch clicked target |
 | mouse wheel | Scroll |
 | `Esc` | Clear search; close when search is empty |
 | `Ctrl-C` | Close |
-| `Ctrl-r` | Reload rows |
+| `Ctrl-r` | Reload the current catalog without closing |
+| `Backspace` | Delete the previous search character |
+
+Configure keyboard actions in the plugin `config.toml` shown by
+`herdr plugin config-dir herdr-pickers`:
+
+```toml
+[keymap]
+up = ["up", "ctrl-k"]
+down = ["down", "ctrl-j"]
+```
+
+Each action accepts an array of keys, so one action can keep multiple
+bindings. A configured action replaces only that action's defaults. Omitted
+actions keep their defaults. In the example, `Ctrl-j` moves down, while the
+carriage return sent by `Enter` still accepts. Use an empty array to unbind
+an action.
+
+Configurable actions are `up`, `down`, `accept`, `escape`, `close`, and
+`reload`. Supported key names are `up`, `down`, `enter`, `escape`, and
+`ctrl-a` through `ctrl-z`. Printable characters remain search input, and
+`Backspace` remains fixed query editing. Unknown names, malformed arrays, and
+conflicting keys fail with the config file path. Reopen the popup after a
+config change.
+
+Terminals encode `Ctrl-j` as line feed. A terminal that also sends line feed
+for `Enter` cannot distinguish those inputs. Use carriage-return `Enter` or a
+different binding there.
 
 The top-right `✕` closes without dispatch. Cancellation is inert. Dispatch
 failures close the popup and surface as errors.

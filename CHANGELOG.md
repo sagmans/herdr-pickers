@@ -4,6 +4,10 @@ All notable user-facing changes to Herdr Pickers are recorded in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Added configurable multi-key bindings for picker navigation and actions.
+
 ## [0.1.0] - 2026-09-02
 
 ### Added
