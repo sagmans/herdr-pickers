@@ -8,6 +8,10 @@ All notable user-facing changes to Herdr Pickers are recorded in this file.
 
 - Added configurable multi-key bindings for picker navigation and actions while keeping Escape and Ctrl-C fixed for reliable cancellation.
 
+### Changed
+
+- Navigation pickers now render before project and worktree discovery completes.
+
 ## [0.1.0] - 2026-09-02
 
 ### Added

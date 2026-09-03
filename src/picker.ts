@@ -3,7 +3,7 @@ import { readAgentList, readWorkspaces, readWorktreeScope } from "./client/types
 import { buildAgentTargets, currentContextFromEnv, type AgentTarget, type CurrentContext } from "./catalog.ts";
 import type { HerdrPickersConfig } from "./config/config.ts";
 import { dispatchAgent, dispatchNavigationTarget } from "./dispatch.ts";
-import { loadNavigationTargets, type NavigationMode } from "./navigation.ts";
+import { loadNavigationTargets, type NavigationMode, type NavigationTarget } from "./navigation.ts";
 import type { PickerItem } from "./picker-row.ts";
 import { renderAgentRows, renderNavigationRows } from "./rows.ts";
 import { runTerminalPicker, type TerminalPickerOptions } from "./terminal-picker.ts";
@@ -116,21 +116,23 @@ export async function runAgentPicker(mode: AgentMode, runtime: PickerRuntime): P
 }
 
 async function runNavigationPicker(mode: NavigationMode, runtime: PickerRuntime): Promise<PickerOutcome> {
-  let targets = await loadNavigationTargets(mode, navigationRuntime(runtime));
+  // Discovery stays off the first-frame path: the popup draws immediately and
+  // the startup load rides the same reload path as manual Ctrl-r refreshes.
+  let targets: NavigationTarget[] = [];
   const picker = runtime.pickerRunner ?? runTerminalPicker;
   const presentation = NAVIGATION_PRESENTATION[mode];
-  const rendered = renderNavigationRows(mode, targets);
+  const loadRows = async () => {
+    targets = await loadNavigationTargets(mode, navigationRuntime(runtime));
+    return renderNavigationRows(mode, targets);
+  };
   const selection = await picker({
     prompt: presentation.prompt,
     noun: presentation.noun,
     emptyMessage: presentation.emptyMessage,
-    items: rendered.items,
-    focusedId: rendered.focusedId,
+    items: [],
+    loadOnStart: true,
     keymap: runtime.config?.keymap,
-    reload: async () => {
-      targets = await loadNavigationTargets(mode, navigationRuntime(runtime));
-      return renderNavigationRows(mode, targets);
-    },
+    reload: loadRows,
   });
   if (!selection) return "cancelled";
   const target = targets.find((candidate) => candidate.id === selection.target);

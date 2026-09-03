@@ -146,6 +146,7 @@ describe("picker flow", () => {
       expect(options.live).toBe(true);
       expect(options.emptyMessage).toBe(NO_AGENTS_MESSAGE);
       expect(options.refreshIntervalMilliseconds).toBe(1000);
+      expect(options.loadOnStart).toBeUndefined();
       const refreshed = await options.reload?.();
       expect(refreshed?.items[0]?.group?.display).toContain("▾ sample-repo");
       return undefined;
@@ -176,17 +177,22 @@ describe("navigation picker flow", () => {
         exitCode: 0,
       }),
     }, commands);
-    const picker = fakePicker("workspace:w2");
+    const runner: PickerRunner = async (options) => {
+      expect(options.items).toEqual([]);
+      expect(options.loadOnStart).toBe(true);
+      expect(options.refreshIntervalMilliseconds).toBeUndefined();
+      expect(options.keymap).toBe(KEYMAP_CONFIG.keymap);
+      expect(commands).toEqual([]);
+      const loaded = await options.reload?.();
+      expect(loaded?.focusedId).toBe("workspace:w1");
+      expect(loaded?.items.length).toBeGreaterThan(0);
+      return loaded?.items.find((item) => item.target === "workspace:w2");
+    };
 
-    const outcome = await runPicker("workspaces", { herdr, env: {}, pickerRunner: picker.runner, config: KEYMAP_CONFIG });
+    const outcome = await runPicker("workspaces", { herdr, env: {}, pickerRunner: runner, config: KEYMAP_CONFIG });
 
     expect(outcome).toBe("dispatched");
     expect(commands).toContainEqual(["workspace", "focus", "w2"]);
-    expect(picker.calls[0]?.keymap).toBe(KEYMAP_CONFIG.keymap);
-    expect(picker.calls[0]?.noun).toBe("workspaces");
-    expect(picker.calls[0]?.live).toBeUndefined();
-    expect(picker.calls[0]?.refreshIntervalMilliseconds).toBeUndefined();
-    expect(picker.calls[0]?.focusedId).toBe("workspace:w1");
   });
 
   test("keeps empty navigation catalogs open and reloadable", async () => {
@@ -226,6 +232,7 @@ describe("navigation picker flow", () => {
       },
     }, commands);
     const runner: PickerRunner = async (options) => {
+      await options.reload?.();
       const refreshed = await options.reload?.();
       return refreshed?.items.find((item) => item.target === "workspace:w3");
     };
