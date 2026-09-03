@@ -147,14 +147,15 @@ an action.
 
 Configurable actions are `up`, `down`, `accept`, `escape`, `close`, and
 `reload`. Supported key names are `up`, `down`, `enter`, `escape`, and
-`ctrl-a` through `ctrl-z`. Printable characters remain search input, and
-`Backspace` remains fixed query editing. Unknown names, malformed arrays, and
-conflicting keys fail with the config file path. Reopen the popup after a
-config change.
+`ctrl-a` through `ctrl-z`. Printable characters remain search input. The
+`backspace` key name is not supported. A DEL Backspace always edits the query.
+Unknown names, malformed arrays, and conflicting keys fail with the config
+file path. Reopen the popup after a config change.
 
 Terminals encode `Ctrl-j` as line feed. A terminal that also sends line feed
 for `Enter` cannot distinguish those inputs. Use carriage-return `Enter` or a
-different binding there.
+different binding there. Some terminals encode a physical Backspace as
+`Ctrl-h`. On those terminals, a configured `ctrl-h` action receives Backspace.
 
 The top-right `✕` closes without dispatch. Cancellation is inert. Dispatch
 failures close the popup and surface as errors.

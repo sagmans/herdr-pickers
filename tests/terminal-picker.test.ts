@@ -15,7 +15,12 @@ const REFRESH_INTERVAL_MILLISECONDS = 1000;
 const CONFIG_PATH = "/example/config.toml";
 const KEY_CTRL_J = "\x0a";
 const KEY_ENTER = "\r";
+const KEY_ESCAPE = "\x1b";
+const CSI_PREFIX = "\x1b[";
+const KEY_UP_FINAL = "A";
+const DELAYED_SEQUENCE_MILLISECONDS = 75;
 const VIM_KEYMAP_TOML = '[keymap]\nup = ["up", "ctrl-k"]\ndown = ["down", "ctrl-j"]\n';
+const ESCAPE_ACCEPT_KEYMAP_TOML = '[keymap]\nescape = []\naccept = ["escape"]\n';
 const AGENT_NOUN = "agents";
 const NO_AGENTS_MESSAGE = "No agents found.";
 const AGENT_PICKER_OPTIONS = { noun: AGENT_NOUN, live: true, emptyMessage: NO_AGENTS_MESSAGE } as const;
@@ -238,7 +243,7 @@ describe("terminal picker session", () => {
   });
 
   test("combines an arrow sequence split across input chunks", async () => {
-    const terminal = new FakeTerminal(["\x1b", "[A", "\r"]);
+    const terminal = new FakeTerminal([KEY_ESCAPE, "[A", KEY_ENTER]);
 
     const result = await runTerminalPicker({
       ...AGENT_PICKER_OPTIONS,
@@ -246,6 +251,36 @@ describe("terminal picker session", () => {
       items: STATE.items,
       focusedId: "codex",
       terminal,
+    });
+
+    expect(result?.target).toBe("pane-1");
+  });
+
+  test("retains a fragmented arrow after the Escape timeout", async () => {
+    const delayedTail = Bun.sleep(DELAYED_SEQUENCE_MILLISECONDS).then(() => KEY_UP_FINAL);
+    const terminal = new FakeTerminal([CSI_PREFIX, delayedTail, KEY_ENTER]);
+
+    const result = await runTerminalPicker({
+      ...AGENT_PICKER_OPTIONS,
+      prompt: "agents> ",
+      items: STATE.items,
+      focusedId: "codex",
+      terminal,
+    });
+
+    expect(result?.target).toBe("pane-1");
+  });
+
+  test("maps a pending Escape when input ends", async () => {
+    const terminal = new FakeTerminal([KEY_ESCAPE]);
+    const keymap = parseConfig(ESCAPE_ACCEPT_KEYMAP_TOML, CONFIG_PATH).keymap;
+
+    const result = await runTerminalPicker({
+      ...AGENT_PICKER_OPTIONS,
+      prompt: "agents> ",
+      items: STATE.items,
+      terminal,
+      keymap,
     });
 
     expect(result?.target).toBe("pane-1");

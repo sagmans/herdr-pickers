@@ -288,7 +288,8 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
           timerFailure,
         ]);
         if (raced.type === "timeout") {
-          const event = pending === ESCAPE_KEY_SEQUENCE ? mappedKeyEvent(ESCAPE_KEY_SEQUENCE, keymap) : undefined;
+          if (pending !== ESCAPE_KEY_SEQUENCE) continue;
+          const event = mappedKeyEvent(ESCAPE_KEY_SEQUENCE, keymap);
           pending = "";
           const outcome = await handleEvents(event === undefined ? [] : [event]);
           if (outcome.done) return outcome.selection;
