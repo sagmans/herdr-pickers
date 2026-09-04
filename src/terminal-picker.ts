@@ -29,6 +29,7 @@ export type { PickerAction, PickerState, Viewport } from "./terminal-picker-view
 const DEFAULT_COLUMNS = 80;
 const DEFAULT_ROWS = 24;
 const ESCAPE_SEQUENCE_TIMEOUT_MILLISECONDS = 25;
+const LOADING_MESSAGE = "Loading…";
 const DOUBLE_CLICK_MILLISECONDS = 400;
 const WHEEL_STEP = 3;
 const ALTERNATE_SCREEN_ENTER = "\x1b[?1049h";
@@ -77,6 +78,7 @@ export interface TerminalPickerOptions extends PickerRows {
   readonly terminal?: TerminalAdapter | undefined;
   readonly ranker?: ((query: string, items: readonly PickerItem[]) => Promise<PickerItem[]>) | undefined;
   readonly reload?: (() => Promise<PickerRows>) | undefined;
+  readonly loadOnStart?: boolean | undefined;
   readonly now?: (() => number) | undefined;
   readonly timers?: PickerTimers | undefined;
   readonly refreshIntervalMilliseconds?: number | undefined;
@@ -94,7 +96,7 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
     prompt: options.prompt,
     noun: options.noun,
     live: options.live,
-    emptyMessage: options.emptyMessage,
+    emptyMessage: options.loadOnStart === true ? LOADING_MESSAGE : options.emptyMessage,
     query: "",
     items: arrangePickerItems(sourceItems),
     sourceCount: sourceItems.length,
@@ -173,7 +175,8 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
     const rows = await options.reload();
     sourceItems = [...rows.items];
     focusedId = rows.focusedId;
-    state = { ...state, sourceCount: sourceItems.length };
+    // Loading copy is placeholder-only: once rows arrive, emptiness is real.
+    state = { ...state, emptyMessage: options.emptyMessage, sourceCount: sourceItems.length };
     await applyQuery(state.query);
     if (!cleaned) draw();
   };
@@ -276,6 +279,9 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
       }, options.refreshIntervalMilliseconds));
     }
     draw();
+    // First frame must precede discovery; loading failures ride the same
+    // failure channel as timer refreshes so cleanup stays on one path.
+    if (options.loadOnStart === true) void refresh().catch(failFromTimer);
 
     const iterator = terminal.input[Symbol.asyncIterator]();
     let nextInput = iterator.next();

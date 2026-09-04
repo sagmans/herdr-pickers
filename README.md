@@ -162,10 +162,11 @@ different binding there. Some terminals encode a physical Backspace as
 The top-right `✕` closes without dispatch. Cancellation is inert. Dispatch
 failures close the popup and surface as errors.
 
-Navigation catalogs reload only on `Ctrl-r`, preventing project and Git
-worktree discovery from polling. Agent catalogs refresh every second and also
-support `Ctrl-r`. Empty navigation catalogs remain open and reloadable;
-empty agent catalogs do not open a popup.
+Navigation pickers render immediately with a loading message, perform one
+initial catalog load, and then reload only on `Ctrl-r`. This keeps project
+and Git worktree discovery from polling. Agent catalogs refresh every second
+and also support `Ctrl-r`. Empty navigation catalogs remain open and
+reloadable; empty agent catalogs do not open a popup.
 
 Search uses only rendered group, identity, relation, badge, and detail text.
 Hidden paths, workspace ids, agent targets, and workspace agent status do
