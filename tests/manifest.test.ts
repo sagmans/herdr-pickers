@@ -30,7 +30,7 @@ describe("plugin manifest", () => {
       dependencies?: Record<string, string>;
     };
 
-    expect(pkg.version).toBe("0.1.0");
+    expect(pkg.version).toBe("0.2.0");
     expect(manifest.version).toBe(pkg.version);
     expect(pkg.license).toBe("MIT");
     expect(pkg.private).toBe(true);
