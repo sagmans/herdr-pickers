@@ -4,6 +4,10 @@ All notable user-facing changes to Herdr Pickers are recorded in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Added a `placement` setting so pickers can open as overlay and hide Kitty images from the pane underneath.
+
 ## [0.2.0] - 2026-09-04
 
 ### Added

@@ -1,8 +1,9 @@
 # Herdr Pickers
 
 Mouse-aware, fzf-ranked Herdr pickers for projects, workspaces, worktrees,
-and agents. Every interactive mode opens in a centered Herdr popup sized to
-75% of the terminal in each dimension. The plugin also owns
+and agents. By default, every interactive mode opens in a centered Herdr
+popup sized to 75% of the terminal in each dimension. Set
+`placement = "overlay"` for a full-pane zoom. The plugin also owns
 previous-workspace history because Herdr has no native last-focused-
 workspace action.
 
@@ -152,7 +153,21 @@ key names are `up`, `down`, `enter`, and `ctrl-a` through `ctrl-z`, except
 fixed cancellation controls; they cannot be rebound or used in `[keymap]`.
 The `backspace` key name is not supported. A DEL Backspace always edits the
 query. Unknown names, malformed arrays, and conflicting keys fail with the
-config file path. Reopen the popup after a config change.
+config file path. Reopen the picker after a config change.
+
+## Picker placement
+
+The default surface is a centered popup. Kitty images from the pane
+underneath can paint on top of that popup.
+
+If you need a full-pane zoom that hides those images, set `placement` in
+the plugin `config.toml`:
+
+1. Open the plugin config directory with `herdr plugin config-dir herdr-pickers`.
+2. Set `placement = "overlay"` in `config.toml`.
+3. Invoke a picker action again.
+
+Overlay is not 75% of the terminal. Reopen the picker after a config change.
 
 Terminals encode `Ctrl-j` as line feed. A terminal that also sends line feed
 for `Enter` cannot distinguish those inputs. Use carriage-return `Enter` or a

@@ -273,6 +273,26 @@ async function main(): Promise<void> {
   check("escape closes without dispatching", afterEscape === stableFocus,
     "focus moved from " + String(stableFocus) + " to " + String(afterEscape));
 
+  // Overlay is a real zoomed pane: prove open and Ctrl-C restore focus.
+  writeFileSync(
+    join(pluginConfigDir, CONFIG_FILE_NAME),
+    `placement = "overlay"\n\n${SMOKE_CONFIG}`,
+    "utf8",
+  );
+  const bytesBeforeOverlay = clientBytes();
+  const overlayOpened = cli(["plugin", "action", "invoke", "herdr-pickers.workspaces"]);
+  check("overlay workspaces action exits cleanly", overlayOpened.code === 0, overlayOpened.stderr.trim());
+  await poll("overlay picker renders", () => clientBytes() > bytesBeforeOverlay ? "rendered" : undefined);
+  const overlayFocus = focusedWorkspaceId();
+  attach.stdin.write(KEY_CTRL_C);
+  await Bun.sleep(800);
+  const afterOverlay = focusedWorkspaceId();
+  check(
+    "overlay ctrl-c closes without dispatching",
+    afterOverlay === overlayFocus,
+    "focus moved from " + String(overlayFocus) + " to " + String(afterOverlay),
+  );
+
   // 11. plugin command log shows no failures
   const logs = cli(["plugin", "log", "list"]);
   let pluginEntries: Array<Record<string, unknown> & { status?: string }> = [];
