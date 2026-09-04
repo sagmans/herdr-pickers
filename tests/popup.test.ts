@@ -39,7 +39,7 @@ describe("popup dismissal", () => {
     });
   });
 
-  test("skips popup.close when the picker is a real pane", async () => {
+  test("closes an overlay picker pane by id without popup.close", async () => {
     const writes: Array<{ path: string; payload: string }> = [];
 
     await closePickerSurface({
@@ -49,6 +49,21 @@ describe("popup dismissal", () => {
       writes.push({ path, payload });
     });
 
-    expect(writes).toHaveLength(0);
+    expect(writes).toHaveLength(1);
+    expect(writes[0]?.path).toBe("/tmp/herdr.sock");
+    expect(JSON.parse(writes[0]?.payload.trim() ?? "{}")).toEqual({
+      id: "herdr-pickers:overlay-close",
+      method: "plugin.pane.close",
+      params: { pane_id: "w1:p1" },
+    });
+  });
+
+  test("does not wait forever when overlay close socket stalls", async () => {
+    const started = Date.now();
+    await closePickerSurface({
+      HERDR_SOCKET_PATH: "/tmp/herdr.sock",
+      HERDR_PANE_ID: "w1:p1",
+    }, () => new Promise(() => {}));
+    expect(Date.now() - started).toBeLessThan(500);
   });
 });

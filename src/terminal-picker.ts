@@ -322,10 +322,10 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
     }
   } finally {
     cleanup();
-    // Overlay close is process exit. A pending stdin read keeps the pane alive
-    // as a blank zoom; the next Escape then echoes and Ctrl-C becomes SIGINT.
+    // Escape timeout leaves a pending read. Awaiting return() hung Escape while
+    // Ctrl-C had no pending read and still dismissed.
     try {
-      await iterator?.return?.();
+      void iterator?.return?.();
     } catch {}
   }
 }

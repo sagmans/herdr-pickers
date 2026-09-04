@@ -73,6 +73,8 @@ function closePopupOnSignals(env: Record<string, string | undefined>): () => voi
 if (import.meta.main) {
   try {
     await main();
+    // Overlay close can leave stdin handles; this process is the picker pane.
+    process.exit(0);
   } catch (error) {
     console.error(color("red", formatPaneError(error)));
     process.exit(1);

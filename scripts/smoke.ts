@@ -110,6 +110,17 @@ function git(cwd: string, ...args: string[]): void {
   execFileSync("git", args, { cwd, stdio: "ignore" });
 }
 
+function labeledPaneCount(label: string): number {
+  const result = cli(["pane", "list"]);
+  if (result.code !== 0) return -1;
+  try {
+    const parsed = JSON.parse(result.stdout) as { result?: { panes?: Array<{ label?: string }> } };
+    return (parsed.result?.panes ?? []).filter((pane) => pane.label === label).length;
+  } catch {
+    return -1;
+  }
+}
+
 function focusedWorkspaceId(): string | undefined {
   const result = cli(["workspace", "list"]);
   if (result.code !== 0) return undefined;
@@ -292,6 +303,24 @@ async function main(): Promise<void> {
     afterOverlay === overlayFocus,
     "focus moved from " + String(overlayFocus) + " to " + String(afterOverlay),
   );
+  const leftoverPickers = labeledPaneCount("Herdr Picker");
+  check("overlay ctrl-c removes the picker pane", leftoverPickers === 0, String(leftoverPickers));
+
+  const bytesBeforeOverlayEscape = clientBytes();
+  const overlayEscapeOpened = cli(["plugin", "action", "invoke", "herdr-pickers.workspaces"]);
+  check("overlay escape action exits cleanly", overlayEscapeOpened.code === 0, overlayEscapeOpened.stderr.trim());
+  await poll("overlay escape picker renders", () => clientBytes() > bytesBeforeOverlayEscape ? "rendered" : undefined);
+  const overlayEscapeFocus = focusedWorkspaceId();
+  attach.stdin.write(KEY_ESCAPE);
+  await Bun.sleep(800);
+  const afterOverlayEscape = focusedWorkspaceId();
+  check(
+    "overlay escape closes without dispatching",
+    afterOverlayEscape === overlayEscapeFocus,
+    "focus moved from " + String(overlayEscapeFocus) + " to " + String(afterOverlayEscape),
+  );
+  const leftoverAfterEscape = labeledPaneCount("Herdr Picker");
+  check("overlay escape removes the picker pane", leftoverAfterEscape === 0, String(leftoverAfterEscape));
 
   // 11. plugin command log shows no failures
   const logs = cli(["plugin", "log", "list"]);

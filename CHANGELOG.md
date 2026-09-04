@@ -11,6 +11,7 @@ All notable user-facing changes to Herdr Pickers are recorded in this file.
 ### Fixed
 
 - Overlay Escape and Ctrl-C now close the zoomed pane instead of leaving a blank terminal.
+- Overlay cancel now removes the picker pane so it cannot linger in the mosaic.
 
 ## [0.2.0] - 2026-09-04
 
