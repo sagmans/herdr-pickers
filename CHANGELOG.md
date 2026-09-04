@@ -4,6 +4,8 @@ All notable user-facing changes to Herdr Pickers are recorded in this file.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-04
+
 ### Added
 
 - Added configurable multi-key bindings for picker navigation and actions while keeping Escape and Ctrl-C fixed for reliable cancellation.
@@ -28,5 +30,6 @@ All notable user-facing changes to Herdr Pickers are recorded in this file.
 - Sanitized untrusted terminal text, bounded child-process errors, and kept command execution argv-based.
 - Added private vulnerability reporting guidance, license terms, and third-party notices.
 
-[Unreleased]: https://github.com/sagmans/herdr-pickers/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/sagmans/herdr-pickers/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/sagmans/herdr-pickers/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/sagmans/herdr-pickers/releases/tag/v0.1.0
