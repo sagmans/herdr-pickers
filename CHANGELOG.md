@@ -8,6 +8,10 @@ All notable user-facing changes to Herdr Pickers are recorded in this file.
 
 - Added a `placement` setting so pickers can open as overlay and hide Kitty images from the pane underneath.
 
+### Fixed
+
+- Overlay Escape and Ctrl-C now close the zoomed pane instead of leaving a blank terminal.
+
 ## [0.2.0] - 2026-09-04
 
 ### Added
