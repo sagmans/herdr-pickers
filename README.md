@@ -121,7 +121,7 @@ roots = ["~/projects", "~/work"]
 | typing | Fuzzy search visible repository, identity, relation, and detail text |
 | `Ctrl-n` / `↓` | Move selection down |
 | `Ctrl-p` / `↑` | Move selection up |
-| `Enter` / `Ctrl-j` | Dispatch highlighted target |
+| `Enter` | Dispatch highlighted target |
 | mouse click | Move selection |
 | mouse double-click | Dispatch clicked target |
 | mouse wheel | Scroll |

@@ -27,7 +27,7 @@ const NAMED_KEY_SEQUENCES: ReadonlyMap<string, string> = new Map([
 const DEFAULT_KEY_BINDINGS: Readonly<Record<PickerKeyAction, readonly string[]>> = {
   up: ["up", "ctrl-p"],
   down: ["down", "ctrl-n"],
-  accept: ["enter", "ctrl-j"],
+  accept: ["enter"],
   escape: ["escape"],
   close: ["ctrl-c"],
   reload: ["ctrl-r"],

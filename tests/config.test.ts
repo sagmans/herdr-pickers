@@ -52,7 +52,6 @@ describe("plugin config", () => {
       [KEY_DOWN, "down"],
       [KEY_CTRL_N, "down"],
       [KEY_ENTER, "accept"],
-      [KEY_CTRL_J, "accept"],
       [KEY_ESCAPE, "escape"],
       [KEY_CTRL_C, "close"],
       [KEY_CTRL_R, "reload"],
