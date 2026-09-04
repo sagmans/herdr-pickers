@@ -33,7 +33,7 @@ async function main(): Promise<void> {
       if (env.HERDR_PANE_ID) watch = await watchPickerFocus(env.HERDR_SOCKET_PATH!, env.HERDR_PANE_ID);
       const signal = watch ? AbortSignal.any([lifecycle.signal, watch.signal]) : lifecycle.signal;
       const outcome = await runPicker(mode, {
-        herdr: new Herdr({ signal }), env, config, signal, beforeDispatch: () => watch?.stop(),
+        herdr: new Herdr({ signal }), env, config, signal, beforeDispatch: () => watch?.prepareDispatch(),
       });
       if (outcome === "no-agents") {
         console.log(dim(mode === "repo-agents" ? "No repository agents found." : "No agents found."));

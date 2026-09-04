@@ -38,7 +38,7 @@ interface FocusOwner {
 export async function watchPickerFocus(
   socketPath: string,
   paneId: string,
-): Promise<{ signal: AbortSignal; stop(): void }> {
+): Promise<{ signal: AbortSignal; stop(): void; prepareDispatch(): Promise<void> }> {
   const controller = new AbortController();
   const socket = createConnection(socketPath);
   socket.unref();
@@ -48,15 +48,26 @@ export async function watchPickerFocus(
     const buffers = new Map<Socket, Buffer>();
     let snapshotSocket: Socket | undefined;
     let owner: FocusOwner | undefined;
+    let dispatch: { resolve(): void; reject(error: Error): void } | undefined;
     let ready = false;
     let dirty = false;
     let setupTimer = setTimeout(() => terminate(), SETUP_TIMEOUT_MS);
 
     const watcher = {
       signal: controller.signal,
+      prepareDispatch(): Promise<void> {
+        if (!ready || stage === "stopped" || stage === "failed" || dispatch) return Promise.reject(new Error(WATCH_FAILURE_MESSAGE));
+        return new Promise((resolve, reject) => {
+          dispatch = { resolve, reject };
+          if (stage === "snapshot") dirty = true;
+          else requestSnapshot();
+        });
+      },
       stop() {
         if (!ready || stage === "stopped" || stage === "failed") return;
         stage = "stopped";
+        dispatch?.reject(new Error(WATCH_FAILURE_MESSAGE));
+        dispatch = undefined;
         cleanup();
       },
     };
@@ -67,6 +78,8 @@ export async function watchPickerFocus(
       stage = "failed";
       const error = new Error(wasActive ? WATCH_FAILURE_MESSAGE : SETUP_FAILURE_MESSAGE);
       controller.abort(error);
+      dispatch?.reject(error);
+      dispatch = undefined;
       cleanup();
       if (!wasActive) reject(error);
     }
@@ -119,6 +132,12 @@ export async function watchPickerFocus(
         ready = true;
         resolve(watcher);
         if (dirty) requestSnapshot();
+        else if (dispatch) {
+          const accepted = dispatch;
+          dispatch = undefined;
+          watcher.stop();
+          accepted.resolve();
+        }
         return;
       }
 

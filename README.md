@@ -276,6 +276,7 @@ before it can reach your terminal.
 - Picker startup cannot be verified — save active work, then restart the affected Herdr session.
   Ownership uses `picker-sessions.sqlite` in the plugin state directory.
   Do not delete this file while any picker is active.
+  If an unrelated process reuses a recorded PID, ownership also fails closed; restart the affected session to recover.
 - Red fzf error — verify `fzf --version` is `>= 0.48`.
 
 ## License

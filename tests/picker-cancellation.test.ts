@@ -113,6 +113,22 @@ for (const mode of MODES) {
     expect(focused).toEqual([]);
   });
 
+  test(`${mode} waits for focus confirmation before dispatch`, async () => {
+    const controller = new AbortController();
+    const focused: string[][] = [];
+    const runner: CommandRunner = async argv => {
+      if (argv.includes("focus")) focused.push([...argv]);
+      return { stdout: argv.includes("workspace") ? WORKSPACES : AGENTS, stderr: "", exitCode: 0 };
+    };
+    const outcome = await runPicker(mode, {
+      herdr: new Herdr({ runner }), env: {}, signal: controller.signal,
+      beforeDispatch: async () => { await Promise.resolve(); controller.abort(); },
+      pickerRunner: async options => (options.loadOnStart ? await options.reload!() : options).items[0],
+    });
+    expect(outcome).toBe("cancelled");
+    expect(focused).toEqual([]);
+  });
+
   test(`${mode} stops focus observation before dispatch`, async () => {
     const order: string[] = [];
     const runner: CommandRunner = async argv => {

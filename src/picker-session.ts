@@ -105,6 +105,7 @@ export class PickerSession {
 }
 
 function ownerAlive(owner: Owner): boolean {
+  // ponytail: PID reuse fails closed; add process birth identities if restart recovery becomes frequent.
   return processAlive(owner.opener) || (owner.picker !== null && processAlive(owner.picker));
 }
 

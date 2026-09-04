@@ -345,6 +345,40 @@ describe("picker focus subscription", () => {
     }
   });
 
+  test("acceptance waits for a pending departure snapshot", async () => {
+    let finishSnapshot!: () => void;
+    let sawSnapshot!: () => void;
+    const pending = new Promise<void>(resolve => { sawSnapshot = resolve; });
+    let snapshots = 0;
+    const handshake = standardHandshake();
+    const server = await startServer((request, socket) => {
+      if (request.method === SNAPSHOT_METHOD && ++snapshots > 1) {
+        finishSnapshot = () => socket.end(line(snapshotResponse(request.id, OTHER_PANE_ID)));
+        sawSnapshot();
+      } else handshake(request, socket);
+    });
+    try {
+      const watcher = await watchPickerFocus(server.path, PANE_ID);
+      (await server.connected).write(focusEvent("pane_focused", { pane_id: OTHER_PANE_ID, workspace_id: WORKSPACE_ID }));
+      await pending;
+      const acceptance = watcher.prepareDispatch();
+      const rejected = expect(acceptance).rejects.toThrow();
+      finishSnapshot();
+      await rejected;
+      expect(watcher.signal.aborted).toBe(true);
+    } finally { await server.close(); }
+  });
+
+  test("acceptance confirms current focus then disconnects without aborting", async () => {
+    const server = await startServer(standardHandshake());
+    try {
+      const watcher = await watchPickerFocus(server.path, PANE_ID);
+      await watcher.prepareDispatch();
+      expect(server.requests.filter(request => request.method === SNAPSHOT_METHOD)).toHaveLength(2);
+      expect(watcher.signal.aborted).toBe(false);
+    } finally { await server.close(); }
+  });
+
   test("stop disconnects without aborting selection", async () => {
     const server = await startServer(standardHandshake());
     try {

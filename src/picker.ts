@@ -41,7 +41,7 @@ export type PickerRunner = (options: TerminalPickerOptions) => Promise<PickerIte
 
 export interface PickerRuntime {
   readonly signal?: AbortSignal | undefined;
-  readonly beforeDispatch?: (() => void) | undefined;
+  readonly beforeDispatch?: (() => void | Promise<void>) | undefined;
   readonly herdr: Herdr;
   readonly env?: Record<string, string | undefined> | undefined;
   readonly gitRunner?: CommandRunner | undefined;
@@ -128,7 +128,7 @@ export async function runAgentPicker(mode: AgentMode, runtime: PickerRuntime): P
   });
   const target = selection?.target;
   if (!target || runtime.signal?.aborted) return "cancelled";
-  runtime.beforeDispatch?.();
+  await runtime.beforeDispatch?.();
   if (runtime.signal?.aborted) return "cancelled";
   await dispatchAgent(target, runtime.herdr);
   return "dispatched";
@@ -160,7 +160,7 @@ async function runNavigationPicker(mode: NavigationMode, runtime: PickerRuntime)
   if (!selection || runtime.signal?.aborted) return "cancelled";
   const target = targets.find((candidate) => candidate.id === selection.target);
   if (!target) throw new Error(`Selected navigation target '${selection.target}' is no longer available.`);
-  runtime.beforeDispatch?.();
+  await runtime.beforeDispatch?.();
   if (runtime.signal?.aborted) return "cancelled";
   await dispatchNavigationTarget(target, runtime.herdr);
   return "dispatched";
