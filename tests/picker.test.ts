@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { buildPaneOpenArgs } from "../src/actions/open.ts";
 import { Herdr, type CommandRunner } from "../src/client/herdr.ts";
+import { parseConfig } from "../src/config/config.ts";
 import { AgentTargetError, loadAgentTargets, parseMode, runAgentPicker, runPicker, type PickerRunner } from "../src/picker.ts";
 import type { TerminalPickerOptions } from "../src/terminal-picker.ts";
 
@@ -29,6 +30,8 @@ function herdrWith(routes: Record<string, () => { stdout: string; stderr: string
 const AGENTS = '{"result":{"agents":[{"terminal_id":"t1","label":"pi","workspace_id":"w1","focused":true},{"terminal_id":"t2","label":"alpha","workspace_id":"w1","status":"working"}]}}';
 const WORKSPACES = '{"result":{"workspaces":[{"workspace_id":"w1","focused":true,"worktree":{"repo_root":"/repo/sample-repo","repo_name":"sample-repo","checkout_path":"/repo/sample-repo/main","is_linked_worktree":true}}]}}';
 const NO_AGENTS_MESSAGE = "No agents found.";
+const CONFIG_PATH = "/example/config.toml";
+const KEYMAP_CONFIG = parseConfig('[keymap]\ndown = ["ctrl-j"]\n', CONFIG_PATH);
 
 describe("modes", () => {
   test("parses all eight picker modes and rejects unknown modes", () => {
@@ -77,10 +80,11 @@ describe("picker flow", () => {
     }, commands);
     const picker = fakePicker("t2");
 
-    const outcome = await runAgentPicker("agents", { herdr, env: {}, pickerRunner: picker.runner });
+    const outcome = await runAgentPicker("agents", { herdr, env: {}, pickerRunner: picker.runner, config: KEYMAP_CONFIG });
 
     expect(outcome).toBe("dispatched");
     expect(commands).toContainEqual(["agent", "focus", "t2"]);
+    expect(picker.calls[0]?.keymap).toBe(KEYMAP_CONFIG.keymap);
     expect(picker.calls[0]?.items[0]?.group?.display).toContain("▾ sample-repo");
     expect(picker.calls[0]?.prompt).toBe("agents › ");
   });
@@ -174,10 +178,11 @@ describe("navigation picker flow", () => {
     }, commands);
     const picker = fakePicker("workspace:w2");
 
-    const outcome = await runPicker("workspaces", { herdr, env: {}, pickerRunner: picker.runner });
+    const outcome = await runPicker("workspaces", { herdr, env: {}, pickerRunner: picker.runner, config: KEYMAP_CONFIG });
 
     expect(outcome).toBe("dispatched");
     expect(commands).toContainEqual(["workspace", "focus", "w2"]);
+    expect(picker.calls[0]?.keymap).toBe(KEYMAP_CONFIG.keymap);
     expect(picker.calls[0]?.noun).toBe("workspaces");
     expect(picker.calls[0]?.live).toBeUndefined();
     expect(picker.calls[0]?.refreshIntervalMilliseconds).toBeUndefined();

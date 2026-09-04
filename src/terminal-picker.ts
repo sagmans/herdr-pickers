@@ -1,47 +1,31 @@
+import { DEFAULT_PICKER_KEYMAP, type PickerKeymap } from "./config/config.ts";
 import { rankRows } from "./fzf.ts";
-import { PICKER_PALETTE } from "./palette.ts";
-import { trueColor } from "./style.ts";
 import {
   arrangePickerItems,
-  expandPickerItems,
-  type PickerDisplayRow,
   type PickerItem,
   type PickerRows,
 } from "./picker-row.ts";
+import {
+  ESCAPE_KEY_SEQUENCE,
+  parseInput,
+  type InputEvent,
+} from "./terminal-picker-input.ts";
+import {
+  fitSelection,
+  initialSelection,
+  mouseAction,
+  moveSelection,
+  renderFrame,
+  scrollRows,
+  type PickerState,
+  type Viewport,
+} from "./terminal-picker-view.ts";
 
-const CLOSE_BUTTON = "✕";
-const CLOSE_ROW = 1;
-const CLOSE_RIGHT_MARGIN = 1;
-const CLOSE_HIT_RADIUS = 1;
-const DIVIDER = "─";
-const TOP_DIVIDER_INDEX = 1;
-const RAIL_ROWS = 2;
-const RESERVED_ROWS = RAIL_ROWS * 2;
-const MIN_DIVIDER_VIEWPORT_ROWS = RESERVED_ROWS;
-const LIVE_SUFFIX = " · live";
-const PLURAL_SUFFIX = "s";
-const MATCH_SINGULAR = "match";
-const MATCH_PLURAL = "matches";
-const POINTER = "→";
-const MOUSE_PATTERN = /^\x1b\[<(\d+);(\d+);(\d+)([Mm])/;
-const CSI_PATTERN = /^\x1b\[[0-9;?]*[ -/]*[@-~]/;
-const C1_CSI_PATTERN = /^\u009b[0-9;?]*[ -/]*[@-~]/;
-const KEY_UP = "\x1b[A";
-const KEY_DOWN = "\x1b[B";
-const KEY_ESCAPE = "\x1b";
-const KEY_CTRL_C = "\x03";
-const KEY_CTRL_N = "\x0e";
-const KEY_CTRL_P = "\x10";
-const KEY_CTRL_R = "\x12";
-const KEY_ENTER = "\r";
-const KEY_NEWLINE = "\n";
-const KEY_BACKSPACE = "\x7f";
-const MOUSE_LEFT = 0;
-const MOUSE_WHEEL_UP = 64;
-const MOUSE_WHEEL_DOWN = 65;
-const PRINTABLE_CODE_MIN = 0x20;
-const DELETE_CODE = 0x7f;
-const C1_CONTROL_MAX = 0x9f;
+export { parseInput } from "./terminal-picker-input.ts";
+export type { InputEvent, MouseEvent, ParsedInput } from "./terminal-picker-input.ts";
+export { mouseAction, renderFrame } from "./terminal-picker-view.ts";
+export type { PickerAction, PickerState, Viewport } from "./terminal-picker-view.ts";
+
 const DEFAULT_COLUMNS = 80;
 const DEFAULT_ROWS = 24;
 const ESCAPE_SEQUENCE_TIMEOUT_MILLISECONDS = 25;
@@ -59,66 +43,12 @@ const CURSOR_HIDE = "\x1b[?25l";
 const CURSOR_SHOW = "\x1b[?25h";
 const CLEAR_SCREEN = "\x1b[2J";
 const CURSOR_HOME = "\x1b[H";
-const CURSOR_COLUMN_SUFFIX = "G";
 const CURSOR_POSITION_SUFFIX = "H";
 const CSI_PREFIX = "\x1b[";
 const FIRST_TERMINAL_CELL = 1;
+const ESCAPE_INPUT_EVENT: InputEvent = { type: "escape" };
 const TERMINAL_START = `${ALTERNATE_SCREEN_ENTER}${LINE_WRAP_DISABLE}${MOUSE_TRACKING_ENABLE}${SGR_MOUSE_ENABLE}`;
 const TERMINAL_STOP = `${SGR_MOUSE_DISABLE}${MOUSE_TRACKING_DISABLE}${LINE_WRAP_ENABLE}${CURSOR_SHOW}${ALTERNATE_SCREEN_EXIT}`;
-
-export interface Viewport {
-  readonly columns: number;
-  readonly rows: number;
-}
-
-interface ListLayout {
-  readonly count: number;
-  readonly firstIndex: number;
-  readonly firstRow: number;
-  readonly rows: readonly PickerDisplayRow[];
-}
-
-export interface PickerState {
-  readonly prompt: string;
-  readonly noun: string;
-  readonly live?: boolean | undefined;
-  readonly emptyMessage?: string | undefined;
-  readonly query: string;
-  readonly items: readonly PickerItem[];
-  readonly sourceCount: number;
-  readonly selected: number;
-  readonly scrollTop: number;
-}
-
-export interface MouseEvent {
-  readonly type: "mouse";
-  readonly button: "left" | "wheel-up" | "wheel-down" | "other";
-  readonly column: number;
-  readonly row: number;
-  readonly released: boolean;
-}
-
-export type InputEvent =
-  | MouseEvent
-  | { readonly type: "up" }
-  | { readonly type: "down" }
-  | { readonly type: "accept" }
-  | { readonly type: "escape" }
-  | { readonly type: "close" }
-  | { readonly type: "reload" }
-  | { readonly type: "backspace" }
-  | { readonly type: "text"; readonly value: string };
-
-export type PickerAction =
-  | { readonly type: "close" }
-  | { readonly type: "select"; readonly index: number }
-  | { readonly type: "scroll"; readonly delta: number }
-  | { readonly type: "none" };
-
-export interface ParsedInput {
-  readonly events: readonly InputEvent[];
-  readonly remainder: string;
-}
 
 export interface TerminalAdapter {
   readonly input: AsyncIterable<string | Uint8Array>;
@@ -143,6 +73,7 @@ export interface TerminalPickerOptions extends PickerRows {
   readonly noun: string;
   readonly live?: boolean | undefined;
   readonly emptyMessage?: string | undefined;
+  readonly keymap?: PickerKeymap | undefined;
   readonly terminal?: TerminalAdapter | undefined;
   readonly ranker?: ((query: string, items: readonly PickerItem[]) => Promise<PickerItem[]>) | undefined;
   readonly reload?: (() => Promise<PickerRows>) | undefined;
@@ -151,132 +82,9 @@ export interface TerminalPickerOptions extends PickerRows {
   readonly refreshIntervalMilliseconds?: number | undefined;
 }
 
-export function renderFrame(state: PickerState, viewport: Viewport): readonly string[] {
-  if (viewport.rows <= 0) return [];
-  const frame = Array.from({ length: viewport.rows }, () => "");
-  frame[0] = `${trueColor(PICKER_PALETTE.muted, sourceCountLabel(state.sourceCount, state.noun, state.live))}${CSI_PREFIX}${closeColumn(viewport)}${CURSOR_COLUMN_SUFFIX}${trueColor(PICKER_PALETTE.muted, CLOSE_BUTTON)}`;
-  if (viewport.rows === 1) return frame;
-
-  if (hasDividers(viewport)) {
-    const divider = trueColor(PICKER_PALETTE.muted, DIVIDER.repeat(Math.max(0, viewport.columns)));
-    frame[TOP_DIVIDER_INDEX] = divider;
-    frame[viewport.rows - RAIL_ROWS] = divider;
-  }
-
-  const list = listLayout(state, viewport);
-  for (let offset = 0; offset < list.count; offset += 1) {
-    const row = list.rows[list.firstIndex + offset];
-    if (row === undefined) break;
-    const selected = row.type === "item" && row.itemIndex === state.selected;
-    const selectionColor = row.type === "item" ? row.item.selectionColor ?? PICKER_PALETTE.selected : PICKER_PALETTE.selected;
-    const pointer = selected ? trueColor(selectionColor, POINTER) : " ";
-    const display = row.type === "group"
-      ? row.group.display
-      : selected
-        ? row.item.selectedDisplay ?? row.item.display
-        : row.item.display;
-    frame[list.firstRow - 1 + offset] = `${pointer} ${display}`;
-  }
-  if (state.items.length === 0 && state.emptyMessage !== undefined && resultCapacity(viewport) > 0) {
-    frame[resultEndRow(viewport) - RAIL_ROWS] = state.emptyMessage;
-  }
-  frame[viewport.rows - 1] = promptRail(state, viewport);
-  return frame;
-}
-
-export function mouseAction(event: MouseEvent, state: PickerState, viewport: Viewport): PickerAction {
-  if (event.released) return { type: "none" };
-  if (event.button === "wheel-up") return { type: "scroll", delta: -1 };
-  if (event.button === "wheel-down") return { type: "scroll", delta: 1 };
-  if (event.button !== "left") return { type: "none" };
-  if (event.row === CLOSE_ROW && Math.abs(event.column - closeColumn(viewport)) <= CLOSE_HIT_RADIUS) {
-    return { type: "close" };
-  }
-  const list = listLayout(state, viewport);
-  if (event.row < list.firstRow || event.row >= list.firstRow + list.count) return { type: "none" };
-  const row = list.rows[list.firstIndex + event.row - list.firstRow];
-  return row?.type === "item" ? { type: "select", index: row.itemIndex } : { type: "none" };
-}
-
-export function parseInput(data: string): ParsedInput {
-  const events: InputEvent[] = [];
-  let remaining = data;
-
-  while (remaining.length > 0) {
-    const mouse = MOUSE_PATTERN.exec(remaining);
-    if (mouse) {
-      events.push({
-        type: "mouse",
-        button: mouseButton(Number(mouse[1])),
-        column: Number(mouse[2]),
-        row: Number(mouse[3]),
-        released: mouse[4] === "m",
-      });
-      remaining = remaining.slice(mouse[0].length);
-      continue;
-    }
-    if (remaining.startsWith("\x1b[<")) return { events, remainder: remaining };
-    if (remaining.startsWith(KEY_UP)) {
-      events.push({ type: "up" });
-      remaining = remaining.slice(KEY_UP.length);
-      continue;
-    }
-    if (remaining.startsWith(KEY_DOWN)) {
-      events.push({ type: "down" });
-      remaining = remaining.slice(KEY_DOWN.length);
-      continue;
-    }
-    const csi = CSI_PATTERN.exec(remaining);
-    if (csi) {
-      remaining = remaining.slice(csi[0].length);
-      continue;
-    }
-    const c1Csi = C1_CSI_PATTERN.exec(remaining);
-    if (c1Csi) {
-      remaining = remaining.slice(c1Csi[0].length);
-      continue;
-    }
-    if (remaining.startsWith("\x1b[") && remaining.length < KEY_UP.length) {
-      return { events, remainder: remaining };
-    }
-    if (remaining === KEY_ESCAPE) return { events, remainder: remaining };
-
-    const character = Array.from(remaining)[0];
-    if (character === undefined) break;
-    remaining = remaining.slice(character.length);
-    switch (character) {
-      case KEY_ESCAPE:
-        events.push({ type: "escape" });
-        break;
-      case KEY_CTRL_C:
-        events.push({ type: "close" });
-        break;
-      case KEY_CTRL_N:
-        events.push({ type: "down" });
-        break;
-      case KEY_CTRL_P:
-        events.push({ type: "up" });
-        break;
-      case KEY_CTRL_R:
-        events.push({ type: "reload" });
-        break;
-      case KEY_ENTER:
-      case KEY_NEWLINE:
-        events.push({ type: "accept" });
-        break;
-      case KEY_BACKSPACE:
-        events.push({ type: "backspace" });
-        break;
-      default:
-        if (isPrintable(character)) events.push({ type: "text", value: character });
-    }
-  }
-
-  return { events, remainder: "" };
-}
-
 export async function runTerminalPicker(options: TerminalPickerOptions): Promise<PickerItem | undefined> {
   const terminal = options.terminal ?? systemTerminal();
+  const keymap = options.keymap ?? DEFAULT_PICKER_KEYMAP;
   const ranker = options.ranker ?? rankRows;
   const now = options.now ?? Date.now;
   const timers = options.timers ?? SYSTEM_TIMERS;
@@ -420,10 +228,9 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
         case "text":
           await applyQuery(state.query + event.value);
           break;
-        case "reload": {
+        case "reload":
           await refresh();
           break;
-        }
         case "mouse": {
           const action = mouseAction(event, state, terminal.getViewport());
           if (action.type === "close") {
@@ -443,6 +250,10 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
             }
           }
           break;
+        }
+        default: {
+          const exhaustive: never = event;
+          return exhaustive;
         }
       }
       if (done) return { done, selection };
@@ -470,16 +281,16 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
     let nextInput = iterator.next();
     while (true) {
       let input: IteratorResult<string | Uint8Array>;
-      if (pending.startsWith(KEY_ESCAPE)) {
-          const raced = await Promise.race([
-            nextInput.then((result) => ({ type: "input" as const, result })),
-            Bun.sleep(ESCAPE_SEQUENCE_TIMEOUT_MILLISECONDS).then(() => ({ type: "timeout" as const })),
-            timerFailure,
-          ]);
+      if (pending.startsWith(ESCAPE_KEY_SEQUENCE)) {
+        const raced = await Promise.race([
+          nextInput.then((result) => ({ type: "input" as const, result })),
+          Bun.sleep(ESCAPE_SEQUENCE_TIMEOUT_MILLISECONDS).then(() => ({ type: "timeout" as const })),
+          timerFailure,
+        ]);
         if (raced.type === "timeout") {
-          const events: InputEvent[] = pending === KEY_ESCAPE ? [{ type: "escape" }] : [];
+          if (pending !== ESCAPE_KEY_SEQUENCE) continue;
           pending = "";
-          const outcome = await handleEvents(events);
+          const outcome = await handleEvents([ESCAPE_INPUT_EVENT]);
           if (outcome.done) return outcome.selection;
           continue;
         }
@@ -488,15 +299,15 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
         input = await Promise.race([nextInput, timerFailure]);
       }
       if (input.done) {
-        if (pending === KEY_ESCAPE) {
-          const outcome = await handleEvents([{ type: "escape" }]);
+        if (pending === ESCAPE_KEY_SEQUENCE) {
+          const outcome = await handleEvents([ESCAPE_INPUT_EVENT]);
           if (outcome.done) return outcome.selection;
         }
         return undefined;
       }
       const chunk = input.value;
       pending += typeof chunk === "string" ? chunk : decoder.decode(chunk, { stream: true });
-      const parsed = parseInput(pending);
+      const parsed = parseInput(pending, keymap);
       pending = parsed.remainder;
       const outcome = await handleEvents(parsed.events);
       if (outcome.done) return outcome.selection;
@@ -505,67 +316,6 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
   } finally {
     cleanup();
   }
-}
-
-function mouseButton(code: number): MouseEvent["button"] {
-  switch (code) {
-    case MOUSE_LEFT:
-      return "left";
-    case MOUSE_WHEEL_UP:
-      return "wheel-up";
-    case MOUSE_WHEEL_DOWN:
-      return "wheel-down";
-    default:
-      return "other";
-  }
-}
-
-function isPrintable(value: string): boolean {
-  const code = value.codePointAt(0);
-  return code !== undefined && code >= PRINTABLE_CODE_MIN && (code < DELETE_CODE || code > C1_CONTROL_MAX);
-}
-
-function closeColumn(viewport: Viewport): number {
-  return Math.max(1, viewport.columns - CLOSE_RIGHT_MARGIN);
-}
-
-function listLayout(state: PickerState, viewport: Viewport): ListLayout {
-  const rows = expandPickerItems(state.items);
-  const capacity = resultCapacity(viewport);
-  const count = Math.min(capacity, Math.max(0, rows.length - state.scrollTop));
-  return {
-    count,
-    firstIndex: state.scrollTop,
-    firstRow: resultEndRow(viewport) - count,
-    rows,
-  };
-}
-
-function hasDividers(viewport: Viewport): boolean {
-  return viewport.rows >= MIN_DIVIDER_VIEWPORT_ROWS;
-}
-
-function resultCapacity(viewport: Viewport): number {
-  return Math.max(0, viewport.rows - (hasDividers(viewport) ? RESERVED_ROWS : RAIL_ROWS));
-}
-
-function resultEndRow(viewport: Viewport): number {
-  return viewport.rows - (hasDividers(viewport) ? 1 : 0);
-}
-
-function sourceCountLabel(count: number, noun: string, live: boolean | undefined): string {
-  const countNoun = count === 1 && noun.endsWith(PLURAL_SUFFIX) ? noun.slice(0, -PLURAL_SUFFIX.length) : noun;
-  return `${count} ${countNoun}${live === true ? LIVE_SUFFIX : ""}`;
-}
-
-function promptRail(state: PickerState, viewport: Viewport): string {
-  const left = `${trueColor(PICKER_PALETTE.group, state.prompt)}${state.query}`;
-  const count = state.items.length;
-  const rightLabel = `${count} ${count === 1 ? MATCH_SINGULAR : MATCH_PLURAL}`;
-  const rightColumn = Math.max(1, viewport.columns - Bun.stringWidth(rightLabel) + 1);
-  const leftWidth = Bun.stringWidth(state.prompt + state.query);
-  if (leftWidth >= rightColumn) return left;
-  return `${left}${CSI_PREFIX}${rightColumn}${CURSOR_COLUMN_SUFFIX}${trueColor(PICKER_PALETTE.muted, rightLabel)}`;
 }
 
 function systemTerminal(): TerminalAdapter {
@@ -602,48 +352,4 @@ function searchCursorPosition(state: PickerState, viewport: Viewport): string {
   const lastColumn = Math.max(FIRST_TERMINAL_CELL, viewport.columns);
   const column = Math.min(lastColumn, Bun.stringWidth(state.prompt + state.query) + FIRST_TERMINAL_CELL);
   return `${CSI_PREFIX}${row};${column}${CURSOR_POSITION_SUFFIX}`;
-}
-
-function initialSelection(items: readonly PickerItem[], focusedId?: string): number {
-  if (items.length === 0) return -1;
-  if (focusedId === undefined) return 0;
-  const focused = items.findIndex((item) => item.id === focusedId);
-  return focused >= 0 ? focused : 0;
-}
-
-function moveSelection(state: PickerState, delta: number, viewport: Viewport): PickerState {
-  if (state.items.length === 0) return state;
-  return fitSelection({
-    ...state,
-    selected: Math.min(state.items.length - 1, Math.max(0, state.selected + delta)),
-  }, viewport);
-}
-
-function scrollRows(state: PickerState, delta: number, viewport: Viewport): PickerState {
-  const rows = expandPickerItems(state.items);
-  const capacity = resultCapacity(viewport);
-  if (capacity === 0 || rows.length <= capacity) return state;
-  const maxScroll = rows.length - capacity;
-  const scrollTop = Math.min(maxScroll, Math.max(0, state.scrollTop + delta));
-  const selectedRow = rows.findIndex((row) => row.type === "item" && row.itemIndex === state.selected);
-  const visibleItems = rows.slice(scrollTop, scrollTop + capacity).filter((row) => row.type === "item");
-  const selected = selectedRow < scrollTop
-    ? visibleItems[0]?.itemIndex ?? state.selected
-    : selectedRow >= scrollTop + capacity
-      ? visibleItems.at(-1)?.itemIndex ?? state.selected
-      : state.selected;
-  return { ...state, selected, scrollTop };
-}
-
-function fitSelection(state: PickerState, viewport: Viewport): PickerState {
-  const rows = expandPickerItems(state.items);
-  const capacity = resultCapacity(viewport);
-  if (state.items.length === 0 || capacity === 0) return { ...state, selected: -1, scrollTop: 0 };
-  const selected = Math.min(state.items.length - 1, Math.max(0, state.selected));
-  const selectedRow = rows.findIndex((row) => row.type === "item" && row.itemIndex === selected);
-  const maxScroll = Math.max(0, rows.length - capacity);
-  let scrollTop = Math.min(maxScroll, Math.max(0, state.scrollTop));
-  if (selectedRow < scrollTop) scrollTop = selectedRow;
-  if (selectedRow >= scrollTop + capacity) scrollTop = selectedRow - capacity + 1;
-  return { ...state, selected, scrollTop };
 }

@@ -21,6 +21,7 @@ export interface NavigationRuntime {
   readonly herdr: Herdr;
   readonly gitRunner?: CommandRunner | undefined;
   readonly env?: Record<string, string | undefined> | undefined;
+  readonly projectRoots?: readonly string[] | undefined;
 }
 
 interface NavigationSources {
@@ -83,7 +84,7 @@ async function loadNavigationSources(
     : undefined;
   const repositoryScopeKey = workspaceScopeKey
     ?? (scoped?.sourceRepoRoot ? canonicalPathKey(scoped.sourceRepoRoot) : undefined);
-  const projects = needsProjects(mode) ? resolveProjects(runtime.env, workspaces) : [];
+  const projects = needsProjects(mode) ? resolveProjects(runtime, workspaces) : [];
   const worktrees = mode === "repo-worktrees"
     ? scoped?.worktrees ?? []
     : needsWorktrees(mode)
@@ -95,11 +96,11 @@ async function loadNavigationSources(
 // Empty config intentionally mirrors Herdr; explicit roots are the only opt-in
 // to filesystem-wide discovery beyond repositories already represented there.
 function resolveProjects(
-  env: Record<string, string | undefined> | undefined,
+  runtime: NavigationRuntime,
   workspaces: readonly WorkspaceRecord[],
 ): string[] {
   const tracked = workspaceRepoRoots(workspaces).map(canonicalPathKey);
-  const configured = loadConfig(env).projects.roots;
+  const configured = runtime.projectRoots ?? loadConfig(runtime.env).projects.roots;
   const widened = configured.length > 0 ? [...tracked, ...listProjects(configured)] : tracked;
   return [...new Set(widened)].sort((left, right) => left.localeCompare(right));
 }

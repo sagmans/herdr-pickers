@@ -4,10 +4,20 @@
 // state never touch the host installation. The script aborts before any
 // mutation unless the session socket is verified to live under the temp root.
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, openSync, readFileSync, rmSync, statSync } from "node:fs";
+import { mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const PLUGIN_ROOT = join(import.meta.dir, "..");
+const PLUGIN_ID = "herdr-pickers";
+const CONFIG_FILE_NAME = "config.toml";
+const SMOKE_CONFIG = '[keymap]\nup = ["up", "ctrl-k"]\ndown = ["down", "ctrl-j"]\n';
+const KEY_CTRL_C = "\u0003";
+const KEY_CTRL_J = "\u000a";
+const KEY_ENTER = "\r";
+const KEY_ESCAPE = "\u001b";
+const KEY_INPUT_SETTLE_MS = 100;
+const SMOKE_QUERY = "smoke-";
+const DISPATCH_TARGET_WORKSPACE_ID = "w3";
 const SESSION_NAME = `s-${Date.now().toString(36)}`;
 const ACTION_IDS = [
   "all", "projects", "workspaces", "repo-workspaces", "worktrees",
@@ -159,6 +169,12 @@ async function main(): Promise<void> {
   // 5. link the plugin inside the isolated runtime only
   const linked = cli(["plugin", "link", PLUGIN_ROOT, "--enabled"]);
   check("plugin links", linked.code === 0, linked.stderr.trim());
+  const configDirResult = cli(["plugin", "config-dir", PLUGIN_ID]);
+  check("plugin config directory resolves", configDirResult.code === 0, configDirResult.stderr.trim());
+  const pluginConfigDir = configDirResult.stdout.trim();
+  check("plugin config remains isolated", pluginConfigDir.startsWith(root), pluginConfigDir);
+  mkdirSync(pluginConfigDir, { recursive: true });
+  writeFileSync(join(pluginConfigDir, CONFIG_FILE_NAME), SMOKE_CONFIG, "utf8");
 
   // 6. all nine actions register
   const actions = cli(["plugin", "action", "list", "--plugin", "herdr-pickers"]);
@@ -188,20 +204,28 @@ async function main(): Promise<void> {
   check("focus transition seeds last-workspace memory", seeded.code === 0, seeded.stderr.trim());
   await Bun.sleep(1000);
 
-  // 8. open the workspaces picker and dispatch by typing a query + Enter
+  // 8. open the workspaces picker and dispatch with configured Ctrl-J navigation
   const opened = cli(["plugin", "action", "invoke", "herdr-pickers.workspaces"]);
   check("workspaces action exits cleanly", opened.code === 0, opened.stderr.trim());
   const before = focusedWorkspaceId();
-  // Wait for the popup to render before typing: keys sent earlier route to
-  // the focused shell pane instead of the picker.
+  // Wait for the popup to render because earlier keys route to the focused
+  // shell pane instead of the picker.
   await Bun.sleep(1500);
-  attach.stdin.write("smoke-two");
+  attach.stdin.write(SMOKE_QUERY);
   await Bun.sleep(400);
-  attach.stdin.write("\n");
-  await poll("picker dispatches the typed selection", () => {
+  attach.stdin.write(KEY_CTRL_J);
+  await Bun.sleep(KEY_INPUT_SETTLE_MS);
+  // CR keeps acceptance distinct from Ctrl-J's indistinguishable LF byte.
+  attach.stdin.write(KEY_ENTER);
+  const configuredSelection = await poll("configured ctrl-j selection", () => {
     const focused = focusedWorkspaceId();
-    return focused !== undefined && focused !== before ? focused : undefined;
+    return focused === DISPATCH_TARGET_WORKSPACE_ID ? focused : undefined;
   });
+  check(
+    "configured ctrl-j dispatches the next selection",
+    configuredSelection === DISPATCH_TARGET_WORKSPACE_ID,
+    configuredSelection,
+  );
 
   // 9. last-workspace toggles back
   const toggled = cli(["plugin", "action", "invoke", "herdr-pickers.last-workspace"]);
@@ -212,9 +236,11 @@ async function main(): Promise<void> {
   });
 
   // 10. Discovery action registers a real catalog without touching host state
+  const bytesBeforeProjects = clientBytes();
   const projects = cli(["plugin", "action", "invoke", "herdr-pickers.projects"]);
   check("projects action exits cleanly", projects.code === 0, projects.stderr.trim());
-  attach.stdin.write("\u001B");
+  await poll("projects picker renders", () => clientBytes() > bytesBeforeProjects ? "rendered" : undefined);
+  attach.stdin.write(KEY_CTRL_C);
   await Bun.sleep(600);
 
   // 11. Ctrl-r reloads an open picker without breaking it
@@ -225,7 +251,7 @@ async function main(): Promise<void> {
   await Bun.sleep(1000);
   check("ctrl-r redraws the picker", clientBytes() > bytesBeforeReload,
     "client output did not grow after ctrl-r");
-  attach.stdin.write("\u001B");
+  attach.stdin.write(KEY_ESCAPE);
   await Bun.sleep(600);
 
   // 12. The adversarial workspace label must never reach the client as a
@@ -241,7 +267,7 @@ async function main(): Promise<void> {
   const reopened = cli(["plugin", "action", "invoke", "herdr-pickers.workspaces"]);
   check("reopen picker exits cleanly", reopened.code === 0, reopened.stderr.trim());
   const stableFocus = focusedWorkspaceId();
-  attach.stdin.write("\u001B");
+  attach.stdin.write(KEY_ESCAPE);
   await Bun.sleep(800);
   const afterEscape = focusedWorkspaceId();
   check("escape closes without dispatching", afterEscape === stableFocus,
@@ -249,12 +275,13 @@ async function main(): Promise<void> {
 
   // 11. plugin command log shows no failures
   const logs = cli(["plugin", "log", "list"]);
-  let failures = 0;
+  let pluginEntries: Array<Record<string, unknown> & { status?: string }> = [];
   try {
-    const parsed = JSON.parse(logs.stdout) as { result?: { logs?: Array<{ status?: string }> } };
-    failures = (parsed.result?.logs ?? []).filter((entry) => entry.status !== "succeeded").length;
-  } catch { failures = -1; }
-  check("every plugin command succeeded", failures === 0, `${failures} failed entries`);
+    const parsed = JSON.parse(logs.stdout) as { result?: { logs?: Array<Record<string, unknown> & { status?: string }> } };
+    pluginEntries = parsed.result?.logs ?? [];
+  } catch { pluginEntries = [{ error: "invalid plugin log response" }]; }
+  const failedEntries = pluginEntries.filter((entry) => entry.status !== "succeeded");
+  check("every plugin command succeeded", failedEntries.length === 0, JSON.stringify(failedEntries));
 
   console.error("smoke passed");
   finish(0);
