@@ -8,10 +8,14 @@ export async function listWorktreesForProjects(
   projects: readonly string[],
   herdr: Herdr,
   gitRunner: CommandRunner = runGitCommand,
+  signal?: AbortSignal,
 ): Promise<WorktreeRecord[]> {
+  signal?.throwIfAborted();
   const results: WorktreeRecord[] = [];
   const seen = new Set<string>();
-  const perProject = await Promise.all(projects.map((project) => listWorktreesForProject(project, herdr, gitRunner)));
+  const perProject = await Promise.all(
+    projects.map((project) => listWorktreesForProject(project, herdr, gitRunner, signal)),
+  );
 
   for (const worktree of perProject.flat()) {
     if (seen.has(worktree.path)) continue;
@@ -22,10 +26,16 @@ export async function listWorktreesForProjects(
   return results.sort((left, right) => left.path.localeCompare(right.path));
 }
 
-export async function listWorktreesForContext(context: CurrentContext, herdr: Herdr): Promise<WorktreeListResult> {
+export async function listWorktreesForContext(
+  context: CurrentContext,
+  herdr: Herdr,
+  signal?: AbortSignal,
+): Promise<WorktreeListResult> {
+  signal?.throwIfAborted();
   const lookup = context.workspaceId ? ["--workspace", context.workspaceId] : context.cwd ? ["--cwd", context.cwd] : [];
   if (lookup.length === 0) throw new Error("Cannot open repository worktrees without a source workspace or cwd.");
   const result = readWorktrees(await herdr.json(["worktree", "list", ...lookup, "--json"]));
+  signal?.throwIfAborted();
   if (!result.sourceRepoRoot) throw new Error("Herdr worktree list response did not include source.repo_root.");
   return {
     ...result,
@@ -40,21 +50,37 @@ export async function listWorktreesForProject(
   project: string,
   herdr: Herdr,
   gitRunner: CommandRunner = runGitCommand,
+  signal?: AbortSignal,
 ): Promise<WorktreeRecord[]> {
+  signal?.throwIfAborted();
   try {
     const result = readWorktrees(await herdr.json(["worktree", "list", "--cwd", project, "--json"]));
+    signal?.throwIfAborted();
     return result.worktrees.map((worktree) => ({
       ...worktree,
       repoRoot: worktree.repoRoot ?? result.sourceRepoRoot,
     }));
   } catch (error) {
+    signal?.throwIfAborted();
     if (!(error instanceof HerdrCommandError)) throw error;
-    return listGitWorktrees(project, gitRunner);
+    return listGitWorktrees(project, gitRunner, signal);
   }
 }
 
-export async function listGitWorktrees(project: string, runner: CommandRunner): Promise<WorktreeRecord[]> {
-  const result = await runner([GIT_COMMAND, "-C", project, "worktree", "list", "--porcelain"]);
+export async function listGitWorktrees(
+  project: string,
+  runner: CommandRunner,
+  signal?: AbortSignal,
+): Promise<WorktreeRecord[]> {
+  signal?.throwIfAborted();
+  let result;
+  try {
+    result = await runner([GIT_COMMAND, "-C", project, "worktree", "list", "--porcelain"], signal);
+  } catch (error) {
+    signal?.throwIfAborted();
+    throw error;
+  }
+  signal?.throwIfAborted();
   if (result.exitCode !== 0) return [];
 
   const records: WorktreeRecord[] = [];
@@ -65,16 +91,26 @@ export async function listGitWorktrees(project: string, runner: CommandRunner): 
   return records;
 }
 
-async function runGitCommand(argv: readonly string[]) {
+async function runGitCommand(argv: readonly string[], signal?: AbortSignal) {
+  signal?.throwIfAborted();
   const proc = Bun.spawn([...argv], {
     stdout: "pipe",
     stderr: "pipe",
+    ...(signal === undefined ? {} : { signal }),
   });
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
+  let result: [string, string, number];
+  try {
+    result = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+  } catch (error) {
+    signal?.throwIfAborted();
+    throw error;
+  }
+  signal?.throwIfAborted();
+  const [stdout, stderr, exitCode] = result;
   return { stdout, stderr, exitCode };
 }
 

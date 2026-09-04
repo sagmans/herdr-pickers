@@ -70,6 +70,7 @@ const SYSTEM_TIMERS: PickerTimers = {
 };
 
 export interface TerminalPickerOptions extends PickerRows {
+  readonly signal?: AbortSignal | undefined;
   readonly prompt: string;
   readonly noun: string;
   readonly live?: boolean | undefined;
@@ -85,9 +86,10 @@ export interface TerminalPickerOptions extends PickerRows {
 }
 
 export async function runTerminalPicker(options: TerminalPickerOptions): Promise<PickerItem | undefined> {
+  if (options.signal?.aborted) return undefined;
   const terminal = options.terminal ?? systemTerminal();
   const keymap = options.keymap ?? DEFAULT_PICKER_KEYMAP;
-  const ranker = options.ranker ?? rankRows;
+  const ranker = options.ranker ?? ((query, items) => rankRows(query, items, options.signal));
   const now = options.now ?? Date.now;
   const timers = options.timers ?? SYSTEM_TIMERS;
   let sourceItems = [...options.items];
@@ -117,7 +119,9 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
   const intervalHandles: unknown[] = [];
   let previousClick: { readonly itemId: string; readonly time: number } | undefined;
 
-  const draw = (): void => drawFrame(terminal, state);
+  const draw = (): void => {
+    if (!cleaned && !options.signal?.aborted) drawFrame(terminal, state);
+  };
   const cleanup = (): void => {
     if (cleaned) return;
     cleaned = true;
@@ -145,6 +149,7 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
     rejectTimerFailure(error);
   };
   const applyQuery = async (query: string): Promise<void> => {
+    if (cleaned || options.signal?.aborted) return;
     previousClick = undefined;
     // An unchanged query is a live refresh: keep the pointer where the user
     // put it. A changed query is typing: best match wins, and an empty query
@@ -171,8 +176,9 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
     state = fitSelection({ ...state, query, items, selected }, terminal.getViewport());
   };
   const reloadRows = async (): Promise<void> => {
-    if (!options.reload) return;
+    if (!options.reload || cleaned || options.signal?.aborted) return;
     const rows = await options.reload();
+    if (cleaned || options.signal?.aborted) return;
     sourceItems = [...rows.items];
     focusedId = rows.focusedId;
     // Loading copy is placeholder-only: once rows arrive, emptiness is real.
@@ -200,6 +206,7 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
   };
   const handleEvents = async (events: readonly InputEvent[]): Promise<{ readonly done: boolean; readonly selection?: PickerItem | undefined }> => {
     for (const event of events) {
+      if (cleaned || options.signal?.aborted) return { done: true };
       let selection: PickerItem | undefined;
       let done = false;
       switch (event.type) {
@@ -266,6 +273,8 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
   };
 
   let iterator: AsyncIterator<string | Uint8Array> | undefined;
+  const abort = (): void => failFromTimer(options.signal?.reason);
+  options.signal?.addEventListener("abort", abort, { once: true });
   try {
     terminal.setRawMode(true);
     rawMode = true;
@@ -297,7 +306,7 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
         if (raced.type === "timeout") {
           if (pending !== ESCAPE_KEY_SEQUENCE) continue;
           pending = "";
-          const outcome = await handleEvents([ESCAPE_INPUT_EVENT]);
+          const outcome = await Promise.race([handleEvents([ESCAPE_INPUT_EVENT]), timerFailure]);
           if (outcome.done) return outcome.selection;
           continue;
         }
@@ -307,7 +316,7 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
       }
       if (input.done) {
         if (pending === ESCAPE_KEY_SEQUENCE) {
-          const outcome = await handleEvents([ESCAPE_INPUT_EVENT]);
+          const outcome = await Promise.race([handleEvents([ESCAPE_INPUT_EVENT]), timerFailure]);
           if (outcome.done) return outcome.selection;
         }
         return undefined;
@@ -316,11 +325,15 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
       pending += typeof chunk === "string" ? chunk : decoder.decode(chunk, { stream: true });
       const parsed = parseInput(pending, keymap);
       pending = parsed.remainder;
-      const outcome = await handleEvents(parsed.events);
+      const outcome = await Promise.race([handleEvents(parsed.events), timerFailure]);
       if (outcome.done) return outcome.selection;
       nextInput = iterator.next();
     }
+  } catch (error) {
+    if (options.signal?.aborted) return undefined;
+    throw error;
   } finally {
+    options.signal?.removeEventListener("abort", abort);
     cleanup();
     // Escape timeout leaves a pending read. Awaiting return() hung Escape while
     // Ctrl-C had no pending read and still dismissed.

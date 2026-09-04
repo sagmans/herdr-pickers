@@ -6,7 +6,7 @@ export interface CommandResult {
   readonly exitCode: number;
 }
 
-export type CommandRunner = (argv: readonly string[]) => Promise<CommandResult>;
+export type CommandRunner = (argv: readonly string[], signal?: AbortSignal) => Promise<CommandResult>;
 
 const UNKNOWN_COMMAND_FAMILY = "command";
 
@@ -39,19 +39,30 @@ export class HerdrJsonError extends Error {
 export interface HerdrOptions {
   readonly bin?: string;
   readonly runner?: CommandRunner;
+  readonly signal?: AbortSignal;
 }
 
 export class Herdr {
   private readonly bin: string;
   private readonly runner: CommandRunner;
+  private readonly signal: AbortSignal | undefined;
 
   constructor(options: HerdrOptions = {}) {
     this.bin = options.bin ?? process.env.HERDR_BIN_PATH ?? "herdr";
     this.runner = options.runner ?? runCommand;
+    this.signal = options.signal;
   }
 
   async run(args: readonly string[]): Promise<string> {
-    const result = await this.runner([this.bin, ...args]);
+    this.signal?.throwIfAborted();
+    let result: CommandResult;
+    try {
+      result = await this.runner([this.bin, ...args], this.signal);
+    } catch (error) {
+      this.signal?.throwIfAborted();
+      throw error;
+    }
+    this.signal?.throwIfAborted();
     if (result.exitCode !== 0) {
       throw new HerdrCommandError(args, result.exitCode, result.stderr.trim());
     }
@@ -68,17 +79,27 @@ export class Herdr {
   }
 }
 
-async function runCommand(argv: readonly string[]): Promise<CommandResult> {
+async function runCommand(argv: readonly string[], signal?: AbortSignal): Promise<CommandResult> {
+  signal?.throwIfAborted();
   const proc = Bun.spawn([...argv], {
     stdout: "pipe",
     stderr: "pipe",
+    ...(signal === undefined ? {} : { signal }),
   });
 
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
+  let result: [string, string, number];
+  try {
+    result = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+  } catch (error) {
+    signal?.throwIfAborted();
+    throw error;
+  }
+  signal?.throwIfAborted();
+  const [stdout, stderr, exitCode] = result;
 
   return { stdout, stderr, exitCode };
 }

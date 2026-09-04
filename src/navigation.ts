@@ -18,6 +18,7 @@ export type NavigationMode = "all" | "projects" | "workspaces" | "worktrees" | "
 export type NavigationTarget = PickerTarget;
 
 export interface NavigationRuntime {
+  readonly signal?: AbortSignal | undefined;
   readonly herdr: Herdr;
   readonly gitRunner?: CommandRunner | undefined;
   readonly env?: Record<string, string | undefined> | undefined;
@@ -80,7 +81,7 @@ async function loadNavigationSources(
   const current = currentContextFromEnv(runtime.env);
   const workspaceScopeKey = mode === "repo-workspaces" ? sourceWorkspaceRepoKey(workspaces, current) : undefined;
   const scoped = needsWorktreeScope(mode)
-    ? await listWorktreesForContext(current, runtime.herdr)
+    ? await listWorktreesForContext(current, runtime.herdr, runtime.signal)
     : undefined;
   const repositoryScopeKey = workspaceScopeKey
     ?? (scoped?.sourceRepoRoot ? canonicalPathKey(scoped.sourceRepoRoot) : undefined);
@@ -88,7 +89,7 @@ async function loadNavigationSources(
   const worktrees = mode === "repo-worktrees"
     ? scoped?.worktrees ?? []
     : needsWorktrees(mode)
-      ? await listWorktreesForProjects(projects, runtime.herdr, runtime.gitRunner)
+      ? await listWorktreesForProjects(projects, runtime.herdr, runtime.gitRunner, runtime.signal)
       : [];
   return { workspaces, current, repositoryScopeKey, projects, worktrees };
 }
