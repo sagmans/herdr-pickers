@@ -4,7 +4,7 @@ import { Herdr, type CommandRunner } from "../src/client/herdr.ts";
 import { runPicker, type PickerMode } from "../src/picker.ts";
 import type { PickerItem } from "../src/picker-row.ts";
 import { runTerminalPicker } from "../src/terminal-picker.ts";
-import { FakeTerminal, VIEWPORT } from "./terminal-picker-test-support.ts";
+import { FakeTerminal, FakeTimers, VIEWPORT } from "./terminal-picker-test-support.ts";
 
 const DEADLINE_MS = 100;
 const TIMED_OUT = "timed-out";
@@ -16,6 +16,9 @@ const WORKSPACES = JSON.stringify({ result: { workspaces: [{ workspace_id: "w1",
 const AGENTS = JSON.stringify({ result: { agents: [{ terminal_id: "t1", label: "pi", workspace_id: "w1" }] } });
 const RESULT = JSON.stringify({ result: {} });
 const MODES: PickerMode[] = ["workspaces", "agents"];
+const RELOAD_KEY = "\x12";
+const REFRESH_INTERVAL_MS = 1000;
+const LOAD_PHASES = [true, false] as const;
 
 test("pre-aborted terminal never enters raw mode", async () => {
   const controller = new AbortController();
@@ -63,6 +66,32 @@ test("focus cancellation interrupts ranking and discards late output", async () 
   expect(terminal.writes).toHaveLength(writes);
   expect(terminal.rawModes).toEqual([true, false]);
 });
+
+for (const loadOnStart of LOAD_PHASES) {
+  test(`cancels ${loadOnStart ? "initial loading" : "manual reload"} without late redraws`, async () => {
+    const controller = new AbortController();
+    const terminal = new FakeTerminal(loadOnStart ? [] : [RELOAD_KEY], VIEWPORT, true);
+    const timers = new FakeTimers();
+    let started!: () => void;
+    let finish!: (rows: { items: PickerItem[] }) => void;
+    const ready = new Promise<void>(resolve => { started = resolve; });
+    const run = runTerminalPicker({
+      prompt: PROMPT, noun: NOUN, items: ITEMS, terminal, timers, signal: controller.signal, loadOnStart,
+      refreshIntervalMilliseconds: REFRESH_INTERVAL_MS,
+      reload: () => { started(); return new Promise(resolve => { finish = resolve; }); },
+    });
+    await ready;
+    controller.abort();
+    expect(await Promise.race([run, Bun.sleep(DEADLINE_MS).then(() => TIMED_OUT)])).toBeUndefined();
+    const writes = terminal.writes.length;
+    finish({ items: ITEMS });
+    await Promise.resolve();
+    await run;
+    expect(terminal.writes).toHaveLength(writes);
+    expect(timers.activeCount()).toBe(0);
+    expect(terminal.rawModes).toEqual([true, false]);
+  });
+}
 
 for (const mode of MODES) {
   test(`${mode} cancellation suppresses a late accepted selection`, async () => {

@@ -1,4 +1,6 @@
 import { Herdr } from "../client/herdr.ts";
+import { readPickerPaneIds } from "../client/types.ts";
+import { PICKER_TOKEN_ENV, PickerSession } from "../picker-session.ts";
 import { CURRENT_CONTEXT_ENV, currentContextFromEnv } from "../catalog.ts";
 import { loadConfig, type PickerPlacement } from "../config/config.ts";
 import { parseMode, type PickerMode } from "../picker.ts";
@@ -11,6 +13,7 @@ export function buildPaneOpenArgs(options: {
   readonly mode: PickerMode;
   readonly env?: Record<string, string | undefined> | undefined;
   readonly placement?: PickerPlacement;
+  readonly token?: string;
 }): string[] {
   // Overlay must be requested here: manifest size applies only to popup.
   // Width and height flags are omitted because overlay rejects them.
@@ -24,21 +27,28 @@ export function buildPaneOpenArgs(options: {
     "picker",
     ...(options.placement === "overlay" ? ["--placement", "overlay"] : []),
     ...paneEnvArgs(options.mode, options.env),
+    ...(options.token ? ["--env", `${PICKER_TOKEN_ENV}=${options.token}`] : []),
   ];
 }
 
-async function run(): Promise<void> {
-  const pluginId = process.env.HERDR_PLUGIN_ID;
+export async function openPicker(
+  mode: PickerMode,
+  env: Record<string, string | undefined> = process.env,
+  herdr: Herdr = new Herdr(),
+): Promise<void> {
+  const pluginId = env.HERDR_PLUGIN_ID;
   if (!pluginId) throw new Error("HERDR_PLUGIN_ID is required to open the herdr-pickers pane.");
 
-  const mode = parseMode(process.argv[2]);
-  const config = loadConfig(process.env);
-  await new Herdr().run(buildPaneOpenArgs({
-    pluginId,
-    mode,
-    env: process.env,
-    placement: config.placement,
-  }));
+  const config = loadConfig(env);
+  const session = new PickerSession(env);
+  try {
+    const token = await session.reserve(config.placement, async paneId =>
+      readPickerPaneIds(await herdr.json(["pane", "list"])).includes(paneId));
+    if (!token) return;
+    await herdr.run(buildPaneOpenArgs({ pluginId, mode, env, placement: config.placement, token }));
+  } finally {
+    session.close();
+  }
 }
 
 function paneEnvArgs(mode: PickerMode, env: Record<string, string | undefined> | undefined): string[] {
@@ -54,7 +64,7 @@ function paneEnvArgs(mode: PickerMode, env: Record<string, string | undefined> |
 }
 
 if (import.meta.main) {
-  run().catch((error: unknown) => {
+  Promise.resolve().then(() => openPicker(parseMode(process.argv[2]))).catch((error: unknown) => {
     console.error(formatPaneError(error));
     process.exit(1);
   });

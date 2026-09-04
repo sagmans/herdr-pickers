@@ -1,5 +1,15 @@
 import { isRecord } from "../util/objects.ts";
 
+const MALFORMED_PICKER_PANES_MESSAGE = "Malformed picker pane list";
+const MALFORMED_PICKER_FOCUS_MESSAGE = "Malformed picker focus lifecycle message";
+const SUBSCRIPTION_STARTED_TYPE = "subscription_started";
+const SESSION_SNAPSHOT_TYPE = "session_snapshot";
+const PICKER_FOCUS_EVENTS = {
+  pane: "pane_focused",
+  tab: "tab_focused",
+  workspace: "workspace_focused",
+} as const;
+
 export interface WorktreeProvenance {
   readonly branch?: string | undefined;
   readonly path?: string | undefined;
@@ -55,6 +65,62 @@ export interface AgentListResult {
   readonly skippedWithoutTarget: number;
   readonly skippedWithoutIdentity: number;
   readonly observedKeys: readonly string[];
+}
+
+export interface PickerFocusRequestIds {
+  readonly subscribe: string;
+  readonly snapshot: string;
+}
+
+export type PickerFocusLifecycleMessage =
+  | { readonly kind: "subscription-started" }
+  | {
+    readonly kind: "snapshot";
+    readonly paneId: string;
+    readonly tabId: string;
+    readonly workspaceId: string;
+    readonly globallyFocused: boolean;
+  }
+  | { readonly kind: "pane-focused"; readonly paneId: string; readonly workspaceId: string }
+  | { readonly kind: "tab-focused"; readonly tabId: string; readonly workspaceId: string }
+  | { readonly kind: "workspace-focused"; readonly workspaceId: string };
+
+export function parsePickerFocusLifecycleMessage(
+  raw: string,
+  requestIds: PickerFocusRequestIds,
+  paneId: string,
+): PickerFocusLifecycleMessage {
+  let value: unknown;
+  try {
+    value = JSON.parse(raw) as unknown;
+  } catch {
+    throw new Error(MALFORMED_PICKER_FOCUS_MESSAGE);
+  }
+
+  try {
+    const envelope = expectRecord(value);
+    if (typeof envelope.event === "string") return readPickerFocusEvent(envelope);
+    if (envelope.error !== undefined) throw new Error(MALFORMED_PICKER_FOCUS_MESSAGE);
+
+    const id = expectString(envelope.id);
+    const result = expectRecord(envelope.result);
+    if (id === requestIds.subscribe && result.type === SUBSCRIPTION_STARTED_TYPE) {
+      return { kind: "subscription-started" };
+    }
+    if (id === requestIds.snapshot && result.type === SESSION_SNAPSHOT_TYPE) {
+      return readPickerFocusSnapshot(result.snapshot, paneId);
+    }
+    throw new Error(MALFORMED_PICKER_FOCUS_MESSAGE);
+  } catch {
+    throw new Error(MALFORMED_PICKER_FOCUS_MESSAGE);
+  }
+}
+
+export function readPickerPaneIds(envelope: unknown): string[] {
+  const record = expectRecord(envelope);
+  const panes = getResult(record).panes;
+  if (record.error !== undefined || !Array.isArray(panes)) throw new Error(MALFORMED_PICKER_PANES_MESSAGE);
+  return panes.map(pane => expectString(expectRecord(pane).pane_id));
 }
 
 export function readWorkspaces(envelope: unknown): WorkspaceRecord[] {
@@ -117,6 +183,54 @@ export function readAgentList(envelope: unknown): AgentListResult {
   return { agents, skippedWithoutTarget, skippedWithoutIdentity, observedKeys: [...observedKeys].sort((left, right) => left.localeCompare(right)) };
 }
 
+function readPickerFocusEvent(envelope: Record<string, unknown>): PickerFocusLifecycleMessage {
+  const event = envelope.event;
+  const data = expectRecord(envelope.data);
+  if (data.type !== event) throw new Error(MALFORMED_PICKER_FOCUS_MESSAGE);
+
+  switch (event) {
+    case PICKER_FOCUS_EVENTS.pane:
+      return {
+        kind: "pane-focused",
+        paneId: expectString(data.pane_id),
+        workspaceId: expectString(data.workspace_id),
+      };
+    case PICKER_FOCUS_EVENTS.tab:
+      return {
+        kind: "tab-focused",
+        tabId: expectString(data.tab_id),
+        workspaceId: expectString(data.workspace_id),
+      };
+    case PICKER_FOCUS_EVENTS.workspace:
+      return { kind: "workspace-focused", workspaceId: expectString(data.workspace_id) };
+    default:
+      throw new Error(MALFORMED_PICKER_FOCUS_MESSAGE);
+  }
+}
+
+function readPickerFocusSnapshot(value: unknown, paneId: string): PickerFocusLifecycleMessage {
+  const snapshot = expectRecord(value);
+  const owner = getArray(snapshot.panes)
+    .map(optionalRecord)
+    .find((pane) => optionalString(pane?.pane_id) === paneId);
+  if (!owner) throw new Error(MALFORMED_PICKER_FOCUS_MESSAGE);
+
+  const ownerPaneId = expectString(owner.pane_id);
+  const tabId = expectString(owner.tab_id);
+  const workspaceId = expectString(owner.workspace_id);
+  const focused = expectBoolean(owner.focused);
+  return {
+    kind: "snapshot",
+    paneId: ownerPaneId,
+    tabId,
+    workspaceId,
+    globallyFocused: focused
+      && optionalString(snapshot.focused_pane_id) === ownerPaneId
+      && optionalString(snapshot.focused_tab_id) === tabId
+      && optionalString(snapshot.focused_workspace_id) === workspaceId,
+  };
+}
+
 function getResult(envelope: unknown): Record<string, unknown> {
   const record = expectRecord(envelope);
   return expectRecord(record.result);
@@ -130,6 +244,17 @@ function expectRecord(value: unknown): Record<string, unknown> {
 function optionalRecord(value: unknown): Record<string, unknown> | undefined {
   if (value === undefined || value === null) return undefined;
   return expectRecord(value);
+}
+
+function expectString(value: unknown): string {
+  const parsed = optionalString(value);
+  if (parsed) return parsed;
+  throw new Error("Expected non-empty string");
+}
+
+function expectBoolean(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  throw new Error("Expected boolean");
 }
 
 function optionalString(value: unknown): string | undefined {

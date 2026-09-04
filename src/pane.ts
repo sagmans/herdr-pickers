@@ -1,5 +1,7 @@
 import { Herdr } from "./client/herdr.ts";
 import { closePickerSurface } from "./client/popup.ts";
+import { watchPickerFocus } from "./client/picker-focus.ts";
+import { PICKER_TOKEN_ENV, PickerSession } from "./picker-session.ts";
 import { loadConfig } from "./config/config.ts";
 import { parseMode, runPicker } from "./picker.ts";
 import { color, dim } from "./style.ts";
@@ -10,18 +12,39 @@ const EXIT_SIGNALS = ["SIGHUP", "SIGINT", "SIGTERM"] as const;
 const COMBINED_FAILURE_MESSAGE = "Picker failed and its popup could not be closed.";
 
 async function main(): Promise<void> {
-  const removeSignalHandlers = closePopupOnSignals(process.env);
+  const env = process.env;
+  const session = new PickerSession(env);
+  const lifecycle = new AbortController();
+  let watch: Awaited<ReturnType<typeof watchPickerFocus>> | undefined;
+  let exitSignal: (typeof EXIT_SIGNALS)[number] | undefined;
+  const handlers = EXIT_SIGNALS.map(signal => ({
+    signal,
+    handler: () => { exitSignal ??= signal; lifecycle.abort(); },
+  }));
   try {
+    const token = env[PICKER_TOKEN_ENV];
+    // A rejected child has no authority to close any existing surface.
+    if (!token || !session.claim(token, env.HERDR_PANE_ID)) throw new Error("Picker reservation is missing or stale.");
+    for (const { signal, handler } of handlers) process.on(signal, handler);
     await withPopupClose(async () => {
-      const mode = parseMode(process.env[MODE_ENV]);
-      const config = loadConfig(process.env);
-      const outcome = await runPicker(mode, { herdr: new Herdr(), env: process.env, config });
+      const mode = parseMode(env[MODE_ENV]);
+      const config = loadConfig(env);
+      if (lifecycle.signal.aborted) return;
+      if (env.HERDR_PANE_ID) watch = await watchPickerFocus(env.HERDR_SOCKET_PATH!, env.HERDR_PANE_ID);
+      const signal = watch ? AbortSignal.any([lifecycle.signal, watch.signal]) : lifecycle.signal;
+      const outcome = await runPicker(mode, {
+        herdr: new Herdr({ signal }), env, config, signal, beforeDispatch: () => watch?.stop(),
+      });
       if (outcome === "no-agents") {
         console.log(dim(mode === "repo-agents" ? "No repository agents found." : "No agents found."));
       }
-    }, () => closePickerSurface(process.env));
+    }, () => closePickerSurface(env));
   } finally {
-    removeSignalHandlers();
+    watch?.stop();
+    lifecycle.abort();
+    for (const { signal, handler } of handlers) process.off(signal, handler);
+    session.close();
+    if (exitSignal) process.kill(process.pid, exitSignal);
   }
 }
 
@@ -50,24 +73,6 @@ export function formatPaneError(error: unknown): string {
   // Popup output is user-facing: every line is sanitized and the whole
   // aggregate stays bounded so failures cannot flood the terminal.
   return boundedTerminalBlock(rendered);
-}
-
-function closePopupOnSignals(env: Record<string, string | undefined>): () => void {
-  let closing = false;
-  const handlers = EXIT_SIGNALS.map((signal) => {
-    const handler = (): void => {
-      if (closing) return;
-      closing = true;
-      remove();
-      void closePickerSurface(env).finally(() => process.kill(process.pid, signal));
-    };
-    process.on(signal, handler);
-    return { signal, handler };
-  });
-  const remove = (): void => {
-    for (const { signal, handler } of handlers) process.off(signal, handler);
-  };
-  return remove;
 }
 
 if (import.meta.main) {
