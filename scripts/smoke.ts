@@ -1,4 +1,3 @@
-// PTY smoke: proves the plugin inside a real, disposable Herdr runtime.
 // Host safety: every herdr process and CLI call runs with all four XDG base
 // dirs redirected into a temp root, so config, sessions, sockets, and plugin
 // state never touch the host installation. The script aborts before any
@@ -6,6 +5,8 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+
+import { runPickerLifecycleSmoke, type CliResult, type SmokeSession } from "./smoke-picker-lifecycle.ts";
 
 const PLUGIN_ROOT = join(import.meta.dir, "..");
 const PLUGIN_ID = "herdr-pickers";
@@ -19,8 +20,17 @@ const KEY_INPUT_SETTLE_MS = 100;
 const PICKER_PANE_LABEL = "Herdr Picker";
 const OVERLAY_PICKER_PROMPT = "workspaces › ";
 const SMOKE_QUERY = "smoke-";
+const FIRST_WORKSPACE_ID = "w1";
+const FIRST_WORKSPACE_LABEL = "smoke-one";
 const DISPATCH_TARGET_WORKSPACE_ID = "w3";
-const SESSION_NAME = `s-${Date.now().toString(36)}`;
+const DISPATCH_TARGET_WORKSPACE_LABEL = "smoke-two";
+const FIXTURE_DEFAULT_BRANCH = "main";
+const FIXTURE_WORKTREE_BRANCH = "feature";
+const SESSION_SUFFIX = Date.now().toString(36);
+const SESSION_NAME = `s-${SESSION_SUFFIX}`;
+const SECOND_SESSION_NAME = `t-${SESSION_SUFFIX}`;
+const SECOND_SESSION_CHECK_PREFIX = "second ";
+const SECOND_SESSION_WORKSPACE_LABEL = "smoke-second-session";
 const ACTION_IDS = [
   "all", "projects", "workspaces", "repo-workspaces", "worktrees",
   "repo-worktrees", "agents", "repo-agents", "last-workspace",
@@ -33,7 +43,9 @@ const POLL_TIMEOUT_MS = 15_000;
 const root = mkdtempSync("/tmp/hps-");
 const fixtureRoot = join(root, "fixture");
 const serverLog = join(root, "server.log");
+const secondServerLog = join(root, "server-second.log");
 const clientRawPath = join(root, "client.raw");
+const secondClientRawPath = join(root, "client-second.raw");
 
 function clientBytes(): number {
   try { return statSync(clientRawPath).size; } catch { return 0; }
@@ -59,10 +71,12 @@ function isolatedEnv(): Record<string, string> {
   return env;
 }
 
-function cli(args: readonly string[]): { code: number; stdout: string; stderr: string } {
+const cli = (args: readonly string[]): CliResult => cliFor(SESSION_NAME, args);
+
+function cliFor(sessionName: string, args: readonly string[]): CliResult {
   try {
     const stdout = execFileSync("herdr", [...args], {
-      env: { ...isolatedEnv(), HERDR_SESSION: SESSION_NAME },
+      env: { ...isolatedEnv(), HERDR_SESSION: sessionName },
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -73,9 +87,22 @@ function cli(args: readonly string[]): { code: number; stdout: string; stderr: s
   }
 }
 
-const checks: Array<[label: string, ok: boolean, detail?: string]> = [];
+async function cliAsyncFor(sessionName: string, args: readonly string[]): Promise<CliResult> {
+  const proc = Bun.spawn(["herdr", ...args], {
+    env: { ...isolatedEnv(), HERDR_SESSION: sessionName },
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  return { code, stdout, stderr };
+}
+
 function check(label: string, ok: boolean, detail?: string): void {
-  checks.push([label, ok, detail]);
   console.error(`${ok ? "ok" : "FAIL"}  ${label}${ok || !detail ? "" : ` — ${detail}`}`);
   if (!ok) finish(1);
 }
@@ -90,27 +117,54 @@ async function poll(label: string, probe: () => string | undefined): Promise<str
   }
 }
 
-let server: Bun.Subprocess<"ignore", "file", "file"> | undefined;
-let attach: Bun.Subprocess<"pipe", "ignore", "ignore"> | undefined;
+const isolatedSessions = new Set<string>();
+
+async function verifySessionIsolation(sessionName: string, label: string): Promise<void> {
+  await poll(`${label}server becomes ready`, () => cliFor(sessionName, ["pane", "list"]).code === 0 ? "ready" : undefined);
+  const status = cliFor(sessionName, ["status", "server"]);
+  check(`${label}runtime is isolated under temp config`, status.code === 0 && status.stdout.includes(`${root}/`),
+    `unexpected socket path in: ${status.stdout.trim()}`);
+  isolatedSessions.add(sessionName);
+}
+
+let server: Bun.Subprocess<"ignore", number, number> | undefined;
+let secondServer: Bun.Subprocess<"ignore", number, number> | undefined;
+let attach: Bun.Subprocess<"pipe", number, "ignore"> | undefined;
+let secondAttach: Bun.Subprocess<"pipe", number, "ignore"> | undefined;
+
+function sendInput(proc: typeof attach, text: string): void {
+  if (!proc) throw new Error("smoke PTY is not attached");
+  proc.stdin.write(text);
+}
 
 function finish(code: number): never {
-  if (code !== 0) console.error(`keeping smoke root for inspection: ${root}`);
-  for (const proc of [attach, server]) {
+  if (code !== 0) {
+    console.error(`keeping smoke root for inspection: ${root}`);
+    for (const sessionName of isolatedSessions) {
+      writeFileSync(join(root, `${sessionName}-plugins.json`), cliFor(sessionName, ["plugin", "log", "list"]).stdout);
+    }
+  }
+  for (const proc of [attach, secondAttach]) {
     if (!proc) continue;
     try { proc.kill(); } catch { /* already gone */ }
   }
-  cli(["plugin", "unlink", "herdr-pickers"]);
-  cli(["session", "stop", SESSION_NAME]);
-  cli(["session", "delete", SESSION_NAME]);
+  if (isolatedSessions.has(SESSION_NAME)) cli(["plugin", "unlink", PLUGIN_ID]);
+  for (const sessionName of [SESSION_NAME, SECOND_SESSION_NAME]) {
+    if (!isolatedSessions.has(sessionName)) continue;
+    cliFor(sessionName, ["session", "stop", sessionName]);
+    cliFor(sessionName, ["session", "delete", sessionName]);
+  }
+  for (const proc of [server, secondServer]) {
+    if (!proc) continue;
+    try { proc.kill(); } catch { /* already gone */ }
+  }
   if (code === 0) {
     try { rmSync(root, { recursive: true, force: true }); } catch { /* best effort */ }
   }
   process.exit(code);
 }
 
-function git(cwd: string, ...args: string[]): void {
-  execFileSync("git", args, { cwd, stdio: "ignore" });
-}
+const git = (cwd: string, ...args: string[]): void => execFileSync("git", args, { cwd, stdio: "ignore" });
 
 function listPanes(): Array<{ pane_id: string; label?: string; focused?: boolean }> | undefined {
   const result = cli(["pane", "list"]);
@@ -154,9 +208,8 @@ function focusedWorkspaceId(): string | undefined {
 
 async function main(): Promise<void> {
   console.error(`smoke root: ${root}`);
-  execFileSync("mkdir", ["-p", fixtureRoot]);
+  mkdirSync(fixtureRoot, { recursive: true });
 
-  // 1. headless server under the isolated config
   const logFd = openSync(serverLog, "a");
   server = Bun.spawn(["herdr", "--session", SESSION_NAME, "server"], {
     env: { ...isolatedEnv(), HERDR_SESSION: SESSION_NAME },
@@ -165,49 +218,36 @@ async function main(): Promise<void> {
     stderr: logFd,
   });
 
-  await poll("server becomes ready", () => {
-    const listed = cli(["pane", "list"]);
-    return listed.code === 0 ? "ready" : undefined;
-  });
+  // No Herdr mutation is allowed until its session socket proves isolation.
+  await verifySessionIsolation(SESSION_NAME, "");
 
-  // 2. isolation proof BEFORE any mutation: socket/session dir must live under root.
-  const status = cli(["status", "server"]);
-  check("runtime is isolated under temp config", status.stdout.includes(root),
-    `unexpected socket path in: ${status.stdout.trim()}`);
-
-  // 3. fixture repository with a linked worktree
   const repo = join(fixtureRoot, "sample-repo");
-  execFileSync("mkdir", ["-p", repo]);
-  git(repo, "init", "-q", "-b", "main");
-  git(repo, "config", "user.email", "smoke@example.invalid");
-  git(repo, "config", "user.name", "smoke");
-  // The host's global signing config must not leak into throwaway fixtures.
-  git(repo, "config", "commit.gpgsign", "false");
-  git(repo, "commit", "-q", "--allow-empty", "-m", "fixture");
-  git(repo, "worktree", "add", "-q", join(fixtureRoot, "sample-repo-wt"), "-b", "feature");
+  mkdirSync(repo, { recursive: true });
+  git(repo, "init", "-q", "-b", FIXTURE_DEFAULT_BRANCH);
+  // Reusing a real signed history avoids weakening Git policy in the fixture.
+  git(repo, "fetch", "-q", "--no-tags", PLUGIN_ROOT, "HEAD");
+  git(repo, "checkout", "-q", "-B", FIXTURE_DEFAULT_BRANCH, "FETCH_HEAD");
+  git(repo, "worktree", "add", "-q", join(fixtureRoot, "sample-repo-wt"), "-b", FIXTURE_WORKTREE_BRANCH);
 
-  // 4. three workspaces: the first takes the initial focus (herdr focuses the
-  // only workspace at creation time), eviltwo carries an adversarial label,
-  // and smoke-two is the dispatch target the picker must focus.
-  const created = cli(["workspace", "create", "--cwd", repo, "--label", "smoke-one", "--no-focus"]);
+  // Herdr focuses the first workspace because it is alone at creation time;
+  // eviltwo carries an adversarial label, and smoke-two is the dispatch target.
+  const created = cli(["workspace", "create", "--cwd", repo, "--label", FIRST_WORKSPACE_LABEL, "--no-focus"]);
   check("workspace create succeeds", created.code === 0, created.stderr.trim());
   const adversarialLabel = "evil\u001B]0;pwn\u0007two\u2066";
   const createdTwo = cli(["workspace", "create", "--cwd", join(fixtureRoot, "sample-repo-wt"), "--label", adversarialLabel, "--no-focus"]);
   check("adversarial workspace create succeeds", createdTwo.code === 0, createdTwo.stderr.trim());
-  const createdThree = cli(["workspace", "create", "--cwd", repo, "--label", "smoke-two", "--no-focus"]);
+  const createdThree = cli(["workspace", "create", "--cwd", repo, "--label", DISPATCH_TARGET_WORKSPACE_LABEL, "--no-focus"]);
   check("dispatch-target workspace create succeeds", createdThree.code === 0, createdThree.stderr.trim());
 
-  // 5. link the plugin inside the isolated runtime only
   const linked = cli(["plugin", "link", PLUGIN_ROOT, "--enabled"]);
   check("plugin links", linked.code === 0, linked.stderr.trim());
   const configDirResult = cli(["plugin", "config-dir", PLUGIN_ID]);
   check("plugin config directory resolves", configDirResult.code === 0, configDirResult.stderr.trim());
   const pluginConfigDir = configDirResult.stdout.trim();
-  check("plugin config remains isolated", pluginConfigDir.startsWith(root), pluginConfigDir);
+  check("plugin config remains isolated", pluginConfigDir.startsWith(`${root}/`), pluginConfigDir);
   mkdirSync(pluginConfigDir, { recursive: true });
   writeFileSync(join(pluginConfigDir, CONFIG_FILE_NAME), SMOKE_CONFIG, "utf8");
 
-  // 6. all nine actions register
   const actions = cli(["plugin", "action", "list", "--plugin", "herdr-pickers"]);
   let registered: string[] = [];
   try {
@@ -217,7 +257,7 @@ async function main(): Promise<void> {
   check("all nine actions register", JSON.stringify(registered) === JSON.stringify([...ACTION_IDS].sort()),
     `registered: ${registered.join(", ")}`);
 
-  // 7. attach a client through a real PTY bridge so popups have a terminal
+  // A real PTY is required because popup input routes through the attached client.
   const clientRaw = openSync(clientRawPath, "a");
   attach = Bun.spawn([
     "python3", join(import.meta.dir, "smoke-pty.py"), "herdr", "--session", SESSION_NAME,
@@ -235,19 +275,18 @@ async function main(): Promise<void> {
   check("focus transition seeds last-workspace memory", seeded.code === 0, seeded.stderr.trim());
   await Bun.sleep(1000);
 
-  // 8. open the workspaces picker and dispatch with configured Ctrl-J navigation
   const opened = cli(["plugin", "action", "invoke", "herdr-pickers.workspaces"]);
   check("workspaces action exits cleanly", opened.code === 0, opened.stderr.trim());
   const before = focusedWorkspaceId();
   // Wait for the popup to render because earlier keys route to the focused
   // shell pane instead of the picker.
   await Bun.sleep(1500);
-  attach.stdin.write(SMOKE_QUERY);
+  sendInput(attach, SMOKE_QUERY);
   await Bun.sleep(400);
-  attach.stdin.write(KEY_CTRL_J);
+  sendInput(attach, KEY_CTRL_J);
   await Bun.sleep(KEY_INPUT_SETTLE_MS);
   // CR keeps acceptance distinct from Ctrl-J's indistinguishable LF byte.
-  attach.stdin.write(KEY_ENTER);
+  sendInput(attach, KEY_ENTER);
   const configuredSelection = await poll("configured ctrl-j selection", () => {
     const focused = focusedWorkspaceId();
     return focused === DISPATCH_TARGET_WORKSPACE_ID ? focused : undefined;
@@ -258,7 +297,6 @@ async function main(): Promise<void> {
     configuredSelection,
   );
 
-  // 9. last-workspace toggles back
   const toggled = cli(["plugin", "action", "invoke", "herdr-pickers.last-workspace"]);
   check("last-workspace action exits cleanly", toggled.code === 0, toggled.stderr.trim());
   await poll("last-workspace restores the previous focus", () => {
@@ -266,26 +304,24 @@ async function main(): Promise<void> {
     return focused === before ? focused : undefined;
   });
 
-  // 10. Discovery action registers a real catalog without touching host state
   const bytesBeforeProjects = clientBytes();
   const projects = cli(["plugin", "action", "invoke", "herdr-pickers.projects"]);
   check("projects action exits cleanly", projects.code === 0, projects.stderr.trim());
   await poll("projects picker renders", () => clientBytes() > bytesBeforeProjects ? "rendered" : undefined);
-  attach.stdin.write(KEY_CTRL_C);
+  sendInput(attach, KEY_CTRL_C);
   await Bun.sleep(600);
 
-  // 11. Ctrl-r reloads an open picker without breaking it
   const reloadReopened = cli(["plugin", "action", "invoke", "herdr-pickers.workspaces"]);
   check("reload picker exits cleanly", reloadReopened.code === 0, reloadReopened.stderr.trim());
   const bytesBeforeReload = clientBytes();
-  attach.stdin.write("\u0012");
+  sendInput(attach, "\u0012");
   await Bun.sleep(1000);
   check("ctrl-r redraws the picker", clientBytes() > bytesBeforeReload,
     "client output did not grow after ctrl-r");
-  attach.stdin.write(KEY_ESCAPE);
+  sendInput(attach, KEY_ESCAPE);
   await Bun.sleep(600);
 
-  // 12. The adversarial workspace label must never reach the client as a
+  // The adversarial workspace label must never reach the client as a
   // live escape sequence: the sanitizer strips control bytes, so the rendered
   // text may still show inert "]0;pwn" characters, but ESC-prefixed OSC must
   // be absent or the terminal would execute it.
@@ -294,17 +330,15 @@ async function main(): Promise<void> {
     !rendered.includes("\u001b]0;pwn") && !rendered.includes("\u0007two\u001b"),
     "raw OSC payload from the adversarial label reached the client");
 
-  // 13. Escape closes an open picker without dispatching, and a fresh open still works
   const reopened = cli(["plugin", "action", "invoke", "herdr-pickers.workspaces"]);
   check("reopen picker exits cleanly", reopened.code === 0, reopened.stderr.trim());
   const stableFocus = focusedWorkspaceId();
-  attach.stdin.write(KEY_ESCAPE);
+  sendInput(attach, KEY_ESCAPE);
   await Bun.sleep(800);
   const afterEscape = focusedWorkspaceId();
   check("escape closes without dispatching", afterEscape === stableFocus,
     "focus moved from " + String(stableFocus) + " to " + String(afterEscape));
 
-  // Overlay is a real zoomed pane: prove open and Ctrl-C restore focus.
   writeFileSync(
     join(pluginConfigDir, CONFIG_FILE_NAME),
     `placement = "overlay"\n\n${SMOKE_CONFIG}`,
@@ -315,7 +349,7 @@ async function main(): Promise<void> {
   check("overlay workspaces action exits cleanly", overlayOpened.code === 0, overlayOpened.stderr.trim());
   const overlayPaneId = await waitForOverlayPicker();
   const overlayFocus = focusedWorkspaceId();
-  attach.stdin.write(KEY_CTRL_C);
+  sendInput(attach, KEY_CTRL_C);
   await waitForPaneRemoval("overlay ctrl-c removes the picker pane", overlayPaneId);
   const afterOverlay = focusedWorkspaceId();
   check(
@@ -328,7 +362,7 @@ async function main(): Promise<void> {
   check("overlay escape action exits cleanly", overlayEscapeOpened.code === 0, overlayEscapeOpened.stderr.trim());
   const overlayEscapePaneId = await waitForOverlayPicker();
   const overlayEscapeFocus = focusedWorkspaceId();
-  attach.stdin.write(KEY_ESCAPE);
+  sendInput(attach, KEY_ESCAPE);
   await waitForPaneRemoval("overlay escape removes the picker pane", overlayEscapePaneId);
   const afterOverlayEscape = focusedWorkspaceId();
   check(
@@ -337,15 +371,68 @@ async function main(): Promise<void> {
     "focus moved from " + String(overlayEscapeFocus) + " to " + String(afterOverlayEscape),
   );
 
-  // 11. plugin command log shows no failures
-  const logs = cli(["plugin", "log", "list"]);
-  let pluginEntries: Array<Record<string, unknown> & { status?: string }> = [];
-  try {
-    const parsed = JSON.parse(logs.stdout) as { result?: { logs?: Array<Record<string, unknown> & { status?: string }> } };
-    pluginEntries = parsed.result?.logs ?? [];
-  } catch { pluginEntries = [{ error: "invalid plugin log response" }]; }
-  const failedEntries = pluginEntries.filter((entry) => entry.status !== "succeeded");
-  check("every plugin command succeeded", failedEntries.length === 0, JSON.stringify(failedEntries));
+  const secondLogFd = openSync(secondServerLog, "a");
+  secondServer = Bun.spawn(["herdr", "--session", SECOND_SESSION_NAME, "server"], {
+    env: { ...isolatedEnv(), HERDR_SESSION: SECOND_SESSION_NAME },
+    stdin: "ignore",
+    stdout: secondLogFd,
+    stderr: secondLogFd,
+  });
+  await verifySessionIsolation(SECOND_SESSION_NAME, SECOND_SESSION_CHECK_PREFIX);
+  const secondWorkspace = cliFor(SECOND_SESSION_NAME, [
+    "workspace", "create", "--cwd", repo, "--label", SECOND_SESSION_WORKSPACE_LABEL, "--no-focus",
+  ]);
+  check("second-session workspace creates", secondWorkspace.code === 0, secondWorkspace.stderr.trim());
+  const secondClientRaw = openSync(secondClientRawPath, "a");
+  secondAttach = Bun.spawn([
+    "python3", join(import.meta.dir, "smoke-pty.py"), "herdr", "--session", SECOND_SESSION_NAME,
+  ], {
+    env: { ...isolatedEnv(), HERDR_SESSION: SECOND_SESSION_NAME, TERM: "xterm-256color" },
+    stdin: "pipe",
+    stdout: secondClientRaw,
+    stderr: "ignore",
+  });
+  await Bun.sleep(2500);
+
+  const primarySession: SmokeSession = {
+    label: "primary session",
+    rawOutputPath: clientRawPath,
+    run: cli,
+    runAsync: (args) => cliAsyncFor(SESSION_NAME, args),
+    input: (text) => sendInput(attach, text),
+  };
+  const secondarySession: SmokeSession = {
+    label: "secondary session",
+    rawOutputPath: secondClientRawPath,
+    run: (args) => cliFor(SECOND_SESSION_NAME, args),
+    runAsync: (args) => cliAsyncFor(SECOND_SESSION_NAME, args),
+    input: (text) => sendInput(secondAttach, text),
+  };
+  await runPickerLifecycleSmoke({
+    root,
+    repo,
+    pluginConfigDir,
+    baseConfig: SMOKE_CONFIG,
+    primary: primarySession,
+    secondary: secondarySession,
+    firstWorkspaceId: FIRST_WORKSPACE_ID,
+    firstWorkspaceLabel: FIRST_WORKSPACE_LABEL,
+    dispatchWorkspaceId: DISPATCH_TARGET_WORKSPACE_ID,
+    dispatchWorkspaceLabel: DISPATCH_TARGET_WORKSPACE_LABEL,
+    check,
+    poll,
+  });
+
+  for (const [label, sessionName] of [["primary", SESSION_NAME], ["secondary", SECOND_SESSION_NAME]] as const) {
+    const logs = cliFor(sessionName, ["plugin", "log", "list"]);
+    let pluginEntries: Array<Record<string, unknown> & { status?: string }> = [];
+    try {
+      const parsed = JSON.parse(logs.stdout) as { result?: { logs?: Array<Record<string, unknown> & { status?: string }> } };
+      pluginEntries = parsed.result?.logs ?? [];
+    } catch { pluginEntries = [{ error: "invalid plugin log response" }]; }
+    const failedEntries = pluginEntries.filter((entry) => entry.status !== "succeeded");
+    check(`every ${label} plugin command succeeded`, failedEntries.length === 0, JSON.stringify(failedEntries));
+  }
 
   console.error("smoke passed");
   finish(0);

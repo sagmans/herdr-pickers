@@ -10,6 +10,10 @@ All notable user-facing changes to Herdr Pickers are recorded in this file.
 
 ### Fixed
 
+- Repeated or concurrent picker actions now keep one picker per Herdr session across modes and placements.
+- Navigation away from an overlay cancels it without restoring the old focus or dispatching a selection.
+- Cancellation interrupts pending picker work and restores the terminal before teardown.
+- Popup cleanup no longer risks closing a replacement popup.
 - Overlay Escape and Ctrl-C now close the zoomed pane instead of leaving a blank terminal.
 - Overlay cancel now removes the picker pane so it cannot linger in the mosaic.
 

@@ -9,7 +9,7 @@ workspace action.
 
 ## Requirements
 
-- Herdr `>= 0.8.0` (`popup.close` socket API)
+- Herdr `>= 0.8.0` (plugin panes and socket API)
 - Bun `>= 1.3`
 - fzf `>= 0.48`
 - Git
@@ -126,7 +126,7 @@ roots = ["~/projects", "~/work"]
 | mouse click | Move selection |
 | mouse double-click | Dispatch clicked target |
 | mouse wheel | Scroll |
-| `Esc` | Clear search; close when search is empty |
+| `Esc` | Close overlay; in a popup, clear search or close when search is empty |
 | `Ctrl-C` | Close |
 | `Ctrl-r` | Reload the current catalog without closing |
 | `Backspace` | Delete the previous search character |
@@ -168,6 +168,16 @@ the plugin `config.toml`:
 3. Invoke a picker action again.
 
 Overlay is not 75% of the terminal. Reopen the picker after a config change.
+
+Each Herdr session permits one picker across all modes, workspaces, and
+placements. Repeated actions keep the existing picker and its search.
+Other Herdr sessions can open their own pickers.
+
+Popups block pane navigation. Overlays do not: navigation to another pane,
+tab, or workspace cancels the picker and keeps the new destination focused.
+Cancellation discards the search without dispatch. Herdr replays focus events,
+so the picker checks current focus before it cancels. If the focus connection
+fails, the overlay closes rather than remain active without observation.
 
 Terminals encode `Ctrl-j` as line feed. A terminal that also sends line feed
 for `Enter` cannot distinguish those inputs. Use carriage-return `Enter` or a
@@ -263,6 +273,9 @@ before it can reach your terminal.
 - No `herdr-pickers.*` actions — reinstall or `herdr plugin link .` from a checkout.
 - No projects or worktrees — open a repository in Herdr or configure `[projects].roots`.
 - No agents — open an agent pane first.
+- Picker startup cannot be verified — save active work, then restart the affected Herdr session.
+  Ownership uses `picker-sessions.sqlite` in the plugin state directory.
+  Do not delete this file while any picker is active.
 - Red fzf error — verify `fzf --version` is `>= 0.48`.
 
 ## License
