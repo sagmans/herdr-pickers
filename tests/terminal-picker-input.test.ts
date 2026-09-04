@@ -8,6 +8,7 @@ const KEY_UP = "\x1b[A";
 const KEY_DOWN = "\x1b[B";
 const KEY_ENTER = "\r";
 const KEY_BACKSPACE = "\x7f";
+const KEY_CTRL_C = "\x03";
 const KEY_CTRL_H = "\x08";
 const KEY_CTRL_J = "\x0a";
 const KEY_CTRL_K = "\x0b";
@@ -31,6 +32,7 @@ const EXPECTED_CUSTOM_EVENTS = [
 
 const vimKeymap = parseConfig(VIM_KEYMAP_TOML, CONFIG_PATH).keymap;
 const controlOnlyKeymap = parseConfig(CONTROL_ONLY_KEYMAP_TOML, CONFIG_PATH).keymap;
+const emptyKeymap = new Map<string, never>();
 
 describe("terminal input parsing", () => {
   test("parses SGR mouse presses and default keyboard controls", () => {
@@ -64,6 +66,13 @@ describe("terminal input keymap", () => {
 
   test("ignores arrow sequences removed by action replacement", () => {
     expect(parseInput(KEY_UP + KEY_DOWN, controlOnlyKeymap)).toEqual({ events: [], remainder: "" });
+  });
+
+  test("keeps Ctrl-C fixed outside the configurable keymap", () => {
+    expect(parseInput(KEY_CTRL_C, emptyKeymap)).toEqual({
+      events: [{ type: "close" }],
+      remainder: "",
+    });
   });
 
   test("keeps DEL Backspace fixed while Ctrl-H remains configurable", () => {

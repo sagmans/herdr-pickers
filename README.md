@@ -130,7 +130,8 @@ roots = ["~/projects", "~/work"]
 | `Ctrl-r` | Reload the current catalog without closing |
 | `Backspace` | Delete the previous search character |
 
-Configure keyboard actions in the plugin `config.toml` shown by
+Herdr's main `config.toml` opens picker actions. Configure controls used
+inside an open picker in the plugin `config.toml` shown by
 `herdr plugin config-dir herdr-pickers`:
 
 ```toml
@@ -145,12 +146,13 @@ actions keep their defaults. In the example, `Ctrl-j` moves down, while the
 carriage return sent by `Enter` still accepts. Use an empty array to unbind
 an action.
 
-Configurable actions are `up`, `down`, `accept`, `escape`, `close`, and
-`reload`. Supported key names are `up`, `down`, `enter`, `escape`, and
-`ctrl-a` through `ctrl-z`. Printable characters remain search input. The
-`backspace` key name is not supported. A DEL Backspace always edits the query.
-Unknown names, malformed arrays, and conflicting keys fail with the config
-file path. Reopen the popup after a config change.
+Configurable actions are `up`, `down`, `accept`, and `reload`. Supported
+key names are `up`, `down`, `enter`, and `ctrl-a` through `ctrl-z`, except
+`ctrl-c`. Printable characters remain search input. `Esc` and `Ctrl-C` are
+fixed cancellation controls; they cannot be rebound or used in `[keymap]`.
+The `backspace` key name is not supported. A DEL Backspace always edits the
+query. Unknown names, malformed arrays, and conflicting keys fail with the
+config file path. Reopen the popup after a config change.
 
 Terminals encode `Ctrl-j` as line feed. A terminal that also sends line feed
 for `Enter` cannot distinguish those inputs. Use carriage-return `Enter` or a

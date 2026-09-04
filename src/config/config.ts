@@ -7,29 +7,26 @@ import { hasErrorCode, isRecord } from "../util/objects.ts";
 export const PLUGIN_ID = "herdr-pickers";
 export const CONFIG_FILE_NAME = "config.toml";
 
-export type PickerKeyAction = "up" | "down" | "accept" | "escape" | "close" | "reload";
+export type PickerKeyAction = "up" | "down" | "accept" | "reload";
 export type PickerKeymap = ReadonlyMap<string, PickerKeyAction>;
 
 const KEY_UP = "\x1b[A";
 const KEY_DOWN = "\x1b[B";
 const KEY_ENTER = "\r";
-const KEY_ESCAPE = "\x1b";
 const CONTROL_KEY_PATTERN = /^ctrl-([a-z])$/;
 const CONTROL_CODE_MASK = 0x1f;
-const KEYMAP_ACTIONS = ["up", "down", "accept", "escape", "close", "reload"] as const satisfies readonly PickerKeyAction[];
+const KEYMAP_ACTIONS = ["up", "down", "accept", "reload"] as const satisfies readonly PickerKeyAction[];
 const KEYMAP_ACTION_SET: ReadonlySet<string> = new Set(KEYMAP_ACTIONS);
+const FIXED_KEY_NAMES: ReadonlySet<string> = new Set(["escape", "ctrl-c"]);
 const NAMED_KEY_SEQUENCES: ReadonlyMap<string, string> = new Map([
   ["up", KEY_UP],
   ["down", KEY_DOWN],
   ["enter", KEY_ENTER],
-  ["escape", KEY_ESCAPE],
 ]);
 const DEFAULT_KEY_BINDINGS: Readonly<Record<PickerKeyAction, readonly string[]>> = {
   up: ["up", "ctrl-p"],
   down: ["down", "ctrl-n"],
   accept: ["enter"],
-  escape: ["escape"],
-  close: ["ctrl-c"],
   reload: ["ctrl-r"],
 };
 const INVALID_DEFAULT_KEY_MESSAGE = "Invalid default picker key";
@@ -42,8 +39,9 @@ const DEFAULT_CONFIG = [
   "roots = []",
   "",
   "# Optional. Each action list replaces only that action's default keys.",
-  "# Actions: up, down, accept, escape, close, reload.",
-  "# Keys: up, down, enter, escape, ctrl-a through ctrl-z.",
+  "# Actions: up, down, accept, reload.",
+  "# Keys: up, down, enter, ctrl-a through ctrl-z, except ctrl-c.",
+  "# Escape and Ctrl-C are fixed cancellation controls.",
   "# [keymap]",
   "# up = [\"up\", \"ctrl-k\"]",
   "# down = [\"down\", \"ctrl-j\"]",
@@ -153,6 +151,9 @@ function resolvePickerKeymap(value: unknown, configPath: string): PickerKeymap {
     const names = expectKeyNames(configuredValue, `keymap.${action}`, configPath);
     configured.set(action, names);
     for (const name of names) {
+      if (FIXED_KEY_NAMES.has(name)) {
+        throw new ConfigError(`Key '${name}' is a fixed cancellation control`, configPath);
+      }
       const sequence = decodeKeyName(name);
       if (sequence === undefined) throw new ConfigError(`Unknown key '${name}' in keymap.${action}`, configPath);
       const previous = explicit.get(sequence);

@@ -21,7 +21,11 @@ const VIM_KEYMAP_TOML = '[keymap]\nup = ["up", "ctrl-k"]\ndown = ["down", "ctrl-
 const EMPTY_UP_KEYMAP_TOML = "[keymap]\nup = []\n";
 const BACKSPACE_ACTION_TOML = '[keymap]\nbackspace = ["ctrl-h"]\n';
 const BACKSPACE_KEY_TOML = '[keymap]\nup = ["backspace"]\n';
-const CONFLICTING_KEYMAP_TOML = '[keymap]\naccept = ["enter"]\nclose = ["ctrl-m"]\n';
+const CONFLICTING_KEYMAP_TOML = '[keymap]\naccept = ["enter"]\nreload = ["ctrl-m"]\n';
+const ESCAPE_ACTION_TOML = '[keymap]\nescape = ["up"]\n';
+const CLOSE_ACTION_TOML = '[keymap]\nclose = ["down"]\n';
+const ESCAPE_KEY_TOML = '[keymap]\nup = ["escape"]\n';
+const CTRL_C_KEY_TOML = '[keymap]\ndown = ["ctrl-c"]\n';
 const INVALID_KEYMAP_TOML = '[keymap]\nup = ["left"]\n';
 const INVALID_KEYMAP_VALUE_TOML = '[keymap]\nup = "ctrl-k"\n';
 const INVALID_KEYMAP_TABLE_TOML = 'keymap = "ctrl-k"\n';
@@ -52,8 +56,6 @@ describe("plugin config", () => {
       [KEY_DOWN, "down"],
       [KEY_CTRL_N, "down"],
       [KEY_ENTER, "accept"],
-      [KEY_ESCAPE, "escape"],
-      [KEY_CTRL_C, "close"],
       [KEY_CTRL_R, "reload"],
     ]);
   });
@@ -68,7 +70,8 @@ describe("plugin config", () => {
     expect(keymap.get(KEY_CTRL_J)).toBe("down");
     expect(keymap.get(KEY_CTRL_N)).toBeUndefined();
     expect(keymap.get(KEY_ENTER)).toBe("accept");
-    expect(keymap.get(KEY_CTRL_C)).toBe("close");
+    expect(keymap.get(KEY_ESCAPE)).toBeUndefined();
+    expect(keymap.get(KEY_CTRL_C)).toBeUndefined();
   });
 
   test("allows an empty action list to remove its default keys", () => {
@@ -83,6 +86,10 @@ describe("plugin config", () => {
     for (const source of [
       BACKSPACE_ACTION_TOML,
       BACKSPACE_KEY_TOML,
+      ESCAPE_ACTION_TOML,
+      CLOSE_ACTION_TOML,
+      ESCAPE_KEY_TOML,
+      CTRL_C_KEY_TOML,
       CONFLICTING_KEYMAP_TOML,
       INVALID_KEYMAP_TOML,
       INVALID_KEYMAP_VALUE_TOML,

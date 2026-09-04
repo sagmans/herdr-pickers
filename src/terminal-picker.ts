@@ -7,7 +7,6 @@ import {
 } from "./picker-row.ts";
 import {
   ESCAPE_KEY_SEQUENCE,
-  mappedKeyEvent,
   parseInput,
   type InputEvent,
 } from "./terminal-picker-input.ts";
@@ -47,6 +46,7 @@ const CURSOR_HOME = "\x1b[H";
 const CURSOR_POSITION_SUFFIX = "H";
 const CSI_PREFIX = "\x1b[";
 const FIRST_TERMINAL_CELL = 1;
+const ESCAPE_INPUT_EVENT: InputEvent = { type: "escape" };
 const TERMINAL_START = `${ALTERNATE_SCREEN_ENTER}${LINE_WRAP_DISABLE}${MOUSE_TRACKING_ENABLE}${SGR_MOUSE_ENABLE}`;
 const TERMINAL_STOP = `${SGR_MOUSE_DISABLE}${MOUSE_TRACKING_DISABLE}${LINE_WRAP_ENABLE}${CURSOR_SHOW}${ALTERNATE_SCREEN_EXIT}`;
 
@@ -289,9 +289,8 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
         ]);
         if (raced.type === "timeout") {
           if (pending !== ESCAPE_KEY_SEQUENCE) continue;
-          const event = mappedKeyEvent(ESCAPE_KEY_SEQUENCE, keymap);
           pending = "";
-          const outcome = await handleEvents(event === undefined ? [] : [event]);
+          const outcome = await handleEvents([ESCAPE_INPUT_EVENT]);
           if (outcome.done) return outcome.selection;
           continue;
         }
@@ -301,8 +300,7 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
       }
       if (input.done) {
         if (pending === ESCAPE_KEY_SEQUENCE) {
-          const event = mappedKeyEvent(ESCAPE_KEY_SEQUENCE, keymap);
-          const outcome = await handleEvents(event === undefined ? [] : [event]);
+          const outcome = await handleEvents([ESCAPE_INPUT_EVENT]);
           if (outcome.done) return outcome.selection;
         }
         return undefined;

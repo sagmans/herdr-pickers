@@ -7,6 +7,7 @@ export const ESCAPE_KEY_SEQUENCE = "\x1b";
 const MOUSE_PREFIX = "\x1b[<";
 const CSI_PREFIX = "\x1b[";
 const KEY_BACKSPACE = "\x7f";
+const KEY_CTRL_C = "\x03";
 const MOUSE_LEFT = 0;
 const MOUSE_WHEEL_UP = 64;
 const MOUSE_WHEEL_DOWN = 65;
@@ -95,6 +96,14 @@ export function parseInput(data: string, keymap: PickerKeymap = DEFAULT_PICKER_K
       events.push({ type: "backspace" });
       continue;
     }
+    if (character === ESCAPE_KEY_SEQUENCE) {
+      events.push({ type: "escape" });
+      continue;
+    }
+    if (character === KEY_CTRL_C) {
+      events.push({ type: "close" });
+      continue;
+    }
     const event = mappedKeyEvent(character, keymap);
     if (event !== undefined) {
       events.push(event);
@@ -117,8 +126,6 @@ function actionEvent(action: PickerKeyAction): InputEvent {
     case "up":
     case "down":
     case "accept":
-    case "escape":
-    case "close":
     case "reload":
       return { type: action };
     default: {
