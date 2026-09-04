@@ -1,14 +1,19 @@
 import { Herdr } from "../client/herdr.ts";
 import { CURRENT_CONTEXT_ENV, currentContextFromEnv } from "../catalog.ts";
+import { loadConfig, type PickerPlacement } from "../config/config.ts";
 import { parseMode, type PickerMode } from "../picker.ts";
 import { formatPaneError } from "../pane.ts";
 
 const MODE_ENV = "HERDR_PICKERS_MODE";
 
-export function buildPaneOpenArgs(options: { readonly pluginId: string; readonly mode: PickerMode; readonly env?: Record<string, string | undefined> | undefined }): string[] {
-  // Placement and sizing live in the manifest (popup at 75% x 75%): the CLI
-  // has no width/height flags and its --placement enum predates popup. No
-  // --focus either: popups receive all terminal input on their own.
+export function buildPaneOpenArgs(options: {
+  readonly pluginId: string;
+  readonly mode: PickerMode;
+  readonly env?: Record<string, string | undefined> | undefined;
+  readonly placement?: PickerPlacement;
+}): string[] {
+  // Overlay must be requested here: manifest size applies only to popup.
+  // Width and height flags are omitted because overlay rejects them.
   return [
     "plugin",
     "pane",
@@ -17,6 +22,7 @@ export function buildPaneOpenArgs(options: { readonly pluginId: string; readonly
     options.pluginId,
     "--entrypoint",
     "picker",
+    ...(options.placement === "overlay" ? ["--placement", "overlay"] : []),
     ...paneEnvArgs(options.mode, options.env),
   ];
 }
@@ -26,7 +32,13 @@ async function run(): Promise<void> {
   if (!pluginId) throw new Error("HERDR_PLUGIN_ID is required to open the herdr-pickers pane.");
 
   const mode = parseMode(process.argv[2]);
-  await new Herdr().run(buildPaneOpenArgs({ pluginId, mode, env: process.env }));
+  const config = loadConfig(process.env);
+  await new Herdr().run(buildPaneOpenArgs({
+    pluginId,
+    mode,
+    env: process.env,
+    placement: config.placement,
+  }));
 }
 
 function paneEnvArgs(mode: PickerMode, env: Record<string, string | undefined> | undefined): string[] {
