@@ -16,6 +16,15 @@ export async function closePopup(
   await write(path, payload);
 }
 
+export async function closePickerSurface(
+  env: Record<string, string | undefined> = process.env,
+  write: SocketWriter = writeSocket,
+): Promise<void> {
+  // Overlay is a real pane: process exit restores zoom. popup.close is popup-only.
+  if (env.HERDR_PANE_ID) return;
+  await closePopup(env, write);
+}
+
 async function writeSocket(path: string, payload: string): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const socket = createConnection(path);
