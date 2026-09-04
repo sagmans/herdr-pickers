@@ -69,6 +69,43 @@ describe("modes", () => {
     })).toContain("HERDR_PICKERS_SOURCE_PANE_ID=w7:p1");
     expect(buildPaneOpenArgs({ pluginId: "herdr-pickers", mode: "repo-workspaces" })).toContain("HERDR_PICKERS_MODE=repo-workspaces");
   });
+
+  test("omits placement flags for popup", () => {
+    expect(buildPaneOpenArgs({ pluginId: "herdr-pickers", mode: "agents", placement: "popup" })).toEqual([
+      "plugin",
+      "pane",
+      "open",
+      "--plugin",
+      "herdr-pickers",
+      "--entrypoint",
+      "picker",
+      "--env",
+      "HERDR_PICKERS_MODE=agents",
+    ]);
+  });
+
+  test("adds overlay placement after the picker entrypoint", () => {
+    const args = buildPaneOpenArgs({
+      pluginId: "herdr-pickers",
+      mode: "agents",
+      placement: "overlay",
+      env: { HERDR_WORKSPACE_ID: "w7", HERDR_TAB_ID: "w7:t1", HERDR_PANE_ID: "w7:p1", PWD: "/repo/sample-repo" },
+    });
+
+    expect(args.slice(0, 9)).toEqual([
+      "plugin",
+      "pane",
+      "open",
+      "--plugin",
+      "herdr-pickers",
+      "--entrypoint",
+      "picker",
+      "--placement",
+      "overlay",
+    ]);
+    expect(args).toContain("HERDR_PICKERS_MODE=agents");
+    expect(args).toContain("HERDR_PICKERS_SOURCE_PANE_ID=w7:p1");
+  });
 });
 
 describe("picker flow", () => {

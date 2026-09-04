@@ -1,5 +1,5 @@
 import { Herdr } from "./client/herdr.ts";
-import { closePopup } from "./client/popup.ts";
+import { closePickerSurface } from "./client/popup.ts";
 import { loadConfig } from "./config/config.ts";
 import { parseMode, runPicker } from "./picker.ts";
 import { color, dim } from "./style.ts";
@@ -19,7 +19,7 @@ async function main(): Promise<void> {
       if (outcome === "no-agents") {
         console.log(dim(mode === "repo-agents" ? "No repository agents found." : "No agents found."));
       }
-    }, () => closePopup(process.env));
+    }, () => closePickerSurface(process.env));
   } finally {
     removeSignalHandlers();
   }
@@ -59,7 +59,7 @@ function closePopupOnSignals(env: Record<string, string | undefined>): () => voi
       if (closing) return;
       closing = true;
       remove();
-      void closePopup(env).finally(() => process.kill(process.pid, signal));
+      void closePickerSurface(env).finally(() => process.kill(process.pid, signal));
     };
     process.on(signal, handler);
     return { signal, handler };
@@ -73,6 +73,8 @@ function closePopupOnSignals(env: Record<string, string | undefined>): () => voi
 if (import.meta.main) {
   try {
     await main();
+    // Overlay close can leave stdin handles; this process is the picker pane.
+    process.exit(0);
   } catch (error) {
     console.error(color("red", formatPaneError(error)));
     process.exit(1);

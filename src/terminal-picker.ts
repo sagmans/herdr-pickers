@@ -265,6 +265,7 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
     return { done: false };
   };
 
+  let iterator: AsyncIterator<string | Uint8Array> | undefined;
   try {
     terminal.setRawMode(true);
     rawMode = true;
@@ -283,7 +284,7 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
     // failure channel as timer refreshes so cleanup stays on one path.
     if (options.loadOnStart === true) void refresh().catch(failFromTimer);
 
-    const iterator = terminal.input[Symbol.asyncIterator]();
+    iterator = terminal.input[Symbol.asyncIterator]();
     let nextInput = iterator.next();
     while (true) {
       let input: IteratorResult<string | Uint8Array>;
@@ -321,6 +322,11 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
     }
   } finally {
     cleanup();
+    // Escape timeout leaves a pending read. Awaiting return() hung Escape while
+    // Ctrl-C had no pending read and still dismissed.
+    try {
+      void iterator?.return?.();
+    } catch {}
   }
 }
 
@@ -333,8 +339,13 @@ function systemTerminal(): TerminalAdapter {
     setRawMode: (enabled) => {
       if (!process.stdin.isTTY) throw new Error("Agent picker requires a TTY.");
       process.stdin.setRawMode(enabled);
-      if (enabled) process.stdin.resume();
-      else process.stdin.pause();
+      if (enabled) {
+        process.stdin.resume();
+        process.stdin.ref();
+      } else {
+        process.stdin.pause();
+        process.stdin.unref();
+      }
     },
     getViewport: () => ({
       columns: process.stdout.columns ?? DEFAULT_COLUMNS,

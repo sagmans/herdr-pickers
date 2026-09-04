@@ -16,6 +16,8 @@ const KEY_CTRL_J = "\u000a";
 const KEY_ENTER = "\r";
 const KEY_ESCAPE = "\u001b";
 const KEY_INPUT_SETTLE_MS = 100;
+const PICKER_PANE_LABEL = "Herdr Picker";
+const OVERLAY_PICKER_PROMPT = "workspaces › ";
 const SMOKE_QUERY = "smoke-";
 const DISPATCH_TARGET_WORKSPACE_ID = "w3";
 const SESSION_NAME = `s-${Date.now().toString(36)}`;
@@ -108,6 +110,35 @@ function finish(code: number): never {
 
 function git(cwd: string, ...args: string[]): void {
   execFileSync("git", args, { cwd, stdio: "ignore" });
+}
+
+function listPanes(): Array<{ pane_id: string; label?: string; focused?: boolean }> | undefined {
+  const result = cli(["pane", "list"]);
+  if (result.code !== 0) return undefined;
+  try {
+    const parsed = JSON.parse(result.stdout) as { result?: { panes?: Array<{ pane_id: string; label?: string; focused?: boolean }> } };
+    const panes = parsed.result?.panes;
+    if (!Array.isArray(panes) || panes.some((pane) => !pane || typeof pane.pane_id !== "string")) return undefined;
+    return panes;
+  } catch {
+    return undefined;
+  }
+}
+
+async function waitForOverlayPicker(): Promise<string> {
+  // Other panes can redraw before the picker exists, so client byte counts
+  // cannot prove that cancellation input will reach the picker.
+  return poll("overlay picker renders", () => {
+    const pane = listPanes()?.find((pane) => pane.label === PICKER_PANE_LABEL && pane.focused === true);
+    if (!pane) return undefined;
+    const output = cli(["pane", "read", pane.pane_id, "--source", "visible", "--format", "text"]);
+    return output.code === 0 && output.stdout.includes(OVERLAY_PICKER_PROMPT) ? pane.pane_id : undefined;
+  });
+}
+
+async function waitForPaneRemoval(label: string, paneId: string): Promise<void> {
+  await poll(label, () => listPanes()?.some((pane) => pane.pane_id === paneId) === false ? paneId : undefined);
+  check(label, true);
 }
 
 function focusedWorkspaceId(): string | undefined {
@@ -272,6 +303,39 @@ async function main(): Promise<void> {
   const afterEscape = focusedWorkspaceId();
   check("escape closes without dispatching", afterEscape === stableFocus,
     "focus moved from " + String(stableFocus) + " to " + String(afterEscape));
+
+  // Overlay is a real zoomed pane: prove open and Ctrl-C restore focus.
+  writeFileSync(
+    join(pluginConfigDir, CONFIG_FILE_NAME),
+    `placement = "overlay"\n\n${SMOKE_CONFIG}`,
+    "utf8",
+  );
+  check("no overlay picker exists before opening", listPanes()?.every((pane) => pane.label !== PICKER_PANE_LABEL) === true);
+  const overlayOpened = cli(["plugin", "action", "invoke", "herdr-pickers.workspaces"]);
+  check("overlay workspaces action exits cleanly", overlayOpened.code === 0, overlayOpened.stderr.trim());
+  const overlayPaneId = await waitForOverlayPicker();
+  const overlayFocus = focusedWorkspaceId();
+  attach.stdin.write(KEY_CTRL_C);
+  await waitForPaneRemoval("overlay ctrl-c removes the picker pane", overlayPaneId);
+  const afterOverlay = focusedWorkspaceId();
+  check(
+    "overlay ctrl-c closes without dispatching",
+    afterOverlay === overlayFocus,
+    "focus moved from " + String(overlayFocus) + " to " + String(afterOverlay),
+  );
+
+  const overlayEscapeOpened = cli(["plugin", "action", "invoke", "herdr-pickers.workspaces"]);
+  check("overlay escape action exits cleanly", overlayEscapeOpened.code === 0, overlayEscapeOpened.stderr.trim());
+  const overlayEscapePaneId = await waitForOverlayPicker();
+  const overlayEscapeFocus = focusedWorkspaceId();
+  attach.stdin.write(KEY_ESCAPE);
+  await waitForPaneRemoval("overlay escape removes the picker pane", overlayEscapePaneId);
+  const afterOverlayEscape = focusedWorkspaceId();
+  check(
+    "overlay escape closes without dispatching",
+    afterOverlayEscape === overlayEscapeFocus,
+    "focus moved from " + String(overlayEscapeFocus) + " to " + String(afterOverlayEscape),
+  );
 
   // 11. plugin command log shows no failures
   const logs = cli(["plugin", "log", "list"]);

@@ -47,6 +47,21 @@ describe("plugin config", () => {
     expect(readFileSync(configPath, "utf-8")).toBe(defaultConfigToml());
   });
 
+  test("omitted placement defaults to popup", () => {
+    expect(parseConfig("", CONFIG_PATH).placement).toBe("popup");
+  });
+
+  test("parses overlay placement", () => {
+    expect(parseConfig('placement = "overlay"\n', CONFIG_PATH).placement).toBe("overlay");
+  });
+
+  test("rejects unknown and non-string placement with the config path", () => {
+    expect(() => parseConfig('placement = "split"\n', CONFIG_PATH)).toThrow(/placement/);
+    expect(() => parseConfig('placement = "split"\n', CONFIG_PATH)).toThrow(CONFIG_PATH_PATTERN);
+    expect(() => parseConfig("placement = 1\n", CONFIG_PATH)).toThrow(/placement/);
+    expect(() => parseConfig("placement = 1\n", CONFIG_PATH)).toThrow(CONFIG_PATH_PATTERN);
+  });
+
   test("uses the current bindings when keymap is absent", () => {
     const keymap = parseConfig("", CONFIG_PATH).keymap;
 
