@@ -21,6 +21,8 @@ const MAX_ABORT_WAIT_MS = 2_000;
 const SPLIT_DELAY_MS = 5;
 const INPUT_SETTLE_MS = 50;
 const OVERSIZED_PAYLOAD_BYTES = 128 * 1024;
+const LARGE_SESSION_PANE_COUNT = 512;
+const OVERSIZED_SNAPSHOT_BYTES = 2 * 1024 * 1024;
 const SUBSCRIBE_METHOD = "events.subscribe";
 const SNAPSHOT_METHOD = "session.snapshot";
 const EXPECTED_SUBSCRIPTIONS = [
@@ -42,7 +44,7 @@ function line(value: unknown): string {
   return `${JSON.stringify(value)}\n`;
 }
 
-function snapshotResponse(id: unknown, focusedPaneId = PANE_ID): Record<string, unknown> {
+function snapshotResponse(id: unknown, focusedPaneId = PANE_ID, paneCount = 1): Record<string, unknown> {
   return {
     id,
     result: {
@@ -58,7 +60,7 @@ function snapshotResponse(id: unknown, focusedPaneId = PANE_ID): Record<string, 
           number: 1,
           label: "Owner workspace",
           focused: focusedPaneId === PANE_ID,
-          pane_count: 1,
+          pane_count: paneCount,
           tab_count: 1,
           active_tab_id: TAB_ID,
           agent_status: AGENT_STATUS,
@@ -69,18 +71,18 @@ function snapshotResponse(id: unknown, focusedPaneId = PANE_ID): Record<string, 
           number: 1,
           label: "Owner tab",
           focused: focusedPaneId === PANE_ID,
-          pane_count: 1,
+          pane_count: paneCount,
           agent_status: AGENT_STATUS,
         }],
-        panes: [{
-          pane_id: PANE_ID,
-          terminal_id: "terminal-owner",
+        panes: Array.from({ length: paneCount }, (_, index) => ({
+          pane_id: index === 0 ? PANE_ID : `${OTHER_PANE_ID}-${index}`,
+          terminal_id: `terminal-${index}`,
           workspace_id: WORKSPACE_ID,
           tab_id: TAB_ID,
-          focused: focusedPaneId === PANE_ID,
+          focused: index === 0 && focusedPaneId === PANE_ID,
           agent_status: AGENT_STATUS,
           revision: 0,
-        }],
+        })),
         layouts: [],
         agents: [],
       },
@@ -343,6 +345,31 @@ describe("picker focus subscription", () => {
     } finally {
       await server.close();
     }
+  });
+
+  test("opens and accepts with a large valid session snapshot", async () => {
+    const handshake = standardHandshake();
+    const server = await startServer((request, socket) => {
+      if (request.method === SNAPSHOT_METHOD) socket.end(line(snapshotResponse(request.id, PANE_ID, LARGE_SESSION_PANE_COUNT)));
+      else handshake(request, socket);
+    });
+    try {
+      const watcher = await watchPickerFocus(server.path, PANE_ID);
+      expect(watcher.signal.aborted).toBe(false);
+      await watcher.prepareDispatch();
+      expect(watcher.signal.aborted).toBe(false);
+    } finally { await server.close(); }
+  });
+
+  test("rejects a snapshot exceeding its separate bounded budget", async () => {
+    const handshake = standardHandshake();
+    const server = await startServer((request, socket) => {
+      if (request.method === SNAPSHOT_METHOD) socket.end("x".repeat(OVERSIZED_SNAPSHOT_BYTES));
+      else handshake(request, socket);
+    });
+    try {
+      await expect(watchPickerFocus(server.path, PANE_ID)).rejects.toThrow();
+    } finally { await server.close(); }
   });
 
   test("acceptance waits for a pending departure snapshot", async () => {

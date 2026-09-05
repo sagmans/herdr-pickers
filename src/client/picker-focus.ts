@@ -20,6 +20,8 @@ const FOCUS_SUBSCRIPTIONS = [
   { type: "workspace.focused" },
 ] as const;
 const MAX_MESSAGE_BUFFER_BYTES = 64 * 1024;
+// Session snapshots include every pane and its metadata, unlike individual focus events.
+const MAX_SNAPSHOT_BUFFER_BYTES = 1024 * 1024;
 const SETUP_TIMEOUT_MS = 1_000;
 const NEWLINE_BYTE = 0x0a;
 const SETUP_FAILURE_MESSAGE = "Failed to establish picker focus observation";
@@ -152,10 +154,11 @@ export async function watchPickerFocus(
     }
 
     function handleData(connection: Socket, chunk: Buffer): void {
+      const budget = connection === socket ? MAX_MESSAGE_BUFFER_BYTES : MAX_SNAPSHOT_BUFFER_BYTES;
       let buffer = Buffer.concat([buffers.get(connection) ?? Buffer.alloc(0), chunk]);
       let newline = buffer.indexOf(NEWLINE_BYTE);
       while (newline >= 0) {
-        if (newline > MAX_MESSAGE_BUFFER_BYTES) return terminate();
+        if (newline > budget) return terminate();
         const raw = buffer.subarray(0, newline).toString("utf8");
         buffer = buffer.subarray(newline + 1);
         try {
@@ -166,7 +169,7 @@ export async function watchPickerFocus(
         if (stage === "stopped" || stage === "failed") return;
         newline = buffer.indexOf(NEWLINE_BYTE);
       }
-      if (buffer.length > MAX_MESSAGE_BUFFER_BYTES) return terminate();
+      if (buffer.length > budget) return terminate();
       if (!connection.destroyed) buffers.set(connection, buffer);
     }
 

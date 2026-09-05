@@ -17,6 +17,8 @@ const PANE_DIRECTIONS = ["left", "right", "up", "down"] as const;
 const PLUGIN_ID = "herdr-pickers";
 const CONFIG_FILE_NAME = "config.toml";
 const TAB_DESTINATION_LABEL = "smoke-tab-destination";
+const FOCUS_EVENT_BUDGET_BYTES = 64 * 1024;
+const LARGE_SESSION_LABEL = "large-session-".padEnd(96 * 1024, "x");
 
 export interface CliResult {
   readonly code: number;
@@ -76,6 +78,10 @@ interface OpenPicker {
 
 export async function runPickerLifecycleSmoke(options: PickerLifecycleSmokeOptions): Promise<void> {
   const databasePath = await options.poll("picker ownership database resolves", () => findFile(options.root, OWNERSHIP_DATABASE_NAME));
+  const largeWorkspace = options.primary.run(["workspace", "create", "--cwd", options.repo, "--label", LARGE_SESSION_LABEL, "--no-focus"]);
+  options.check("large-session fixture creates", largeWorkspace.code === 0);
+  const snapshot = options.primary.run(["api", "snapshot"]);
+  options.check("session snapshot exceeds focus-event budget", snapshot.code === 0 && Buffer.byteLength(snapshot.stdout) > FOCUS_EVENT_BUDGET_BYTES);
   await runSingletonCase(options, databasePath, "popup");
   await runSingletonCase(options, databasePath, "overlay");
   await runOverlayNavigationCases(options, databasePath);

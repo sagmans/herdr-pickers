@@ -10,6 +10,7 @@ All notable user-facing changes to Herdr Pickers are recorded in this file.
 
 ### Fixed
 
+- Large session snapshots no longer make overlays close immediately; focus events retain their smaller message limit.
 - Repeated or concurrent picker actions now keep one picker per Herdr session across modes and placements.
 - Navigation away from an overlay cancels it without restoring the old focus or dispatching a selection.
 - Cancellation interrupts pending picker work and restores the terminal before teardown.
