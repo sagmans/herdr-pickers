@@ -71,6 +71,7 @@ const SYSTEM_TIMERS: PickerTimers = {
 
 export interface TerminalPickerOptions extends PickerRows {
   readonly signal?: AbortSignal | undefined;
+  readonly onAccept?: ((selection: PickerItem) => Promise<void>) | undefined;
   readonly prompt: string;
   readonly noun: string;
   readonly live?: boolean | undefined;
@@ -110,6 +111,7 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
   let rawMode = false;
   let removeResizeListener = (): void => {};
   let cleaned = false;
+  let accepting = false;
   let refreshRunning: Promise<void> | undefined;
   let refreshPending = false;
   let rankRevision = 0;
@@ -120,7 +122,7 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
   let previousClick: { readonly itemId: string; readonly time: number } | undefined;
 
   const draw = (): void => {
-    if (!cleaned && !options.signal?.aborted) drawFrame(terminal, state);
+    if (!cleaned && !accepting && !options.signal?.aborted) drawFrame(terminal, state);
   };
   const cleanup = (): void => {
     if (cleaned) return;
@@ -144,12 +146,12 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
     }
   };
   const failFromTimer = (error: unknown): void => {
-    if (cleaned || timerFailureRaised) return;
+    if (cleaned || timerFailureRaised || (accepting && !options.signal?.aborted)) return;
     timerFailureRaised = true;
     rejectTimerFailure(error);
   };
   const applyQuery = async (query: string): Promise<void> => {
-    if (cleaned || options.signal?.aborted) return;
+    if (cleaned || accepting || options.signal?.aborted) return;
     previousClick = undefined;
     // An unchanged query is a live refresh: keep the pointer where the user
     // put it. A changed query is typing: best match wins, and an empty query
@@ -176,9 +178,9 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
     state = fitSelection({ ...state, query, items, selected }, terminal.getViewport());
   };
   const reloadRows = async (): Promise<void> => {
-    if (!options.reload || cleaned || options.signal?.aborted) return;
+    if (!options.reload || cleaned || accepting || options.signal?.aborted) return;
     const rows = await options.reload();
-    if (cleaned || options.signal?.aborted) return;
+    if (cleaned || accepting || options.signal?.aborted) return;
     sourceItems = [...rows.items];
     focusedId = rows.focusedId;
     // Loading copy is placeholder-only: once rows arrive, emptiness is real.
@@ -266,7 +268,15 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
           return exhaustive;
         }
       }
-      if (done) return { done, selection };
+      if (done) {
+        if (selection) {
+          // Keep the selected frame intact until the destination owns focus.
+          accepting = true;
+          rankRevision++;
+          await options.onAccept?.(selection);
+        }
+        return { done, selection };
+      }
       draw();
     }
     return { done: false };

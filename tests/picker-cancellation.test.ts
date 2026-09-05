@@ -106,7 +106,9 @@ for (const mode of MODES) {
       pickerRunner: async options => {
         const rows = options.loadOnStart ? await options.reload!() : options;
         controller.abort();
-        return rows.items[0];
+        const selection = rows.items[0];
+        if (selection) await options.onAccept?.(selection);
+        return selection;
       },
     });
     expect(outcome).toBe("cancelled");
@@ -123,7 +125,11 @@ for (const mode of MODES) {
     const outcome = await runPicker(mode, {
       herdr: new Herdr({ runner }), env: {}, signal: controller.signal,
       beforeDispatch: async () => { await Promise.resolve(); controller.abort(); },
-      pickerRunner: async options => (options.loadOnStart ? await options.reload!() : options).items[0],
+      pickerRunner: async options => {
+        const selection = (options.loadOnStart ? await options.reload!() : options).items[0];
+        if (selection) await options.onAccept?.(selection);
+        return selection;
+      },
     });
     expect(outcome).toBe("cancelled");
     expect(focused).toEqual([]);
@@ -137,7 +143,11 @@ for (const mode of MODES) {
     };
     const outcome = await runPicker(mode, {
       herdr: new Herdr({ runner }), env: {}, beforeDispatch: () => { order.push("stop"); },
-      pickerRunner: async options => (options.loadOnStart ? await options.reload!() : options).items[0],
+      pickerRunner: async options => {
+        const selection = (options.loadOnStart ? await options.reload!() : options).items[0];
+        if (selection) await options.onAccept?.(selection);
+        return selection;
+      },
     });
     expect(outcome).toBe("dispatched");
     expect(order).toEqual(["stop", "dispatch"]);

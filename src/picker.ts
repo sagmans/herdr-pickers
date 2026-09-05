@@ -114,7 +114,8 @@ export async function runAgentPicker(mode: AgentMode, runtime: PickerRuntime): P
   const rendered = renderAgentRows(targets);
   const prompt = mode === "repo-agents" ? "repo agents › " : "agents › ";
   const picker = runtime.pickerRunner ?? runTerminalPicker;
-  const selection = await picker({
+  let dispatched = false;
+  await picker({
     prompt,
     signal: runtime.signal,
     noun: AGENT_NOUN,
@@ -125,13 +126,15 @@ export async function runAgentPicker(mode: AgentMode, runtime: PickerRuntime): P
     keymap: runtime.config?.keymap,
     reload: async () => renderAgentRows(await loadAgentTargets(mode, runtime.herdr, runtime.env)),
     refreshIntervalMilliseconds: AGENT_REFRESH_INTERVAL_MILLISECONDS,
+    onAccept: async selection => {
+      if (runtime.signal?.aborted) return;
+      await runtime.beforeDispatch?.();
+      if (runtime.signal?.aborted) return;
+      await dispatchAgent(selection.target, runtime.herdr);
+      dispatched = true;
+    },
   });
-  const target = selection?.target;
-  if (!target || runtime.signal?.aborted) return "cancelled";
-  await runtime.beforeDispatch?.();
-  if (runtime.signal?.aborted) return "cancelled";
-  await dispatchAgent(target, runtime.herdr);
-  return "dispatched";
+  return dispatched ? "dispatched" : "cancelled";
 }
 
 async function runNavigationPicker(mode: NavigationMode, runtime: PickerRuntime): Promise<PickerOutcome> {
@@ -147,7 +150,8 @@ async function runNavigationPicker(mode: NavigationMode, runtime: PickerRuntime)
     targets = loaded;
     return renderNavigationRows(mode, targets);
   };
-  const selection = await picker({
+  let dispatched = false;
+  await picker({
     prompt: presentation.prompt,
     signal: runtime.signal,
     noun: presentation.noun,
@@ -156,14 +160,17 @@ async function runNavigationPicker(mode: NavigationMode, runtime: PickerRuntime)
     loadOnStart: true,
     keymap: runtime.config?.keymap,
     reload: loadRows,
+    onAccept: async selection => {
+      if (runtime.signal?.aborted) return;
+      const target = targets.find((candidate) => candidate.id === selection.target);
+      if (!target) throw new Error(`Selected navigation target '${selection.target}' is no longer available.`);
+      await runtime.beforeDispatch?.();
+      if (runtime.signal?.aborted) return;
+      await dispatchNavigationTarget(target, runtime.herdr);
+      dispatched = true;
+    },
   });
-  if (!selection || runtime.signal?.aborted) return "cancelled";
-  const target = targets.find((candidate) => candidate.id === selection.target);
-  if (!target) throw new Error(`Selected navigation target '${selection.target}' is no longer available.`);
-  await runtime.beforeDispatch?.();
-  if (runtime.signal?.aborted) return "cancelled";
-  await dispatchNavigationTarget(target, runtime.herdr);
-  return "dispatched";
+  return dispatched ? "dispatched" : "cancelled";
 }
 
 function navigationRuntime(runtime: PickerRuntime) {

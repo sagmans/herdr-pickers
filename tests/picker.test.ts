@@ -12,7 +12,9 @@ function fakePicker(target: string | undefined): { readonly runner: PickerRunner
   const calls: PickerCall[] = [];
   const runner: PickerRunner = async (options) => {
     calls.push(options);
-    return target === undefined ? undefined : options.items.find((item) => item.target === target);
+    const selection = target === undefined ? undefined : options.items.find((item) => item.target === target);
+    if (selection) await options.onAccept?.(selection);
+    return selection;
   };
   return { runner, calls };
 }
@@ -223,7 +225,9 @@ describe("navigation picker flow", () => {
       const loaded = await options.reload?.();
       expect(loaded?.focusedId).toBe("workspace:w1");
       expect(loaded?.items.length).toBeGreaterThan(0);
-      return loaded?.items.find((item) => item.target === "workspace:w2");
+      const selection = loaded?.items.find((item) => item.target === "workspace:w2");
+      if (selection) await options.onAccept?.(selection);
+      return selection;
     };
 
     const outcome = await runPicker("workspaces", { herdr, env: {}, pickerRunner: runner, config: KEYMAP_CONFIG });
@@ -271,7 +275,9 @@ describe("navigation picker flow", () => {
     const runner: PickerRunner = async (options) => {
       await options.reload?.();
       const refreshed = await options.reload?.();
-      return refreshed?.items.find((item) => item.target === "workspace:w3");
+      const selection = refreshed?.items.find((item) => item.target === "workspace:w3");
+      if (selection) await options.onAccept?.(selection);
+      return selection;
     };
 
     const outcome = await runPicker("workspaces", { herdr, env: {}, pickerRunner: runner });
