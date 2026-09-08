@@ -10,6 +10,8 @@ All notable user-facing changes to Herdr Pickers are recorded in this file.
 
 ### Fixed
 
+- Overlay rendering no longer waits for focus setup; native snapshot requests reduce acceptance delays.
+- Accepted selections keep their last frame through focus checks and dispatch instead of exposing an empty picker.
 - Large session snapshots no longer make overlays close immediately; focus events retain their smaller message limit.
 - Repeated or concurrent picker actions now keep one picker per Herdr session across modes and placements.
 - Navigation away from an overlay cancels it without restoring the old focus or dispatching a selection.

@@ -1,5 +1,7 @@
 import { createConnection, type Socket } from "node:net";
 
+import { readPickerSnapshot } from "./picker-snapshot.ts";
+
 import {
   parsePickerFocusLifecycleMessage,
   type PickerFocusLifecycleMessage,
@@ -12,7 +14,6 @@ const REQUEST_IDS: PickerFocusRequestIds = {
 };
 const REQUEST_METHODS = {
   subscribe: "events.subscribe",
-  snapshot: "session.snapshot",
 } as const;
 const FOCUS_SUBSCRIPTIONS = [
   { type: "pane.focused" },
@@ -20,8 +21,6 @@ const FOCUS_SUBSCRIPTIONS = [
   { type: "workspace.focused" },
 ] as const;
 const MAX_MESSAGE_BUFFER_BYTES = 64 * 1024;
-// Session snapshots include every pane and its metadata, unlike individual focus events.
-const MAX_SNAPSHOT_BUFFER_BYTES = 1024 * 1024;
 const SETUP_TIMEOUT_MS = 1_000;
 const NEWLINE_BYTE = 0x0a;
 const SETUP_FAILURE_MESSAGE = "Failed to establish picker focus observation";
@@ -40,15 +39,18 @@ interface FocusOwner {
 export async function watchPickerFocus(
   socketPath: string,
   paneId: string,
+  signal?: AbortSignal,
 ): Promise<{ signal: AbortSignal; stop(): void; prepareDispatch(): Promise<void> }> {
+  signal?.throwIfAborted();
   const controller = new AbortController();
+  const snapshots = new AbortController();
   const socket = createConnection(socketPath);
   socket.unref();
 
   return await new Promise((resolve, reject) => {
     let stage: Stage = "connecting";
     const buffers = new Map<Socket, Buffer>();
-    let snapshotSocket: Socket | undefined;
+    let dispatchTimer: ReturnType<typeof setTimeout> | undefined;
     let owner: FocusOwner | undefined;
     let dispatch: { resolve(): void; reject(error: Error): void } | undefined;
     let ready = false;
@@ -61,6 +63,7 @@ export async function watchPickerFocus(
         if (!ready || stage === "stopped" || stage === "failed" || dispatch) return Promise.reject(new Error(WATCH_FAILURE_MESSAGE));
         return new Promise((resolve, reject) => {
           dispatch = { resolve, reject };
+          dispatchTimer = setTimeout(terminate, SETUP_TIMEOUT_MS);
           if (stage === "snapshot") dirty = true;
           else requestSnapshot();
         });
@@ -88,7 +91,9 @@ export async function watchPickerFocus(
 
     function cleanup(): void {
       dispose(socket, setupTimer);
-      if (snapshotSocket) dispose(snapshotSocket, setupTimer);
+      clearTimeout(dispatchTimer);
+      signal?.removeEventListener("abort", terminate);
+      snapshots.abort();
       buffers.clear();
     }
 
@@ -101,17 +106,9 @@ export async function watchPickerFocus(
       dirty = false;
       clearTimeout(setupTimer);
       setupTimer = setTimeout(terminate, SETUP_TIMEOUT_MS);
-      // Herdr accepts only one request per connection, including subscription streams.
-      const connection = createConnection(socketPath);
-      snapshotSocket = connection;
-      connection.unref();
-      connection.once("connect", () => {
-        writeRequest(connection, { id: REQUEST_IDS.snapshot, method: REQUEST_METHODS.snapshot, params: {} });
-      });
-      connection.on("data", (chunk: Buffer) => handleData(connection, chunk));
-      connection.once("error", terminate);
-      connection.once("end", () => { if (stage === "snapshot") terminate(); });
-      connection.once("close", () => { if (stage === "snapshot") terminate(); });
+      void readPickerSnapshot(socketPath, paneId, snapshots.signal)
+        .then(message => { if (stage === "snapshot") handleMessage(message); })
+        .catch(terminate);
     }
 
     function handleMessage(message: PickerFocusLifecycleMessage): void {
@@ -126,10 +123,6 @@ export async function watchPickerFocus(
         const resolvedOwner = { paneId: message.paneId, tabId: message.tabId, workspaceId: message.workspaceId };
         owner = resolvedOwner;
         stage = "active";
-        if (snapshotSocket) {
-          buffers.delete(snapshotSocket);
-          dispose(snapshotSocket, setupTimer);
-        }
         clearTimeout(setupTimer);
         ready = true;
         resolve(watcher);
@@ -154,7 +147,7 @@ export async function watchPickerFocus(
     }
 
     function handleData(connection: Socket, chunk: Buffer): void {
-      const budget = connection === socket ? MAX_MESSAGE_BUFFER_BYTES : MAX_SNAPSHOT_BUFFER_BYTES;
+      const budget = MAX_MESSAGE_BUFFER_BYTES;
       let buffer = Buffer.concat([buffers.get(connection) ?? Buffer.alloc(0), chunk]);
       let newline = buffer.indexOf(NEWLINE_BYTE);
       while (newline >= 0) {
@@ -173,6 +166,7 @@ export async function watchPickerFocus(
       if (!connection.destroyed) buffers.set(connection, buffer);
     }
 
+    signal?.addEventListener("abort", terminate, { once: true });
     socket.once("connect", () => {
       if (stage !== "connecting") return;
       stage = "subscription";

@@ -178,6 +178,8 @@ tab, or workspace cancels the picker and keeps the new destination focused.
 Cancellation discards the search without dispatch. Herdr replays focus events,
 so the picker checks current focus before it cancels. If the focus connection
 fails, the overlay closes rather than remain active without observation.
+Focus setup runs alongside rendering; acceptance waits for a fresh focus
+check. The selected frame stays visible while that check and dispatch run.
 
 Terminals encode `Ctrl-j` as line feed. A terminal that also sends line feed
 for `Enter` cannot distinguish those inputs. Use carriage-return `Enter` or a

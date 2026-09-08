@@ -116,6 +116,17 @@ export function parsePickerFocusLifecycleMessage(
   }
 }
 
+export function parsePickerSnapshotResponse(raw: string, paneId: string): PickerFocusLifecycleMessage {
+  try {
+    const envelope = expectRecord(JSON.parse(raw));
+    const result = expectRecord(envelope.result);
+    if (envelope.error !== undefined || result.type !== SESSION_SNAPSHOT_TYPE) throw new Error(MALFORMED_PICKER_FOCUS_MESSAGE);
+    return readPickerFocusSnapshot(result.snapshot, paneId);
+  } catch {
+    throw new Error(MALFORMED_PICKER_FOCUS_MESSAGE);
+  }
+}
+
 export function readPickerPaneIds(envelope: unknown): string[] {
   const record = expectRecord(envelope);
   const panes = getResult(record).panes;

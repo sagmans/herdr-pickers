@@ -16,6 +16,7 @@ async function main(): Promise<void> {
   const session = new PickerSession(env);
   const lifecycle = new AbortController();
   let watch: Awaited<ReturnType<typeof watchPickerFocus>> | undefined;
+  let focusReady: Promise<void> | undefined;
   let exitSignal: (typeof EXIT_SIGNALS)[number] | undefined;
   const handlers = EXIT_SIGNALS.map(signal => ({
     signal,
@@ -30,10 +31,23 @@ async function main(): Promise<void> {
       const mode = parseMode(env[MODE_ENV]);
       const config = loadConfig(env);
       if (lifecycle.signal.aborted) return;
-      if (env.HERDR_PANE_ID) watch = await watchPickerFocus(env.HERDR_SOCKET_PATH!, env.HERDR_PANE_ID);
-      const signal = watch ? AbortSignal.any([lifecycle.signal, watch.signal]) : lifecycle.signal;
+      if (env.HERDR_PANE_ID) {
+        // Rendering need not wait for observation, but acceptance must never outrun it.
+        focusReady = watchPickerFocus(env.HERDR_SOCKET_PATH!, env.HERDR_PANE_ID, lifecycle.signal).then(watcher => {
+          watch = watcher;
+          const cancel = () => lifecycle.abort(watcher.signal.reason);
+          watcher.signal.addEventListener("abort", cancel, { once: true });
+          if (watcher.signal.aborted) cancel();
+        }).catch(error => { lifecycle.abort(error); });
+      }
+      const signal = lifecycle.signal;
       const outcome = await runPicker(mode, {
-        herdr: new Herdr({ signal }), env, config, signal, beforeDispatch: () => watch?.prepareDispatch(),
+        herdr: new Herdr({ signal }), env, config, signal,
+        beforeDispatch: async () => {
+          await focusReady;
+          signal.throwIfAborted();
+          await watch?.prepareDispatch();
+        },
       });
       if (outcome === "no-agents") {
         console.log(dim(mode === "repo-agents" ? "No repository agents found." : "No agents found."));
@@ -42,6 +56,7 @@ async function main(): Promise<void> {
   } finally {
     watch?.stop();
     lifecycle.abort();
+    await focusReady;
     for (const { signal, handler } of handlers) process.off(signal, handler);
     session.close();
     if (exitSignal) process.kill(process.pid, exitSignal);
