@@ -62,6 +62,10 @@ export async function runPickerLoop(session: RequestSession, owner: string, opti
             dispatching = true;
           },
         });
+      } catch (error) {
+        // A superseded operation can fail before the next mailbox tick observes replacement.
+        if (dispatching || session.latestRequest()?.token === request.token) throw error;
+        outcome = "cancelled";
       } finally {
         clearInterval(timer);
         current.abort();

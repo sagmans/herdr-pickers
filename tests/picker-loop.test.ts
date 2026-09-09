@@ -124,6 +124,30 @@ for (const operation of ["ranking", "refresh"] as const) {
   });
 }
 
+test("an obsolete error before the mailbox tick does not close the surface", async () => {
+  const session = mailbox();
+  const obsolete = deferred<string>();
+  const input = deferred<string>();
+  const terminal = new FakeTerminal([input.promise], VIEWPORT, true);
+  let loads = 0;
+  const run = runPickerLoop(session, OWNER, {
+    env: {}, terminal,
+    createRuntime: signal => ({ herdr: new Herdr({ signal, runner: async argv => ({
+      stdout: ++loads === 1 ? await obsolete.promise : argv.includes("agent") ? AGENTS : WORKSPACES,
+      stderr: "", exitCode: 0,
+    }) }) }),
+  });
+  const outcome = run.then(value => value, error => error);
+  await until(() => loads > 0);
+  session.replace();
+  obsolete.reject(OLD_FAILURE);
+  await until(() => terminal.writes.some(write => write.includes("agents ›")));
+  expect(terminal.writes.join("")).not.toContain(STOP);
+  input.resolve(ENTER);
+  expect(await outcome).toBe("dispatched");
+  expect(terminal.rawModes).toEqual([true, false]);
+});
+
 test("requests after dispatch submission remain unacknowledged for a successor", async () => {
   const session = mailbox();
   const submission = deferred<string>();
