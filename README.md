@@ -165,13 +165,30 @@ the plugin `config.toml`:
 
 1. Open the plugin config directory with `herdr plugin config-dir herdr-pickers`.
 2. Set `placement = "overlay"` in `config.toml`.
-3. Invoke a picker action again.
+3. Close any active picker, then invoke a picker action again.
 
-Overlay is not 75% of the terminal. Reopen the picker after a config change.
+Overlay is not 75% of the terminal. Placement and keymap changes apply after
+the current surface closes, not during an in-place mode change.
 
-Each Herdr session permits one picker across all modes, workspaces, and
-placements. Repeated actions keep the existing picker and its search.
-Other Herdr sessions can open their own pickers.
+Each Herdr session permits one picker across all eight interactive modes,
+workspaces, and placements. A new action replaces the mode in the same surface
+and clears its search and selection. Repeating the current mode also resets it.
+The newest request received by the session wins. Other sessions remain independent.
+
+Replacement retains the previous frame until the next mode draws. Raw mode and
+mouse tracking remain active; the terminal does not switch screens between modes.
+Actions invoked from an overlay retain the original source context for repository
+scope. An action from another source uses that source's context.
+
+Obsolete discovery, ranking, refresh, and focus checks receive cancellation.
+Late results cannot replace the new mode or dispatch an old selection. A command
+already submitted to Herdr cannot be recalled. A request during dispatch or final
+teardown waits for one successor after ownership and surface removal are verified.
+Request delivery has a three-second timeout; uncertain ownership never permits a
+duplicate surface. A short mailbox check observes requests, not navigation catalogs.
+
+Native popup keyboard capture remains unchanged. Replacement works when Herdr
+invokes the action; it does not make host shortcuts pass through a modal popup.
 
 Popups block pane navigation. Overlays do not: navigation to another pane,
 tab, or workspace cancels the picker and keeps the new destination focused.
@@ -193,10 +210,10 @@ The top-right `✕` closes without dispatch. Cancellation is inert. Dispatch
 failures close the popup and surface as errors.
 
 Navigation pickers render immediately with a loading message, perform one
-initial catalog load, and then reload only on `Ctrl-r`. This keeps project
+initial catalog load for each mode request, and then reload only on `Ctrl-r`. This keeps project
 and Git worktree discovery from polling. Agent catalogs refresh every second
 and also support `Ctrl-r`. Empty navigation catalogs remain open and
-reloadable; empty agent catalogs do not open a popup.
+reloadable; an empty agent catalog closes the picker, including during replacement.
 
 Search uses only rendered group, identity, relation, badge, and detail text.
 Hidden paths, workspace ids, agent targets, and workspace agent status do
@@ -259,8 +276,10 @@ bun run typecheck
 bun run smoke   # PTY smoke against a disposable isolated Herdr runtime
 ```
 
-The smoke automates dispatch, toggling, reload, and teardown, but two
-behaviors only a human can verify: mouse click/double-click/wheel selection
+The smoke automates dispatch, toggling, reload, all-mode replacement, concurrent
+startup, dismissal requests, and teardown in isolated Herdr sessions. It verifies
+unchanged process and overlay pane identity, repository scope, and search reset.
+Two behaviors still need human verification: mouse click/double-click/wheel selection
 and visual fidelity in a real terminal emulator. Give both a quick pass in a
 disposable session before trusting a release.
 
@@ -278,6 +297,9 @@ before it can reach your terminal.
 - No `herdr-pickers.*` actions — reinstall or `herdr plugin link .` from a checkout.
 - No projects or worktrees — open a repository in Herdr or configure `[projects].roots`.
 - No agents — open an agent pane first.
+- Picker request delivery timed out — close the current picker, then retry.
+  Close active pickers before updating from a version without mode replacement.
+  If startup remains uncertain, follow the restart guidance below.
 - Picker startup cannot be verified — save active work, then restart the affected Herdr session.
   Ownership uses `picker-sessions.sqlite` in the plugin state directory.
   Do not delete this file while any picker is active.

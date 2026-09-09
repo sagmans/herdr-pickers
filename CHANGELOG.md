@@ -13,7 +13,9 @@ All notable user-facing changes to Herdr Pickers are recorded in this file.
 - Overlay rendering no longer waits for focus setup; native snapshot requests reduce acceptance delays.
 - Accepted selections keep their last frame through focus checks and dispatch instead of exposing an empty picker.
 - Large session snapshots no longer make overlays close immediately; focus events retain their smaller message limit.
-- Repeated or concurrent picker actions now keep one picker per Herdr session across modes and placements.
+- New picker actions replace the current mode in place and reset search. The newest session request wins across all eight modes and both placements.
+- Mode replacement cancels obsolete work without restoring a blank screen or dispatching stale selections. Repository actions retain their original source context.
+- Startup bursts and requests during dismissal converge on one owner or verified successor. Delivery times out rather than opening an uncertain duplicate.
 - Navigation away from an overlay cancels it without restoring the old focus or dispatching a selection.
 - Cancellation interrupts pending picker work. Overlay teardown now retains the last frame during the bounded close request before restoring terminal state.
 - Popup cleanup no longer risks closing a replacement popup.

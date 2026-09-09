@@ -1,10 +1,12 @@
 import { Database } from "bun:sqlite";
 import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { runPickerReplacementSmoke } from "./smoke-picker-replacement.ts";
 
 const OWNERSHIP_DATABASE_NAME = "picker-sessions.sqlite";
 const OWNERSHIP_DATABASE_SETUP = "PRAGMA busy_timeout = 2000";
 const OWNERSHIP_TABLE_QUERY = "SELECT session, token, opener, picker, placement, pane FROM owners";
+const REQUEST_QUERY = "SELECT mode, acknowledged FROM requests WHERE session = ?";
 const PICKER_PANE_LABEL = "Herdr Picker";
 const WORKSPACE_PICKER_PROMPT = "workspaces ›";
 const KEY_CTRL_C = "\u0003";
@@ -85,6 +87,7 @@ export async function runPickerLifecycleSmoke(options: PickerLifecycleSmokeOptio
   await runSingletonCase(options, databasePath, "popup");
   await runSingletonCase(options, databasePath, "overlay");
   await runOverlayNavigationCases(options, databasePath);
+  await runPickerReplacementSmoke(options, databasePath);
   await runIndependentSessionsCase(options, databasePath);
 }
 
@@ -116,7 +119,7 @@ async function runSingletonCase(
   });
   const retained = ownerForSession(databasePath, opened.owner.session);
   options.check(
-    `${placement} burst retains one picker owner and query`,
+    `${placement} burst retains one picker owner`,
     retained?.token === opened.owner.token && retained.picker === opened.owner.picker,
     retained ? `owner token ${retained.token}` : "owner missing",
   );
@@ -129,8 +132,22 @@ async function runSingletonCase(
     );
   }
 
+  const lastAction = options.primary.run(["plugin", "action", "invoke", `${PLUGIN_ID}.workspaces`]);
+  options.check(`${placement} final replacement action starts`, lastAction.code === 0);
+  await options.poll(`${placement} final replacement is acknowledged`, () => {
+    const database = new Database(databasePath, { readonly: true });
+    try {
+      database.exec(OWNERSHIP_DATABASE_SETUP);
+      const row = database.query<{ mode: string; acknowledged: string | null }, [string]>(
+        REQUEST_QUERY,
+      ).get(opened.owner.session);
+      return row?.mode === "workspaces" && row.acknowledged === opened.owner.token ? row.mode : undefined;
+    } finally { database.close(); }
+  });
+  // Request acknowledgement precedes catalog readiness; this fixture's load must finish before Enter.
+  await Bun.sleep(INPUT_SETTLE_MS);
   options.primary.input(KEY_ENTER);
-  await waitForWorkspaceFocus(options, options.primary, options.dispatchWorkspaceId, `${placement} retained query dispatches`);
+  await waitForWorkspaceFocus(options, options.primary, options.firstWorkspaceId, `${placement} replacement clears the previous query`);
   await waitForPickerExit(options, opened.owner, `${placement} burst picker child exits`);
   if (opened.paneId) await waitForPaneRemoval(options, options.primary, opened.paneId, "overlay burst picker pane closes");
 
