@@ -485,4 +485,3 @@ function findFile(root: string, name: string): string | undefined {
   }
   return undefined;
 }
-
