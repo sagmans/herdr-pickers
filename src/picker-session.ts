@@ -36,6 +36,10 @@ const DELETE_OWNER = "DELETE FROM owners WHERE session = ? AND token = ?";
 const CLAIM_OWNER = "UPDATE owners SET picker = ?, pane = ? WHERE session = ? AND token = ? AND picker IS NULL AND placement = ?";
 const UNCERTAIN_STARTUP = "Picker startup could not be verified. Restart this Herdr session before opening another picker.";
 
+export class PickerStartupUncertainError extends Error {
+  constructor() { super(UNCERTAIN_STARTUP); }
+}
+
 interface Owner {
   readonly token: string;
   readonly opener: number;
@@ -81,9 +85,9 @@ export class PickerSession {
     if (observed) {
       if (ownerAlive(observed)) return undefined;
       // An opener can die after submitting a request but before the child claims it.
-      if (observed.picker === null) throw new Error(UNCERTAIN_STARTUP);
+      if (observed.picker === null) throw new PickerStartupUncertainError();
       if (observed.placement === "overlay") {
-        if (!observed.pane) throw new Error(UNCERTAIN_STARTUP);
+        if (!observed.pane) throw new PickerStartupUncertainError();
         if (await paneExists(observed.pane)) return undefined;
       }
     }

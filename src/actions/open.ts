@@ -1,6 +1,6 @@
 import { Herdr } from "../client/herdr.ts";
 import { readPickerPaneIds } from "../client/types.ts";
-import { PICKER_TOKEN_ENV, PickerSession } from "../picker-session.ts";
+import { PICKER_TOKEN_ENV, PickerSession, PickerStartupUncertainError } from "../picker-session.ts";
 import { PICKER_REQUEST_POLL_MS, PICKER_REQUEST_TIMEOUT_MS } from "../picker-request.ts";
 import { CURRENT_CONTEXT_ENV, currentContextFromEnv } from "../catalog.ts";
 import { loadConfig, type PickerPlacement } from "../config/config.ts";
@@ -66,6 +66,10 @@ export async function openPicker(
             const panes = await client.json(["pane", "list"]);
             cancellation.signal.throwIfAborted();
             return readPickerPaneIds(panes).includes(paneId);
+          }).catch(error => {
+            // A submitted child can claim after its opener exits; waiting never authorizes a duplicate.
+            if (error instanceof PickerStartupUncertainError) return undefined;
+            throw error;
           });
           cancellation.signal.throwIfAborted();
           if (token) {

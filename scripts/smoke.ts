@@ -424,12 +424,16 @@ async function main(): Promise<void> {
   });
 
   for (const [label, sessionName] of [["primary", SESSION_NAME], ["secondary", SECOND_SESSION_NAME]] as const) {
-    const logs = cliFor(sessionName, ["plugin", "log", "list"]);
     let pluginEntries: Array<Record<string, unknown> & { status?: string }> = [];
-    try {
-      const parsed = JSON.parse(logs.stdout) as { result?: { logs?: Array<Record<string, unknown> & { status?: string }> } };
-      pluginEntries = parsed.result?.logs ?? [];
-    } catch { pluginEntries = [{ error: "invalid plugin log response" }]; }
+    // Focus events can outlive picker teardown; running hooks are not failed commands.
+    await poll(`${label} plugin commands settle`, () => {
+      const logs = cliFor(sessionName, ["plugin", "log", "list"]);
+      try {
+        const parsed = JSON.parse(logs.stdout) as { result?: { logs?: Array<Record<string, unknown> & { status?: string }> } };
+        pluginEntries = parsed.result?.logs ?? [];
+      } catch { pluginEntries = [{ error: "invalid plugin log response" }]; }
+      return pluginEntries.some(entry => entry.status === "running" || entry.status === "queued") ? undefined : "settled";
+    });
     const failedEntries = pluginEntries.filter((entry) => entry.status !== "succeeded");
     check(`every ${label} plugin command succeeded`, failedEntries.length === 0, JSON.stringify(failedEntries));
   }

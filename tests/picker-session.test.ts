@@ -25,6 +25,7 @@ const REQUEST_MODE = "request";
 const DEADLINE_PROBE_MS = 4_000;
 const DEADLINE_NOT_ENFORCED = "deadline not enforced";
 const MAX_TEST_CONTEXT = 64 * 1024;
+const LATE_CLAIM_MS = 50;
 const workers: Bun.Subprocess<"pipe", "pipe", "pipe">[] = [];
 const roots: string[] = [];
 const servers: Server[] = [];
@@ -98,18 +99,20 @@ test("request storage is bounded and keeps genuine new source context", async ()
 test("concurrent startup actions deliver the newest mode to one reserved child", async () => {
   const { session, env, root } = await fixture();
   let launch!: () => void;
+  let began!: () => void;
+  const launching = new Promise<void>(resolve => { began = resolve; });
   let opens = 0;
   const herdr = new Herdr({ runner: async argv => {
     opens++;
     const owner = argv.find(value => value.startsWith("HERDR_PICKERS_SESSION_TOKEN="))!.split("=")[1]!;
-    await new Promise<void>(resolve => { launch = resolve; });
+    await new Promise<void>(resolve => { launch = resolve; began(); });
     session.claim(owner);
     session.acknowledge(session.latestRequest()!.token, owner);
     return { stdout: OPEN_RESULT, stderr: "", exitCode: 0 };
   } });
   const actionEnv = { ...env, HERDR_PLUGIN_CONFIG_DIR: root, HERDR_PLUGIN_ID: PLUGIN_ID };
   const first = openPicker("agents", actionEnv, herdr);
-  await Promise.resolve();
+  await launching;
   const second = openPicker("all", actionEnv, herdr);
   const last = openPicker("worktrees", actionEnv, herdr);
   launch();
@@ -147,6 +150,22 @@ test("a request during teardown waits for process death and pane removal", async
   await run;
   expect(opens).toBe(1);
   expect(session.latestRequest()?.mode).toBe("worktrees");
+});
+
+test("delivery waits for a delayed child claim after its opener exits", async () => {
+  const { env, root, session } = await fixture();
+  const old = await worker(env, "unclaimed");
+  old.proc.stdin.end();
+  await old.proc.exited;
+  let opens = 0;
+  const herdr = new Herdr({ runner: async () => { opens++; return { stdout: OPEN_RESULT, stderr: "", exitCode: 0 }; } });
+  const run = openPicker("worktrees", { ...env, HERDR_PLUGIN_CONFIG_DIR: root, HERDR_PLUGIN_ID: PLUGIN_ID }, herdr);
+  const outcome = run.then(() => "delivered", error => String(error));
+  await Bun.sleep(LATE_CLAIM_MS);
+  expect(session.claim(old.token!)).toBe(true);
+  expect(session.acknowledge(session.latestRequest()!.token, old.token!)).toBe(true);
+  expect(await outcome).toBe("delivered");
+  expect(opens).toBe(0);
 });
 
 test("delivery deadline also bounds a stalled Herdr open command", async () => {
