@@ -6,7 +6,7 @@ import { runPickerReplacementSmoke } from "./smoke-picker-replacement.ts";
 const OWNERSHIP_DATABASE_NAME = "picker-sessions.sqlite";
 const OWNERSHIP_DATABASE_SETUP = "PRAGMA busy_timeout = 2000";
 const OWNERSHIP_TABLE_QUERY = "SELECT session, token, opener, picker, placement, pane FROM owners";
-const REQUEST_QUERY = "SELECT mode, acknowledged FROM requests WHERE session = ?";
+const REQUEST_QUERY = "SELECT token, mode, acknowledged FROM requests WHERE session = ?";
 const PICKER_PANE_LABEL = "Herdr Picker";
 const WORKSPACE_PICKER_PROMPT = "workspaces ›";
 const KEY_CTRL_C = "\u0003";
@@ -60,6 +60,12 @@ interface OwnerRow {
   readonly picker: number | null;
   readonly placement: PickerPlacement;
   readonly pane: string | null;
+}
+
+interface RequestRow {
+  readonly token: string;
+  readonly mode: string;
+  readonly acknowledged: string | null;
 }
 
 interface PaneRow {
@@ -132,17 +138,12 @@ async function runSingletonCase(
     );
   }
 
+  const previousRequest = readRequest(databasePath, opened.owner.session)?.token;
   const lastAction = options.primary.run(["plugin", "action", "invoke", `${PLUGIN_ID}.workspaces`]);
   options.check(`${placement} final replacement action starts`, lastAction.code === 0);
   await options.poll(`${placement} final replacement is acknowledged`, () => {
-    const database = new Database(databasePath, { readonly: true });
-    try {
-      database.exec(OWNERSHIP_DATABASE_SETUP);
-      const row = database.query<{ mode: string; acknowledged: string | null }, [string]>(
-        REQUEST_QUERY,
-      ).get(opened.owner.session);
-      return row?.mode === "workspaces" && row.acknowledged === opened.owner.token ? row.mode : undefined;
-    } finally { database.close(); }
+    const row = readRequest(databasePath, opened.owner.session);
+    return row?.mode === "workspaces" && row.token !== previousRequest && row.acknowledged === opened.owner.token ? row.mode : undefined;
   });
   // Request acknowledgement precedes catalog readiness; this fixture's load must finish before Enter.
   await Bun.sleep(INPUT_SETTLE_MS);
@@ -290,6 +291,14 @@ async function openPicker(
 function writePlacement(options: PickerLifecycleSmokeOptions, placement: PickerPlacement): void {
   const prefix = placement === "overlay" ? 'placement = "overlay"\n\n' : "";
   writeFileSync(join(options.pluginConfigDir, CONFIG_FILE_NAME), `${prefix}${options.baseConfig}`, "utf8");
+}
+
+function readRequest(databasePath: string, session: string): RequestRow | null {
+  const database = new Database(databasePath, { readonly: true });
+  try {
+    database.exec(OWNERSHIP_DATABASE_SETUP);
+    return database.query<RequestRow, [string]>(REQUEST_QUERY).get(session);
+  } finally { database.close(); }
 }
 
 function readOwners(databasePath: string): OwnerRow[] {

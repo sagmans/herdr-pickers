@@ -141,8 +141,9 @@ export async function runPickerReplacementSmoke(options: PickerLifecycleSmokeOpt
     const burst = await Promise.all(STARTUP_MODES.map(mode => session.runAsync(["plugin", "action", "invoke", `${PLUGIN}.${mode}`])));
     check(`${placement} startup burst invokes`, burst.every(result => result.code === 0));
     const started = await waitOwner();
+    const startupRequest = request(started)?.token;
     invoke("workspaces");
-    await waitAdopted(started, "workspaces");
+    await waitAdopted(started, "workspaces", startupRequest);
     await Bun.sleep(READY_MS);
     const previous = request(started)?.token;
     // Back-to-back client input and action overlap dismissal without changing the plugin's timing.
