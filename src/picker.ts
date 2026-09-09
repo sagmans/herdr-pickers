@@ -42,6 +42,7 @@ export type PickerRunner = (options: TerminalPickerOptions) => Promise<PickerIte
 export interface PickerRuntime {
   readonly signal?: AbortSignal | undefined;
   readonly beforeDispatch?: (() => void | Promise<void>) | undefined;
+  readonly beforeCleanup?: (() => Promise<void>) | undefined;
   readonly herdr: Herdr;
   readonly env?: Record<string, string | undefined> | undefined;
   readonly gitRunner?: CommandRunner | undefined;
@@ -118,6 +119,7 @@ export async function runAgentPicker(mode: AgentMode, runtime: PickerRuntime): P
   await picker({
     prompt,
     signal: runtime.signal,
+    beforeCleanup: runtime.beforeCleanup,
     noun: AGENT_NOUN,
     live: true,
     emptyMessage: NO_AGENTS_MESSAGE,
@@ -154,6 +156,7 @@ async function runNavigationPicker(mode: NavigationMode, runtime: PickerRuntime)
   await picker({
     prompt: presentation.prompt,
     signal: runtime.signal,
+    beforeCleanup: runtime.beforeCleanup,
     noun: presentation.noun,
     emptyMessage: presentation.emptyMessage,
     items: [],

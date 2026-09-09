@@ -5,6 +5,7 @@ const PANE_ID_ENV = "HERDR_PANE_ID";
 const OVERLAY_CLOSE_REQUEST_ID = "herdr-pickers:overlay-close";
 const OVERLAY_CLOSE_METHOD = "plugin.pane.close";
 const OVERLAY_CLOSE_TIMEOUT_MS = 100;
+const NEWLINE_BYTE = 0x0a;
 
 export type SocketWriter = (path: string, payload: string) => Promise<void>;
 
@@ -46,12 +47,19 @@ async function writeSocket(path: string, payload: string): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const socket = createConnection(path);
     socket.unref();
-    socket.once("error", () => reject(new Error("failed to close the picker popup")));
-    socket.once("connect", () => {
-      socket.end(payload, () => {
-        socket.destroy();
-        resolve();
-      });
+    const finish = (error?: Error): void => {
+      clearTimeout(timeout);
+      socket.destroy();
+      if (error) reject(error);
+      else resolve();
+    };
+    const timeout = setTimeout(finish, OVERLAY_CLOSE_TIMEOUT_MS);
+    socket.once("error", () => finish(new Error("failed to close the picker popup")));
+    // A flushed request is not a removed pane; retain its frame until Herdr replies.
+    socket.on("data", (chunk: Buffer) => {
+      if (chunk.includes(NEWLINE_BYTE)) finish();
     });
+    socket.once("end", () => finish());
+    socket.once("connect", () => { socket.write(payload); });
   });
 }

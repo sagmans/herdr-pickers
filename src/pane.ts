@@ -27,7 +27,7 @@ async function main(): Promise<void> {
     // A rejected child has no authority to close any existing surface.
     if (!token || !session.claim(token, env.HERDR_PANE_ID)) throw new Error("Picker reservation is missing or stale.");
     for (const { signal, handler } of handlers) process.on(signal, handler);
-    await withPopupClose(async () => {
+    await withPopupClose(async beforeCleanup => {
       const mode = parseMode(env[MODE_ENV]);
       const config = loadConfig(env);
       if (lifecycle.signal.aborted) return;
@@ -43,6 +43,7 @@ async function main(): Promise<void> {
       const signal = lifecycle.signal;
       const outcome = await runPicker(mode, {
         herdr: new Herdr({ signal }), env, config, signal,
+        beforeCleanup,
         beforeDispatch: async () => {
           await focusReady;
           signal.throwIfAborted();
@@ -63,19 +64,25 @@ async function main(): Promise<void> {
   }
 }
 
-export async function withPopupClose<T>(work: () => Promise<T>, close: () => Promise<void>): Promise<T> {
+export async function withPopupClose<T>(work: (beforeCleanup: () => Promise<void>) => Promise<T>, close: () => Promise<void>): Promise<T> {
+  let closing: Promise<void> | undefined;
+  const closeOnce = () => closing ??= Promise.resolve().then(close);
+  const beforeCleanup = async (): Promise<void> => {
+    // Report close errors outside terminal cleanup so the original picker error survives.
+    try { await closeOnce(); } catch {}
+  };
   let result: T;
   try {
-    result = await work();
+    result = await work(beforeCleanup);
   } catch (error) {
     try {
-      await close();
+      await closeOnce();
     } catch (closeError) {
       throw new AggregateError([error, closeError], COMBINED_FAILURE_MESSAGE);
     }
     throw error;
   }
-  await close();
+  await closeOnce();
   return result;
 }
 

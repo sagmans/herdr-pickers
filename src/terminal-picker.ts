@@ -72,6 +72,7 @@ const SYSTEM_TIMERS: PickerTimers = {
 export interface TerminalPickerOptions extends PickerRows {
   readonly signal?: AbortSignal | undefined;
   readonly onAccept?: ((selection: PickerItem) => Promise<void>) | undefined;
+  readonly beforeCleanup?: (() => Promise<void>) | undefined;
   readonly prompt: string;
   readonly noun: string;
   readonly live?: boolean | undefined;
@@ -344,12 +345,18 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
     throw error;
   } finally {
     options.signal?.removeEventListener("abort", abort);
-    cleanup();
-    // Escape timeout leaves a pending read. Awaiting return() hung Escape while
-    // Ctrl-C had no pending read and still dismissed.
+    // Restoring the blank primary screen before surface removal exposes an empty pane.
+    accepting = true;
+    rankRevision++;
     try {
-      void iterator?.return?.();
-    } catch {}
+      await options.beforeCleanup?.();
+    } finally {
+      cleanup();
+      // A pending Escape read must not delay teardown.
+      try {
+        void iterator?.return?.();
+      } catch {}
+    }
   }
 }
 
