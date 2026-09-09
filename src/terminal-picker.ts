@@ -48,8 +48,8 @@ const CURSOR_POSITION_SUFFIX = "H";
 const CSI_PREFIX = "\x1b[";
 const FIRST_TERMINAL_CELL = 1;
 const ESCAPE_INPUT_EVENT: InputEvent = { type: "escape" };
-const TERMINAL_START = `${ALTERNATE_SCREEN_ENTER}${LINE_WRAP_DISABLE}${MOUSE_TRACKING_ENABLE}${SGR_MOUSE_ENABLE}`;
-const TERMINAL_STOP = `${SGR_MOUSE_DISABLE}${MOUSE_TRACKING_DISABLE}${LINE_WRAP_ENABLE}${CURSOR_SHOW}${ALTERNATE_SCREEN_EXIT}`;
+export const TERMINAL_START = `${ALTERNATE_SCREEN_ENTER}${LINE_WRAP_DISABLE}${MOUSE_TRACKING_ENABLE}${SGR_MOUSE_ENABLE}`;
+export const TERMINAL_STOP = `${SGR_MOUSE_DISABLE}${MOUSE_TRACKING_DISABLE}${LINE_WRAP_ENABLE}${CURSOR_SHOW}${ALTERNATE_SCREEN_EXIT}`;
 
 export interface TerminalAdapter {
   readonly input: AsyncIterable<string | Uint8Array>;
@@ -73,6 +73,8 @@ export interface TerminalPickerOptions extends PickerRows {
   readonly signal?: AbortSignal | undefined;
   readonly onAccept?: ((selection: PickerItem) => Promise<void>) | undefined;
   readonly beforeCleanup?: (() => Promise<void>) | undefined;
+  readonly sharedTerminal?: boolean;
+  readonly inputState?: { remainder: string };
   readonly prompt: string;
   readonly noun: string;
   readonly live?: boolean | undefined;
@@ -107,7 +109,8 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
     selected: initialSelection(sourceItems, focusedId),
     scrollTop: 0,
   }, terminal.getViewport());
-  let pending = "";
+  let pending = options.inputState?.remainder ?? "";
+  let discardFragment = pending.length > 0;
   const decoder = new TextDecoder();
   let rawMode = false;
   let removeResizeListener = (): void => {};
@@ -137,7 +140,7 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
       removeResizeListener();
     } catch {}
     try {
-      terminal.write(TERMINAL_STOP);
+      if (!options.sharedTerminal) terminal.write(TERMINAL_STOP);
     } catch {}
     if (rawMode) {
       try {
@@ -287,9 +290,11 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
   const abort = (): void => failFromTimer(options.signal?.reason);
   options.signal?.addEventListener("abort", abort, { once: true });
   try {
-    terminal.setRawMode(true);
-    rawMode = true;
-    terminal.write(TERMINAL_START);
+    if (!options.sharedTerminal) {
+      terminal.setRawMode(true);
+      rawMode = true;
+      terminal.write(TERMINAL_START);
+    }
     removeResizeListener = terminal.onResize(() => {
       state = fitSelection(state, terminal.getViewport());
       draw();
@@ -317,6 +322,7 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
         if (raced.type === "timeout") {
           if (pending !== ESCAPE_KEY_SEQUENCE) continue;
           pending = "";
+          if (discardFragment) { discardFragment = false; continue; }
           const outcome = await Promise.race([handleEvents([ESCAPE_INPUT_EVENT]), timerFailure]);
           if (outcome.done) return outcome.selection;
           continue;
@@ -326,7 +332,7 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
         input = await Promise.race([nextInput, timerFailure]);
       }
       if (input.done) {
-        if (pending === ESCAPE_KEY_SEQUENCE) {
+        if (pending === ESCAPE_KEY_SEQUENCE && !discardFragment) {
           const outcome = await Promise.race([handleEvents([ESCAPE_INPUT_EVENT]), timerFailure]);
           if (outcome.done) return outcome.selection;
         }
@@ -336,7 +342,10 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
       pending += typeof chunk === "string" ? chunk : decoder.decode(chunk, { stream: true });
       const parsed = parseInput(pending, keymap);
       pending = parsed.remainder;
-      const outcome = await Promise.race([handleEvents(parsed.events), timerFailure]);
+      // A sequence begun in an abandoned mode cannot accept or edit its successor.
+      const events = discardFragment ? [] : parsed.events;
+      if (discardFragment) discardFragment = pending.length > 0;
+      const outcome = await Promise.race([handleEvents(events), timerFailure]);
       if (outcome.done) return outcome.selection;
       nextInput = iterator.next();
     }
@@ -345,6 +354,7 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
     throw error;
   } finally {
     options.signal?.removeEventListener("abort", abort);
+    if (options.inputState) options.inputState.remainder = pending;
     // Restoring the blank primary screen before surface removal exposes an empty pane.
     accepting = true;
     rankRevision++;
@@ -360,7 +370,7 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
   }
 }
 
-function systemTerminal(): TerminalAdapter {
+export function systemTerminal(): TerminalAdapter {
   return {
     input: process.stdin,
     write: (value) => {

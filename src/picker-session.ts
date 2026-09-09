@@ -2,6 +2,9 @@ import { Database } from "bun:sqlite";
 import { closeSync, constants, fstatSync, mkdirSync, openSync, realpathSync, lstatSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
+import type { CurrentContext } from "./catalog.ts";
+import type { PickerMode } from "./picker.ts";
+import { encodeRequestContext, readPickerRequest, type PickerRequest } from "./picker-request.ts";
 import type { PickerPlacement } from "./config/config.ts";
 import { hasErrorCode } from "./util/objects.ts";
 
@@ -17,8 +20,17 @@ const SCHEMA = `
     session TEXT PRIMARY KEY, token TEXT NOT NULL, opener INTEGER NOT NULL,
     picker INTEGER, placement TEXT NOT NULL CHECK (placement IN ('popup', 'overlay')), pane TEXT
   );
+  CREATE TABLE IF NOT EXISTS requests (
+    session TEXT PRIMARY KEY, token TEXT NOT NULL, mode TEXT NOT NULL,
+    context TEXT NOT NULL, acknowledged TEXT
+  );
 `;
 const READ_OWNER = "SELECT * FROM owners WHERE session = ?";
+const READ_REQUEST = "SELECT * FROM requests WHERE session = ?";
+const WRITE_REQUEST = `INSERT INTO requests (session, token, mode, context) VALUES (?, ?, ?, ?)
+  ON CONFLICT(session) DO UPDATE SET token=excluded.token, mode=excluded.mode, context=excluded.context, acknowledged=NULL`;
+const ACK_REQUEST = `UPDATE requests SET acknowledged=? WHERE session=? AND token=?
+  AND EXISTS (SELECT 1 FROM owners WHERE session=? AND token=? AND picker=?)`;
 const INSERT_OWNER = "INSERT INTO owners (session, token, opener, placement) VALUES (?, ?, ?, ?)";
 const DELETE_OWNER = "DELETE FROM owners WHERE session = ? AND token = ?";
 const CLAIM_OWNER = "UPDATE owners SET picker = ?, pane = ? WHERE session = ? AND token = ? AND picker IS NULL AND placement = ?";
@@ -87,6 +99,27 @@ export class PickerSession {
       this.database.query(INSERT_OWNER).run(this.session, token, process.pid, placement);
       return token;
     }).immediate();
+  }
+
+  request(mode: PickerMode, context: CurrentContext): PickerRequest {
+    return this.database.transaction(() => {
+      const owner = this.read();
+      const previous = this.latestRequest();
+      // Actions invoked from an overlay must not turn the plugin's pane into the source repository.
+      const source = owner?.pane && context.paneId === owner.pane && previous ? previous.context : context;
+      const token = crypto.randomUUID();
+      this.database.query(WRITE_REQUEST).run(this.session, token, mode, encodeRequestContext(source));
+      return this.latestRequest()!;
+    }).immediate();
+  }
+
+  latestRequest(): PickerRequest | undefined {
+    const row = this.database.query(READ_REQUEST).get(this.session);
+    return row ? readPickerRequest(row) : undefined;
+  }
+
+  acknowledge(request: string, owner: string): boolean {
+    return this.database.query(ACK_REQUEST).run(owner, this.session, request, this.session, owner, process.pid).changes === 1;
   }
 
   claim(token: string, paneId?: string): boolean {

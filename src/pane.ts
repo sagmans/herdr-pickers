@@ -3,11 +3,10 @@ import { closePickerSurface } from "./client/popup.ts";
 import { watchPickerFocus } from "./client/picker-focus.ts";
 import { PICKER_TOKEN_ENV, PickerSession } from "./picker-session.ts";
 import { loadConfig } from "./config/config.ts";
-import { parseMode, runPicker } from "./picker.ts";
+import { runPickerLoop } from "./picker-loop.ts";
 import { color, dim } from "./style.ts";
 import { boundedTerminalBlock } from "./util/terminal-text.ts";
 
-const MODE_ENV = "HERDR_PICKERS_MODE";
 const EXIT_SIGNALS = ["SIGHUP", "SIGINT", "SIGTERM"] as const;
 const COMBINED_FAILURE_MESSAGE = "Picker failed and its popup could not be closed.";
 
@@ -15,8 +14,6 @@ async function main(): Promise<void> {
   const env = process.env;
   const session = new PickerSession(env);
   const lifecycle = new AbortController();
-  let watch: Awaited<ReturnType<typeof watchPickerFocus>> | undefined;
-  let focusReady: Promise<void> | undefined;
   let exitSignal: (typeof EXIT_SIGNALS)[number] | undefined;
   const handlers = EXIT_SIGNALS.map(signal => ({
     signal,
@@ -28,36 +25,37 @@ async function main(): Promise<void> {
     if (!token || !session.claim(token, env.HERDR_PANE_ID)) throw new Error("Picker reservation is missing or stale.");
     for (const { signal, handler } of handlers) process.on(signal, handler);
     await withPopupClose(async beforeCleanup => {
-      const mode = parseMode(env[MODE_ENV]);
       const config = loadConfig(env);
-      if (lifecycle.signal.aborted) return;
-      if (env.HERDR_PANE_ID) {
-        // Rendering need not wait for observation, but acceptance must never outrun it.
-        focusReady = watchPickerFocus(env.HERDR_SOCKET_PATH!, env.HERDR_PANE_ID, lifecycle.signal).then(watcher => {
-          watch = watcher;
-          const cancel = () => lifecycle.abort(watcher.signal.reason);
-          watcher.signal.addEventListener("abort", cancel, { once: true });
-          if (watcher.signal.aborted) cancel();
-        }).catch(error => { lifecycle.abort(error); });
-      }
-      const signal = lifecycle.signal;
-      const outcome = await runPicker(mode, {
-        herdr: new Herdr({ signal }), env, config, signal,
-        beforeCleanup,
-        beforeDispatch: async () => {
-          await focusReady;
-          signal.throwIfAborted();
-          await watch?.prepareDispatch();
+      const outcome = await runPickerLoop(session, token, {
+        env, signal: lifecycle.signal, beforeCleanup,
+        createRuntime: signal => {
+          let watch: Awaited<ReturnType<typeof watchPickerFocus>> | undefined;
+          // Every mode needs a fresh observer because acceptance stops its previous observer.
+          const focusReady = env.HERDR_PANE_ID
+            ? watchPickerFocus(env.HERDR_SOCKET_PATH!, env.HERDR_PANE_ID, signal).then(watcher => {
+              watch = watcher;
+              const cancel = () => { if (!signal.aborted) lifecycle.abort(watcher.signal.reason); };
+              watcher.signal.addEventListener("abort", cancel, { once: true });
+              if (watcher.signal.aborted) cancel();
+            }).catch(error => { if (!signal.aborted) lifecycle.abort(error); })
+            : undefined;
+          return {
+            herdr: new Herdr({ signal }), config,
+            beforeDispatch: async () => {
+              await focusReady;
+              signal.throwIfAborted();
+              await watch?.prepareDispatch();
+            },
+            dispose: async () => { watch?.stop(); await focusReady; watch?.stop(); },
+          };
         },
       });
       if (outcome === "no-agents") {
-        console.log(dim(mode === "repo-agents" ? "No repository agents found." : "No agents found."));
+        console.log(dim(session.latestRequest()?.mode === "repo-agents" ? "No repository agents found." : "No agents found."));
       }
     }, () => closePickerSurface(env));
   } finally {
-    watch?.stop();
     lifecycle.abort();
-    await focusReady;
     for (const { signal, handler } of handlers) process.off(signal, handler);
     session.close();
     if (exitSignal) process.kill(process.pid, exitSignal);

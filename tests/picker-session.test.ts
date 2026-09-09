@@ -21,6 +21,10 @@ const ALIAS_NAME = "alias";
 const DATABASE_NAME = "picker-sessions.sqlite";
 const SENTINEL_NAME = "sentinel";
 const SENTINEL_CONTENT = "must remain unchanged";
+const REQUEST_MODE = "request";
+const DEADLINE_PROBE_MS = 4_000;
+const DEADLINE_NOT_ENFORCED = "deadline not enforced";
+const MAX_TEST_CONTEXT = 64 * 1024;
 const workers: Bun.Subprocess<"pipe", "pipe", "pipe">[] = [];
 const roots: string[] = [];
 const servers: Server[] = [];
@@ -46,18 +50,119 @@ async function fixture() {
   return { root, env, session };
 }
 
-test("shared action entrypoint ignores another mode while reserved", async () => {
-  const { env, root } = await fixture();
+test("shared action entrypoint forwards replacement to the live owner", async () => {
+  const { env, root, session } = await fixture();
   const commands: string[][] = [];
+  let owner!: string;
   const herdr = new Herdr({ runner: async argv => {
     commands.push([...argv]);
+    owner = argv.find(value => value.startsWith("HERDR_PICKERS_SESSION_TOKEN="))!.split("=")[1]!;
+    session.claim(owner);
+    session.acknowledge(session.latestRequest()!.token, owner);
     return { stdout: OPEN_RESULT, stderr: "", exitCode: 0 };
   } });
   const actionEnv = { ...env, HERDR_PLUGIN_CONFIG_DIR: root, HERDR_PLUGIN_ID: PLUGIN_ID };
   await openPicker("workspaces", actionEnv, herdr);
-  await openPicker("agents", actionEnv, herdr);
+  const replacement = openPicker("agents", actionEnv, herdr);
+  expect(session.latestRequest()?.mode).toBe("agents");
+  session.acknowledge(session.latestRequest()!.token, owner);
+  await replacement;
   expect(commands).toHaveLength(1);
   expect(commands[0]?.some(value => value.startsWith("HERDR_PICKERS_SESSION_TOKEN="))).toBe(true);
+});
+
+test("new requests replace the mailbox and reject stale acknowledgements", async () => {
+  const { session } = await fixture();
+  const owner = await session.reserve("overlay", async () => false);
+  session.claim(owner!, PANE_ID);
+  const first = session.request("agents", { paneId: "w1:p1", cwd: "/source" });
+  const latest = session.request("worktrees", { paneId: PANE_ID, cwd: "/plugin" });
+  expect(session.latestRequest()?.token).toBe(latest.token);
+  expect(session.latestRequest()?.context).toEqual(first.context);
+  expect(session.acknowledge(first.token, owner!)).toBe(false);
+  expect(session.acknowledge(latest.token, STALE_TOKEN)).toBe(false);
+  expect(session.acknowledge(latest.token, owner!)).toBe(true);
+  expect(session.latestRequest()?.acknowledgedBy).toBe(owner);
+  const repeat = session.request("worktrees", { paneId: PANE_ID });
+  expect(repeat.token).not.toBe(latest.token);
+  expect(repeat.acknowledgedBy).toBeNull();
+});
+
+test("request storage is bounded and keeps genuine new source context", async () => {
+  const { session } = await fixture();
+  session.request("agents", { cwd: "/one" });
+  expect(session.request("worktrees", { cwd: "/two" }).context.cwd).toBe("/two");
+  expect(() => session.request("all", { cwd: "x".repeat(MAX_TEST_CONTEXT) })).toThrow();
+});
+
+test("concurrent startup actions deliver the newest mode to one reserved child", async () => {
+  const { session, env, root } = await fixture();
+  let launch!: () => void;
+  let opens = 0;
+  const herdr = new Herdr({ runner: async argv => {
+    opens++;
+    const owner = argv.find(value => value.startsWith("HERDR_PICKERS_SESSION_TOKEN="))!.split("=")[1]!;
+    await new Promise<void>(resolve => { launch = resolve; });
+    session.claim(owner);
+    session.acknowledge(session.latestRequest()!.token, owner);
+    return { stdout: OPEN_RESULT, stderr: "", exitCode: 0 };
+  } });
+  const actionEnv = { ...env, HERDR_PLUGIN_CONFIG_DIR: root, HERDR_PLUGIN_ID: PLUGIN_ID };
+  const first = openPicker("agents", actionEnv, herdr);
+  await Promise.resolve();
+  const second = openPicker("all", actionEnv, herdr);
+  const last = openPicker("worktrees", actionEnv, herdr);
+  launch();
+  await Promise.all([first, second, last]);
+  expect(opens).toBe(1);
+  expect(session.latestRequest()?.mode).toBe("worktrees");
+  expect(session.latestRequest()?.acknowledgedBy).toBeString();
+});
+
+test("a request during teardown waits for process death and pane removal", async () => {
+  const { session, env, root } = await fixture();
+  const old = await worker(env, "overlay");
+  let panePresent = true;
+  let probed!: () => void;
+  const checked = new Promise<void>(resolve => { probed = resolve; });
+  let opens = 0;
+  const herdr = new Herdr({ runner: async argv => {
+    if (argv.includes("list")) {
+      probed();
+      return { stdout: JSON.stringify({ result: { panes: panePresent ? [{ pane_id: PANE_ID }] : [] } }), stderr: "", exitCode: 0 };
+    }
+    opens++;
+    const token = argv.find(value => value.startsWith("HERDR_PICKERS_SESSION_TOKEN="))!.split("=")[1]!;
+    session.claim(token);
+    session.acknowledge(session.latestRequest()!.token, token);
+    return { stdout: OPEN_RESULT, stderr: "", exitCode: 0 };
+  } });
+  const run = openPicker("worktrees", { ...env, HERDR_PLUGIN_CONFIG_DIR: root, HERDR_PLUGIN_ID: PLUGIN_ID }, herdr);
+  expect(opens).toBe(0);
+  old.proc.stdin.end();
+  await old.proc.exited;
+  await checked;
+  expect(opens).toBe(0);
+  panePresent = false;
+  await run;
+  expect(opens).toBe(1);
+  expect(session.latestRequest()?.mode).toBe("worktrees");
+});
+
+test("delivery deadline also bounds a stalled Herdr open command", async () => {
+  const { env, root } = await fixture();
+  let finish!: () => void;
+  const herdr = new Herdr({ runner: async () => {
+    await new Promise<void>(resolve => { finish = resolve; });
+    return { stdout: OPEN_RESULT, stderr: "", exitCode: 0 };
+  } });
+  const run = openPicker("agents", { ...env, HERDR_PLUGIN_CONFIG_DIR: root, HERDR_PLUGIN_ID: PLUGIN_ID }, herdr);
+  const observed = run.then(() => "delivered", error => String(error));
+  const outcome = await Promise.race([observed, Bun.sleep(DEADLINE_PROBE_MS).then(() => DEADLINE_NOT_ENFORCED)]);
+  finish();
+  await observed;
+  expect(outcome).not.toBe(DEADLINE_NOT_ENFORCED);
+  expect(outcome).toContain("deadline");
 });
 
 test("forwards the exact reserved generation to the pane", () => {
@@ -94,6 +199,11 @@ test("keeps sessions independent with shared plugin storage", async () => {
   sessions.push(other);
   expect(await session.reserve("popup", async () => false)).toBeString();
   expect(await other.reserve("overlay", async () => false)).toBeString();
+  const first = session.request("agents", {});
+  const second = other.request("worktrees", {});
+  expect(session.latestRequest()?.token).toBe(first.token);
+  expect(other.latestRequest()?.token).toBe(second.token);
+  expect(session.acknowledge(second.token, STALE_TOKEN)).toBe(false);
 });
 
 test("directory aliases cannot bypass session identity", async () => {
@@ -153,6 +263,17 @@ async function worker(env: Record<string, string>, mode = "popup") {
   const result = JSON.parse(new TextDecoder().decode(chunk.value)) as { token: string | null; pid: number };
   return { proc, ...result };
 }
+
+test("multiple request processes share one latest-generation mailbox", async () => {
+  const { session, env } = await fixture();
+  const requests = await Promise.all(Array.from({ length: WORKER_COUNT }, () => worker(env, REQUEST_MODE)));
+  expect(requests.every(request => typeof request.token === "string")).toBe(true);
+  expect(new Set(requests.map(request => request.token)).size).toBe(WORKER_COUNT);
+  expect(requests.map(request => request.token)).toContain(session.latestRequest()?.token ?? null);
+  const last = session.request("worktrees", {});
+  for (const request of requests) { request.proc.stdin.end(); await request.proc.exited; }
+  expect(session.latestRequest()?.token).toBe(last.token);
+});
 
 test("concurrent processes converge on one owner and recover after exit", async () => {
   const { env, session } = await fixture();
