@@ -224,8 +224,8 @@ async function main(): Promise<void> {
   const repo = join(fixtureRoot, "sample-repo");
   mkdirSync(repo, { recursive: true });
   git(repo, "init", "-q", "-b", FIXTURE_DEFAULT_BRANCH);
-  // Reusing a real signed history avoids weakening Git policy in the fixture.
-  git(repo, "fetch", "-q", "--no-tags", PLUGIN_ROOT, "HEAD");
+  // Reusing signed history avoids weakening Git policy; CI's shallow checkout must remain fetchable.
+  git(repo, "fetch", "-q", "--no-tags", "--update-shallow", PLUGIN_ROOT, "HEAD");
   git(repo, "checkout", "-q", "-B", FIXTURE_DEFAULT_BRANCH, "FETCH_HEAD");
   git(repo, "worktree", "add", "-q", join(fixtureRoot, "sample-repo-wt"), "-b", FIXTURE_WORKTREE_BRANCH);
 
