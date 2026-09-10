@@ -101,42 +101,49 @@ export async function runPicker(mode: PickerMode, runtime: PickerRuntime): Promi
 
 export async function runAgentPicker(mode: AgentMode, runtime: PickerRuntime): Promise<PickerOutcome> {
   if (runtime.signal?.aborted) return "cancelled";
-  let cancel!: () => void;
-  const cancelled = new Promise<undefined>(resolve => { cancel = () => resolve(undefined); });
-  runtime.signal?.addEventListener("abort", cancel, { once: true });
-  let targets: AgentTarget[] | undefined;
-  try {
-    targets = await Promise.race([loadAgentTargets(mode, runtime.herdr, runtime.env), cancelled]);
-  } finally {
-    runtime.signal?.removeEventListener("abort", cancel);
-  }
-  if (!targets || runtime.signal?.aborted) return "cancelled";
-  if (targets.length === 0) return "no-agents";
-  const rendered = renderAgentRows(targets);
+  const loading = new AbortController();
+  const signal = runtime.signal ? AbortSignal.any([runtime.signal, loading.signal]) : loading.signal;
+  let initialLoad = true;
+  let noAgents = false;
   const prompt = mode === "repo-agents" ? "repo agents › " : "agents › ";
   const picker = runtime.pickerRunner ?? runTerminalPicker;
   let dispatched = false;
-  await picker({
-    prompt,
-    signal: runtime.signal,
-    beforeCleanup: runtime.beforeCleanup,
-    noun: AGENT_NOUN,
-    live: true,
-    emptyMessage: NO_AGENTS_MESSAGE,
-    items: rendered.items,
-    focusedId: rendered.focusedId,
-    keymap: runtime.config?.keymap,
-    reload: async () => renderAgentRows(await loadAgentTargets(mode, runtime.herdr, runtime.env)),
-    refreshIntervalMilliseconds: AGENT_REFRESH_INTERVAL_MILLISECONDS,
-    onAccept: async selection => {
-      if (runtime.signal?.aborted) return;
-      await runtime.beforeDispatch?.();
-      if (runtime.signal?.aborted) return;
-      await dispatchAgent(selection.target, runtime.herdr);
-      dispatched = true;
-    },
-  });
-  return dispatched ? "dispatched" : "cancelled";
+  try {
+    await picker({
+      prompt,
+      signal,
+      beforeCleanup: runtime.beforeCleanup,
+      noun: AGENT_NOUN,
+      live: true,
+      emptyMessage: NO_AGENTS_MESSAGE,
+      items: [],
+      loadOnStart: true,
+      keymap: runtime.config?.keymap,
+      reload: async () => {
+        signal.throwIfAborted();
+        const targets = await loadAgentTargets(mode, runtime.herdr, runtime.env);
+        signal.throwIfAborted();
+        // Initial emptiness still dismisses the picker; later refreshes may recover.
+        if (initialLoad && targets.length === 0) {
+          noAgents = true;
+          loading.abort();
+        }
+        initialLoad = false;
+        return renderAgentRows(targets);
+      },
+      refreshIntervalMilliseconds: AGENT_REFRESH_INTERVAL_MILLISECONDS,
+      onAccept: async selection => {
+        if (runtime.signal?.aborted) return;
+        await runtime.beforeDispatch?.();
+        if (runtime.signal?.aborted) return;
+        await dispatchAgent(selection.target, runtime.herdr);
+        dispatched = true;
+      },
+    });
+  } finally {
+    loading.abort();
+  }
+  return noAgents ? "no-agents" : dispatched ? "dispatched" : "cancelled";
 }
 
 async function runNavigationPicker(mode: NavigationMode, runtime: PickerRuntime): Promise<PickerOutcome> {

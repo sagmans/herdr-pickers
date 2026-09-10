@@ -172,6 +172,51 @@ test("requests after dispatch submission remain unacknowledged for a successor",
   expect(terminal.rawModes).toEqual([true, false]);
 });
 
+test("Ctrl-C cancels agent replacement while discovery never resolves", async () => {
+  const session = mailbox();
+  const input = deferred<string>();
+  const load = deferred<string>();
+  const lifecycle = new AbortController();
+  const terminal = new FakeTerminal([input.promise], VIEWPORT, true);
+  let loading = false;
+  let settled = false;
+  const run = runPickerLoop(session, OWNER, {
+    env: {}, terminal, signal: lifecycle.signal,
+    createRuntime: signal => ({ herdr: new Herdr({ signal, runner: async argv => {
+      if (argv.includes("agent")) { loading = true; await load.promise; }
+      return { stdout: WORKSPACES, stderr: "", exitCode: 0 };
+    } }) }),
+  }).finally(() => { settled = true; });
+  try {
+    await until(() => terminal.writes.some(write => write.includes("one")));
+    session.replace();
+    await until(() => loading);
+    input.resolve(CLOSE);
+    await until(() => settled);
+    expect(await run).toBe("cancelled");
+    expect(terminal.rawModes).toEqual([true, false]);
+  } finally {
+    lifecycle.abort();
+    await run;
+    load.resolve(AGENTS);
+  }
+});
+
+test("an empty initial agent load dismisses the shared terminal", async () => {
+  const session = mailbox();
+  session.replace();
+  const terminal = new FakeTerminal([], VIEWPORT, true);
+  const outcome = await runPickerLoop(session, OWNER, {
+    env: {}, terminal,
+    createRuntime: signal => ({ herdr: new Herdr({ signal, runner: async argv => ({
+      stdout: argv.includes("agent") ? JSON.stringify({ result: { agents: [] } }) : WORKSPACES,
+      stderr: "", exitCode: 0,
+    }) }) }),
+  });
+  expect(outcome).toBe("no-agents");
+  expect(terminal.rawModes).toEqual([true, false]);
+});
+
 test("replacement failure closes once and restores the shared terminal", async () => {
   const session = mailbox();
   const terminal = new FakeTerminal([], VIEWPORT, true);

@@ -51,7 +51,7 @@ export async function runPickerLoop(session: RequestSession, owner: string, opti
           env: sourceEnvironment(options.env, request.context),
           signal,
           beforeCleanup: undefined,
-          pickerRunner: picker => runner({ ...picker, ...terminal.options(signal) }),
+          pickerRunner: picker => runner({ ...picker, ...terminal.options(picker.signal ?? signal) }),
           beforeDispatch: async () => {
             checkRequest();
             signal.throwIfAborted();
