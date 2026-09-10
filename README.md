@@ -27,7 +27,7 @@ herdr plugin install sagmans/herdr-pickers
 Pin a specific revision with `--ref`:
 
 ```sh
-herdr plugin install sagmans/herdr-pickers --ref v0.2.0
+herdr plugin install sagmans/herdr-pickers --ref v0.3.0
 ```
 
 Installing registers the plugin and its actions. It does not change any

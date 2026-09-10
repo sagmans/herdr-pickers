@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 
+const EXPECTED_RELEASE_VERSION = "0.3.0";
+
 describe("plugin manifest", () => {
   const manifest = Bun.TOML.parse(readFileSync(join(import.meta.dir, "..", "herdr-plugin.toml"), "utf-8")) as {
     id?: string;
@@ -30,7 +32,7 @@ describe("plugin manifest", () => {
       dependencies?: Record<string, string>;
     };
 
-    expect(pkg.version).toBe("0.2.0");
+    expect(pkg.version).toBe(EXPECTED_RELEASE_VERSION);
     expect(manifest.version).toBe(pkg.version);
     expect(pkg.license).toBe("MIT");
     expect(pkg.private).toBe(true);
