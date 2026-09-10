@@ -33,6 +33,7 @@ const ACK_REQUEST = `UPDATE requests SET acknowledged=? WHERE session=? AND toke
   AND EXISTS (SELECT 1 FROM owners WHERE session=? AND token=? AND picker=?)`;
 const INSERT_OWNER = "INSERT INTO owners (session, token, opener, placement) VALUES (?, ?, ?, ?)";
 const DELETE_OWNER = "DELETE FROM owners WHERE session = ? AND token = ?";
+const RELEASE_UNSUBMITTED = "DELETE FROM owners WHERE session = ? AND token = ? AND opener = ? AND picker IS NULL";
 const CLAIM_OWNER = "UPDATE owners SET picker = ?, pane = ? WHERE session = ? AND token = ? AND picker IS NULL AND placement = ?";
 const UNCERTAIN_STARTUP = "Picker startup could not be verified. Restart this Herdr session before opening another picker.";
 
@@ -103,6 +104,10 @@ export class PickerSession {
       this.database.query(INSERT_OWNER).run(this.session, token, process.pid, placement);
       return token;
     }).immediate();
+  }
+
+  releaseUnsubmitted(token: string): void {
+    this.database.query(RELEASE_UNSUBMITTED).run(this.session, token, process.pid);
   }
 
   request(mode: PickerMode, context: CurrentContext): PickerRequest {

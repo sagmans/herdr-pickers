@@ -26,6 +26,8 @@ const DEADLINE_PROBE_MS = 4_000;
 const DEADLINE_NOT_ENFORCED = "deadline not enforced";
 const MAX_TEST_CONTEXT = 64 * 1024;
 const LATE_CLAIM_MS = 50;
+const OPEN_ACTION_PATH = join(import.meta.dir, "../src/actions/open.ts");
+const MISSING_BINARY = "missing-herdr";
 const workers: Bun.Subprocess<"pipe", "pipe", "pipe">[] = [];
 const roots: string[] = [];
 const servers: Server[] = [];
@@ -70,6 +72,18 @@ test("shared action entrypoint forwards replacement to the live owner", async ()
   await replacement;
   expect(commands).toHaveLength(1);
   expect(commands[0]?.some(value => value.startsWith("HERDR_PICKERS_SESSION_TOKEN="))).toBe(true);
+});
+
+test("a real pre-submission spawn failure permits a new owner in another process", async () => {
+  const { env, root } = await fixture();
+  const action = Bun.spawn([process.execPath, OPEN_ACTION_PATH, "workspaces"], {
+    env: { ...env, HERDR_PLUGIN_CONFIG_DIR: root, HERDR_PLUGIN_ID: PLUGIN_ID, HERDR_BIN_PATH: join(root, MISSING_BINARY) },
+    stdin: "pipe", stdout: "pipe", stderr: "pipe",
+  });
+  workers.push(action);
+  expect(await action.exited).toBe(1);
+  const next = await worker(env);
+  expect(next.token).toBeString();
 });
 
 test("new requests replace the mailbox and reject stale acknowledgements", async () => {
@@ -198,6 +212,28 @@ test("reserves once across modes and placements before a child starts", async ()
   expect(session.claim(token!, PANE_ID)).toBe(true);
   expect(session.claim(token!, PANE_ID)).toBe(false);
   expect(await other.reserve("overlay", async () => false)).toBeUndefined();
+});
+
+test("unsubmitted release cannot remove a different token or a claimed child", async () => {
+  const { session } = await fixture();
+  const token = await session.reserve("popup", async () => false);
+  session.releaseUnsubmitted(STALE_TOKEN);
+  expect(await session.reserve("popup", async () => false)).toBeUndefined();
+  expect(session.claim(token!)).toBe(true);
+  session.releaseUnsubmitted(token!);
+  expect(await session.reserve("popup", async () => false)).toBeUndefined();
+});
+
+test("ambiguous command errors preserve the reservation for a delayed child", async () => {
+  const { session, env, root } = await fixture();
+  let token!: string;
+  const herdr = new Herdr({ runner: async argv => {
+    token = argv.find(value => value.startsWith("HERDR_PICKERS_SESSION_TOKEN="))!.split("=")[1]!;
+    throw new Error("transport lost after submission");
+  } });
+  await expect(openPicker("agents", { ...env, HERDR_PLUGIN_CONFIG_DIR: root, HERDR_PLUGIN_ID: PLUGIN_ID }, herdr)).rejects.toThrow();
+  expect(await session.reserve("popup", async () => false)).toBeUndefined();
+  expect(session.claim(token)).toBe(true);
 });
 
 test("rejects stale children without changing a current reservation", async () => {

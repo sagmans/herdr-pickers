@@ -29,6 +29,13 @@ export class HerdrCommandError extends Error {
   }
 }
 
+export class HerdrSpawnError extends Error {
+  constructor(cause: unknown) {
+    super("Herdr command could not be started.", { cause });
+    this.name = "HerdrSpawnError";
+  }
+}
+
 export class HerdrJsonError extends Error {
   constructor(args: readonly string[]) {
     super(`herdr ${commandFamily(args)} returned invalid JSON`);
@@ -81,11 +88,18 @@ export class Herdr {
 
 async function runCommand(argv: readonly string[], signal?: AbortSignal): Promise<CommandResult> {
   signal?.throwIfAborted();
-  const proc = Bun.spawn([...argv], {
-    stdout: "pipe",
-    stderr: "pipe",
-    ...(signal === undefined ? {} : { signal }),
-  });
+  let proc: Bun.Subprocess<"ignore", "pipe", "pipe">;
+  try {
+    proc = Bun.spawn([...argv], {
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+      ...(signal === undefined ? {} : { signal }),
+    });
+  } catch (error) {
+    // Only failure to create the process proves that no command reached Herdr.
+    throw new HerdrSpawnError(error);
+  }
 
   let result: [string, string, number];
   try {

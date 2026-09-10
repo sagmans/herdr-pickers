@@ -1,4 +1,4 @@
-import { Herdr } from "../client/herdr.ts";
+import { Herdr, HerdrSpawnError } from "../client/herdr.ts";
 import { readPickerPaneIds } from "../client/types.ts";
 import { PICKER_TOKEN_ENV, PickerSession, PickerStartupUncertainError } from "../picker-session.ts";
 import { PICKER_REQUEST_POLL_MS, PICKER_REQUEST_TIMEOUT_MS } from "../picker-request.ts";
@@ -75,7 +75,12 @@ export async function openPicker(
           if (token) {
             // Even a superseded opener must launch its reserved child; the child reads the newest request.
             opened = true;
-            await client.run(buildPaneOpenArgs({ pluginId, mode, env, placement: config.placement, token }));
+            try {
+              await client.run(buildPaneOpenArgs({ pluginId, mode, env, placement: config.placement, token }));
+            } catch (error) {
+              if (error instanceof HerdrSpawnError) session.releaseUnsubmitted(token);
+              throw error;
+            }
           }
         }
         cancellation.signal.throwIfAborted();
