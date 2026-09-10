@@ -1,6 +1,6 @@
 import { Herdr } from "./client/herdr.ts";
 import { closePickerSurface } from "./client/popup.ts";
-import { watchPickerFocus } from "./client/picker-focus.ts";
+import { PickerFocusDeparture, watchPickerFocus } from "./client/picker-focus.ts";
 import { PICKER_TOKEN_ENV, PickerSession } from "./picker-session.ts";
 import { loadConfig } from "./config/config.ts";
 import { runPickerLoop } from "./picker-loop.ts";
@@ -15,6 +15,7 @@ async function main(): Promise<void> {
   const session = new PickerSession(env);
   const lifecycle = new AbortController();
   let exitSignal: (typeof EXIT_SIGNALS)[number] | undefined;
+  let focusFailure: { error: unknown } | undefined;
   const handlers = EXIT_SIGNALS.map(signal => ({
     signal,
     handler: () => { exitSignal ??= signal; lifecycle.abort(); },
@@ -30,14 +31,18 @@ async function main(): Promise<void> {
         env, signal: lifecycle.signal, beforeCleanup,
         createRuntime: signal => {
           let watch: Awaited<ReturnType<typeof watchPickerFocus>> | undefined;
+          const cancel = (error: unknown) => {
+            if (signal.aborted) return;
+            if (!(error instanceof PickerFocusDeparture)) focusFailure = { error };
+            lifecycle.abort(error);
+          };
           // Every mode needs a fresh observer because acceptance stops its previous observer.
           const focusReady = env.HERDR_PANE_ID
             ? watchPickerFocus(env.HERDR_SOCKET_PATH!, env.HERDR_PANE_ID, signal).then(watcher => {
               watch = watcher;
-              const cancel = () => { if (!signal.aborted) lifecycle.abort(watcher.signal.reason); };
-              watcher.signal.addEventListener("abort", cancel, { once: true });
-              if (watcher.signal.aborted) cancel();
-            }).catch(error => { if (!signal.aborted) lifecycle.abort(error); })
+              watcher.signal.addEventListener("abort", () => cancel(watcher.signal.reason), { once: true });
+              if (watcher.signal.aborted) cancel(watcher.signal.reason);
+            }).catch(cancel)
             : undefined;
           return {
             herdr: new Herdr({ signal }), config,
@@ -50,6 +55,8 @@ async function main(): Promise<void> {
           };
         },
       });
+      // Cancellation owns cleanup, but observer failures must still reach the exit boundary.
+      if (focusFailure) throw focusFailure.error;
       if (outcome === "no-agents") {
         console.log(dim(session.latestRequest()?.mode === "repo-agents" ? "No repository agents found." : "No agents found."));
       }

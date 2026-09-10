@@ -25,6 +25,11 @@ const SETUP_TIMEOUT_MS = 1_000;
 const NEWLINE_BYTE = 0x0a;
 const SETUP_FAILURE_MESSAGE = "Failed to establish picker focus observation";
 const WATCH_FAILURE_MESSAGE = "Picker focus observation failed";
+const FOCUS_DEPARTURE_MESSAGE = "Focus left the picker";
+
+export class PickerFocusDeparture extends Error {
+  constructor() { super(FOCUS_DEPARTURE_MESSAGE); }
+}
 
 type FocusEvent = Exclude<PickerFocusLifecycleMessage,
   { readonly kind: "subscription-started" } | { readonly kind: "snapshot" }>;
@@ -78,10 +83,13 @@ export async function watchPickerFocus(
     };
 
     function terminate(): void {
+      finish(new Error(ready ? WATCH_FAILURE_MESSAGE : SETUP_FAILURE_MESSAGE));
+    }
+
+    function finish(error: Error): void {
       if (stage === "stopped" || stage === "failed") return;
       const wasActive = ready;
       stage = "failed";
-      const error = new Error(wasActive ? WATCH_FAILURE_MESSAGE : SETUP_FAILURE_MESSAGE);
       controller.abort(error);
       dispatch?.reject(error);
       dispatch = undefined;
@@ -119,7 +127,8 @@ export async function watchPickerFocus(
       }
 
       if (message.kind === "snapshot") {
-        if (stage !== "snapshot" || !message.globallyFocused || message.paneId !== paneId) return terminate();
+        if (stage !== "snapshot" || message.paneId !== paneId) return terminate();
+        if (!message.globallyFocused) return finish(new PickerFocusDeparture());
         const resolvedOwner = { paneId: message.paneId, tabId: message.tabId, workspaceId: message.workspaceId };
         owner = resolvedOwner;
         stage = "active";
