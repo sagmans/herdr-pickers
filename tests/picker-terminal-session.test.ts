@@ -8,6 +8,11 @@ const STOP = "\x1b[?1049l";
 const ENTER = "\r";
 const ESCAPE_PREFIX = "\x1b[";
 const ARROW_TAIL = "B";
+const CLOSE = "\x03";
+const FRESH_TEXT = "foo";
+const UTF8_PREFIX = Uint8Array.of(0xe2);
+const UTF8_TAIL = Uint8Array.of(0x82, 0xac);
+const ENCODER = new TextEncoder();
 const ITEM = { id: "one", target: "one", display: "one", searchText: "one" };
 const OPTIONS = { prompt: "picker> ", noun: "targets", items: [ITEM] };
 
@@ -56,6 +61,33 @@ test("does not replay buffered acceptance into the new mode", async () => {
   expect(accepted).toBe(true);
   surface.close();
 });
+
+for (const [label, prefix, tail, query] of [
+  ["coalesced arrow and text", ESCAPE_PREFIX, ARROW_TAIL + FRESH_TEXT, FRESH_TEXT],
+  ["coalesced arrow and Ctrl-C", ESCAPE_PREFIX, ARROW_TAIL + CLOSE, ""],
+  ["unmapped CSI and fresh text", ESCAPE_PREFIX, "9~" + FRESH_TEXT, FRESH_TEXT],
+  ["mouse fragment and fresh text", "\x1b[<0;1;", "1M" + FRESH_TEXT, FRESH_TEXT],
+  ["split UTF-8", UTF8_PREFIX, new Uint8Array([...UTF8_TAIL, ...ENCODER.encode(FRESH_TEXT)]), FRESH_TEXT],
+  ["interrupted UTF-8 and fresh text", UTF8_PREFIX, ENCODER.encode(FRESH_TEXT), FRESH_TEXT],
+  ["interrupted UTF-8 and fresh Unicode", UTF8_PREFIX, ENCODER.encode("é" + FRESH_TEXT), "é" + FRESH_TEXT],
+] as const) {
+  test(`replacement preserves fresh input after ${label}`, async () => {
+    const input = deferred<string | Uint8Array>();
+    const terminal = new FakeTerminal([prefix, input.promise, ENTER]);
+    const surface = new PickerTerminal(terminal);
+    const first = new AbortController();
+    const run = runTerminalPicker({ ...OPTIONS, ...surface.options(first.signal), signal: first.signal });
+    await Bun.sleep(0);
+    first.abort();
+    await run;
+    const queries: string[] = [];
+    const next = runTerminalPicker({ ...OPTIONS, ...surface.options(), ranker: async query => { queries.push(query); return [ITEM]; } });
+    input.resolve(tail);
+    expect(await next).toEqual(tail === ARROW_TAIL + CLOSE ? undefined : ITEM);
+    expect(queries.at(-1) ?? "").toBe(query);
+    surface.close();
+  });
+}
 
 test("discarded fragmented keys cannot become new search text", async () => {
   const tail = deferred<string>();

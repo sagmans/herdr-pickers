@@ -339,13 +339,12 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
         return undefined;
       }
       const chunk = input.value;
+      const stalePrefixLength = discardFragment ? pending.length : 0;
       pending += typeof chunk === "string" ? chunk : decoder.decode(chunk, { stream: true });
-      const parsed = parseInput(pending, keymap);
+      const parsed = parseInput(pending, keymap, stalePrefixLength);
+      discardFragment = stalePrefixLength > pending.length - parsed.remainder.length;
       pending = parsed.remainder;
-      // A sequence begun in an abandoned mode cannot accept or edit its successor.
-      const events = discardFragment ? [] : parsed.events;
-      if (discardFragment) discardFragment = pending.length > 0;
-      const outcome = await Promise.race([handleEvents(events), timerFailure]);
+      const outcome = await Promise.race([handleEvents(parsed.events), timerFailure]);
       if (outcome.done) return outcome.selection;
       nextInput = iterator.next();
     }
