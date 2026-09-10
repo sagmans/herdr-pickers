@@ -194,7 +194,8 @@ Popups block pane navigation. Overlays do not: navigation to another pane,
 tab, or workspace cancels the picker and keeps the new destination focused.
 Cancellation discards the search without dispatch. Herdr replays focus events,
 so the picker checks current focus before it cancels. If the focus connection
-fails, the overlay closes rather than remain active without observation.
+fails, the overlay closes and reports an error with a nonzero exit status.
+Normal focus departure remains a successful cancellation.
 Focus setup runs alongside rendering; acceptance waits for a fresh focus
 check. The selected frame stays visible while that check and dispatch run.
 On exit, the overlay retains its frame during the close request before it
@@ -209,11 +210,12 @@ different binding there. Some terminals encode a physical Backspace as
 The top-right `✕` closes without dispatch. Cancellation is inert. Dispatch
 failures close the popup and surface as errors.
 
-Navigation pickers render immediately with a loading message, perform one
-initial catalog load for each mode request, and then reload only on `Ctrl-r`. This keeps project
-and Git worktree discovery from polling. Agent catalogs refresh every second
-and also support `Ctrl-r`. Empty navigation catalogs remain open and
-reloadable; an empty agent catalog closes the picker, including during replacement.
+All pickers render a loading message immediately and accept `Ctrl-C` during discovery, including after a mode replacement.
+Navigation catalogs load once per mode request and reload only on `Ctrl-r`.
+Agent catalogs refresh every second and also support `Ctrl-r`.
+Empty navigation catalogs remain open and reloadable.
+An empty initial agent catalog closes the picker, including during replacement.
+An empty later agent refresh remains open for new agents.
 
 Search uses only rendered group, identity, relation, badge, and detail text.
 Hidden paths, workspace ids, agent targets, and workspace agent status do
@@ -297,6 +299,8 @@ before it can reach your terminal.
 - No `herdr-pickers.*` actions — reinstall or `herdr plugin link .` from a checkout.
 - No projects or worktrees — open a repository in Herdr or configure `[projects].roots`.
 - No agents — open an agent pane first.
+- `Herdr command could not be started.` — check the Herdr executable and retry. A proven process-creation failure releases its unclaimed reservation.
+- Focus observation failed — the picker closes safely and reports failure. Check that the affected Herdr session remains available.
 - Picker request delivery timed out — close the current picker, then retry.
   Close active pickers before updating from a version without mode replacement.
   If startup remains uncertain, follow the restart guidance below.

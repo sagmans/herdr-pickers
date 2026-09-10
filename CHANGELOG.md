@@ -16,6 +16,10 @@ All notable user-facing changes to Herdr Pickers are recorded in this file.
 - New picker actions replace the current mode in place and reset search. The newest session request wins across all eight modes and both placements.
 - Mode replacement cancels obsolete work without restoring a blank screen or dispatching stale selections. Repository actions retain their original source context.
 - Startup bursts and requests during dismissal converge on one owner or verified successor. Delivery times out rather than opening an uncertain duplicate.
+- Proven process-creation failures release unclaimed reservations so a later picker can retry safely.
+- Agent discovery keeps terminal cancellation available during initial loading and mode replacement.
+- Focus-observation failures report a nonzero exit status after cleanup instead of appearing as successful cancellation.
+- Mode replacement preserves fresh text and Ctrl-C after fragmented keys, including split UTF-8 characters.
 - Navigation away from an overlay cancels it without restoring the old focus or dispatching a selection.
 - Cancellation interrupts pending picker work. Overlay teardown now retains the last frame during the bounded close request before restoring terminal state.
 - Popup cleanup no longer risks closing a replacement popup.
