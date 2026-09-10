@@ -1,6 +1,6 @@
-export const FZF_MIN_VERSION = "0.48";
-
 import type { PickerItem } from "./picker-row.ts";
+
+export const FZF_MIN_VERSION = "0.48";
 
 const FIELD_DELIMITER = "\t";
 const FZF_COMMAND = "fzf";
@@ -16,7 +16,12 @@ const FZF_FILTER_ARGS = [
   "1",
 ] as const;
 
-export async function rankRows(query: string, items: readonly PickerItem[]): Promise<PickerItem[]> {
+export async function rankRows(
+  query: string,
+  items: readonly PickerItem[],
+  signal?: AbortSignal,
+): Promise<PickerItem[]> {
+  signal?.throwIfAborted();
   if (query.length === 0) return [...items];
   if (items.length === 0) return [];
   const indexedLines = items.map((item, index) => `${item.searchText}${FIELD_DELIMITER}${index}`);
@@ -25,16 +30,25 @@ export async function rankRows(query: string, items: readonly PickerItem[]): Pro
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
+    ...(signal === undefined ? {} : { signal }),
   });
-  proc.stdin.write(`${indexedLines.join("\n")}\n`);
-  await proc.stdin.flush();
-  proc.stdin.end();
-
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
+  let result: [string, string, number];
+  try {
+    proc.stdin.write(`${indexedLines.join("\n")}\n`);
+    await proc.stdin.flush();
+    proc.stdin.end();
+    result = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+  } catch (error) {
+    proc.stdin.end();
+    signal?.throwIfAborted();
+    throw error;
+  }
+  signal?.throwIfAborted();
+  const [stdout, , exitCode] = result;
   if (exitCode === FZF_NO_MATCH) return [];
   if (exitCode !== FZF_SUCCESS) {
     throw new Error(`fzf filter failed with exit code ${exitCode}`);

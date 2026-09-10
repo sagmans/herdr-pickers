@@ -1,14 +1,15 @@
 # Herdr Pickers
 
 Mouse-aware, fzf-ranked Herdr pickers for projects, workspaces, worktrees,
-and agents. Every interactive mode opens in a centered Herdr popup sized to
-75% of the terminal in each dimension. The plugin also owns
+and agents. By default, every interactive mode opens in a centered Herdr
+popup sized to 75% of the terminal in each dimension. Set
+`placement = "overlay"` for a full-pane zoom. The plugin also owns
 previous-workspace history because Herdr has no native last-focused-
 workspace action.
 
 ## Requirements
 
-- Herdr `>= 0.8.0` (`popup.close` socket API)
+- Herdr `>= 0.8.0` (plugin panes and socket API)
 - Bun `>= 1.3`
 - fzf `>= 0.48`
 - Git
@@ -125,7 +126,7 @@ roots = ["~/projects", "~/work"]
 | mouse click | Move selection |
 | mouse double-click | Dispatch clicked target |
 | mouse wheel | Scroll |
-| `Esc` | Clear search; close when search is empty |
+| `Esc` | Close overlay; in a popup, clear search or close when search is empty |
 | `Ctrl-C` | Close |
 | `Ctrl-r` | Reload the current catalog without closing |
 | `Backspace` | Delete the previous search character |
@@ -152,7 +153,54 @@ key names are `up`, `down`, `enter`, and `ctrl-a` through `ctrl-z`, except
 fixed cancellation controls; they cannot be rebound or used in `[keymap]`.
 The `backspace` key name is not supported. A DEL Backspace always edits the
 query. Unknown names, malformed arrays, and conflicting keys fail with the
-config file path. Reopen the popup after a config change.
+config file path. Reopen the picker after a config change.
+
+## Picker placement
+
+The default surface is a centered popup. Kitty images from the pane
+underneath can paint on top of that popup.
+
+If you need a full-pane zoom that hides those images, set `placement` in
+the plugin `config.toml`:
+
+1. Open the plugin config directory with `herdr plugin config-dir herdr-pickers`.
+2. Set `placement = "overlay"` in `config.toml`.
+3. Close any active picker, then invoke a picker action again.
+
+Overlay is not 75% of the terminal. Placement and keymap changes apply after
+the current surface closes, not during an in-place mode change.
+
+Each Herdr session permits one picker across all eight interactive modes,
+workspaces, and placements. A new action replaces the mode in the same surface
+and clears its search and selection. Repeating the current mode also resets it.
+The newest request received by the session wins. Other sessions remain independent.
+
+Replacement retains the previous frame until the next mode draws. Raw mode and
+mouse tracking remain active; the terminal does not switch screens between modes.
+Actions invoked from an overlay retain the original source context for repository
+scope. An action from another source uses that source's context.
+
+Obsolete discovery, ranking, refresh, and focus checks receive cancellation.
+Late results cannot replace the new mode or dispatch an old selection. A command
+already submitted to Herdr cannot be recalled. A request during dispatch or final
+teardown waits for one successor after ownership and surface removal are verified.
+Request delivery has a three-second timeout; uncertain ownership never permits a
+duplicate surface. A short mailbox check observes requests, not navigation catalogs.
+
+Native popup keyboard capture remains unchanged. Replacement works when Herdr
+invokes the action; it does not make host shortcuts pass through a modal popup.
+
+Popups block pane navigation. Overlays do not: navigation to another pane,
+tab, or workspace cancels the picker and keeps the new destination focused.
+Cancellation discards the search without dispatch. Herdr replays focus events,
+so the picker checks current focus before it cancels. If the focus connection
+fails, the overlay closes and reports an error with a nonzero exit status.
+Normal focus departure remains a successful cancellation.
+Focus setup runs alongside rendering; acceptance waits for a fresh focus
+check. The selected frame stays visible while that check and dispatch run.
+On exit, the overlay retains its frame during the close request before it
+restores terminal state. The close wait is bounded if Herdr does not reply.
+Host navigation and zoom remain available and can still cause layout transitions.
 
 Terminals encode `Ctrl-j` as line feed. A terminal that also sends line feed
 for `Enter` cannot distinguish those inputs. Use carriage-return `Enter` or a
@@ -162,11 +210,12 @@ different binding there. Some terminals encode a physical Backspace as
 The top-right `✕` closes without dispatch. Cancellation is inert. Dispatch
 failures close the popup and surface as errors.
 
-Navigation pickers render immediately with a loading message, perform one
-initial catalog load, and then reload only on `Ctrl-r`. This keeps project
-and Git worktree discovery from polling. Agent catalogs refresh every second
-and also support `Ctrl-r`. Empty navigation catalogs remain open and
-reloadable; empty agent catalogs do not open a popup.
+All pickers render a loading message immediately and accept `Ctrl-C` during discovery, including after a mode replacement.
+Navigation catalogs load once per mode request and reload only on `Ctrl-r`.
+Agent catalogs refresh every second and also support `Ctrl-r`.
+Empty navigation catalogs remain open and reloadable.
+An empty initial agent catalog closes the picker, including during replacement.
+An empty later agent refresh remains open for new agents.
 
 Search uses only rendered group, identity, relation, badge, and detail text.
 Hidden paths, workspace ids, agent targets, and workspace agent status do
@@ -229,8 +278,10 @@ bun run typecheck
 bun run smoke   # PTY smoke against a disposable isolated Herdr runtime
 ```
 
-The smoke automates dispatch, toggling, reload, and teardown, but two
-behaviors only a human can verify: mouse click/double-click/wheel selection
+The smoke automates dispatch, toggling, reload, all-mode replacement, concurrent
+startup, dismissal requests, and teardown in isolated Herdr sessions. It verifies
+unchanged process and overlay pane identity, repository scope, and search reset.
+Two behaviors still need human verification: mouse click/double-click/wheel selection
 and visual fidelity in a real terminal emulator. Give both a quick pass in a
 disposable session before trusting a release.
 
@@ -248,6 +299,15 @@ before it can reach your terminal.
 - No `herdr-pickers.*` actions — reinstall or `herdr plugin link .` from a checkout.
 - No projects or worktrees — open a repository in Herdr or configure `[projects].roots`.
 - No agents — open an agent pane first.
+- `Herdr command could not be started.` — check the Herdr executable and retry. A proven process-creation failure releases its unclaimed reservation.
+- Focus observation failed — the picker closes safely and reports failure. Check that the affected Herdr session remains available.
+- Picker request delivery timed out — close the current picker, then retry.
+  Close active pickers before updating from a version without mode replacement.
+  If startup remains uncertain, follow the restart guidance below.
+- Picker startup cannot be verified — save active work, then restart the affected Herdr session.
+  Ownership uses `picker-sessions.sqlite` in the plugin state directory.
+  Do not delete this file while any picker is active.
+  If an unrelated process reuses a recorded PID, ownership also fails closed; restart the affected session to recover.
 - Red fzf error — verify `fzf --version` is `>= 0.48`.
 
 ## License

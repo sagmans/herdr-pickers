@@ -1,5 +1,5 @@
 import { Herdr, type CommandRunner } from "./client/herdr.ts";
-import { readAgentList, readWorkspaces, readWorktreeScope } from "./client/types.ts";
+import { readAgentList, readWorkspaces, readWorktreeScope, type WorkspaceRecord } from "./client/types.ts";
 import { buildAgentTargets, currentContextFromEnv, type AgentTarget, type CurrentContext } from "./catalog.ts";
 import type { HerdrPickersConfig } from "./config/config.ts";
 import { dispatchAgent, dispatchNavigationTarget } from "./dispatch.ts";
@@ -40,6 +40,9 @@ export class AgentTargetError extends Error {
 export type PickerRunner = (options: TerminalPickerOptions) => Promise<PickerItem | undefined>;
 
 export interface PickerRuntime {
+  readonly signal?: AbortSignal | undefined;
+  readonly beforeDispatch?: (() => void | Promise<void>) | undefined;
+  readonly beforeCleanup?: (() => Promise<void>) | undefined;
   readonly herdr: Herdr;
   readonly env?: Record<string, string | undefined> | undefined;
   readonly gitRunner?: CommandRunner | undefined;
@@ -87,32 +90,60 @@ export async function loadAgentTargets(
 }
 
 export async function runPicker(mode: PickerMode, runtime: PickerRuntime): Promise<PickerOutcome> {
-  return isAgentMode(mode)
-    ? runAgentPicker(mode, runtime)
-    : runNavigationPicker(mode, runtime);
+  if (runtime.signal?.aborted) return "cancelled";
+  try {
+    return await (isAgentMode(mode) ? runAgentPicker(mode, runtime) : runNavigationPicker(mode, runtime));
+  } catch (error) {
+    if (runtime.signal?.aborted) return "cancelled";
+    throw error;
+  }
 }
 
 export async function runAgentPicker(mode: AgentMode, runtime: PickerRuntime): Promise<PickerOutcome> {
-  const targets = await loadAgentTargets(mode, runtime.herdr, runtime.env);
-  if (targets.length === 0) return "no-agents";
-  const rendered = renderAgentRows(targets);
+  if (runtime.signal?.aborted) return "cancelled";
+  const loading = new AbortController();
+  const signal = runtime.signal ? AbortSignal.any([runtime.signal, loading.signal]) : loading.signal;
+  let initialLoad = true;
+  let noAgents = false;
   const prompt = mode === "repo-agents" ? "repo agents › " : "agents › ";
   const picker = runtime.pickerRunner ?? runTerminalPicker;
-  const selection = await picker({
-    prompt,
-    noun: AGENT_NOUN,
-    live: true,
-    emptyMessage: NO_AGENTS_MESSAGE,
-    items: rendered.items,
-    focusedId: rendered.focusedId,
-    keymap: runtime.config?.keymap,
-    reload: async () => renderAgentRows(await loadAgentTargets(mode, runtime.herdr, runtime.env)),
-    refreshIntervalMilliseconds: AGENT_REFRESH_INTERVAL_MILLISECONDS,
-  });
-  const target = selection?.target;
-  if (!target) return "cancelled";
-  await dispatchAgent(target, runtime.herdr);
-  return "dispatched";
+  let dispatched = false;
+  try {
+    await picker({
+      prompt,
+      signal,
+      beforeCleanup: runtime.beforeCleanup,
+      noun: AGENT_NOUN,
+      live: true,
+      emptyMessage: NO_AGENTS_MESSAGE,
+      items: [],
+      loadOnStart: true,
+      keymap: runtime.config?.keymap,
+      reload: async () => {
+        signal.throwIfAborted();
+        const targets = await loadAgentTargets(mode, runtime.herdr, runtime.env);
+        signal.throwIfAborted();
+        // Initial emptiness still dismisses the picker; later refreshes may recover.
+        if (initialLoad && targets.length === 0) {
+          noAgents = true;
+          loading.abort();
+        }
+        initialLoad = false;
+        return renderAgentRows(targets);
+      },
+      refreshIntervalMilliseconds: AGENT_REFRESH_INTERVAL_MILLISECONDS,
+      onAccept: async selection => {
+        if (runtime.signal?.aborted) return;
+        await runtime.beforeDispatch?.();
+        if (runtime.signal?.aborted) return;
+        await dispatchAgent(selection.target, runtime.herdr);
+        dispatched = true;
+      },
+    });
+  } finally {
+    loading.abort();
+  }
+  return noAgents ? "no-agents" : dispatched ? "dispatched" : "cancelled";
 }
 
 async function runNavigationPicker(mode: NavigationMode, runtime: PickerRuntime): Promise<PickerOutcome> {
@@ -122,23 +153,34 @@ async function runNavigationPicker(mode: NavigationMode, runtime: PickerRuntime)
   const picker = runtime.pickerRunner ?? runTerminalPicker;
   const presentation = NAVIGATION_PRESENTATION[mode];
   const loadRows = async () => {
-    targets = await loadNavigationTargets(mode, navigationRuntime(runtime));
+    runtime.signal?.throwIfAborted();
+    const loaded = await loadNavigationTargets(mode, navigationRuntime(runtime));
+    runtime.signal?.throwIfAborted();
+    targets = loaded;
     return renderNavigationRows(mode, targets);
   };
-  const selection = await picker({
+  let dispatched = false;
+  await picker({
     prompt: presentation.prompt,
+    signal: runtime.signal,
+    beforeCleanup: runtime.beforeCleanup,
     noun: presentation.noun,
     emptyMessage: presentation.emptyMessage,
     items: [],
     loadOnStart: true,
     keymap: runtime.config?.keymap,
     reload: loadRows,
+    onAccept: async selection => {
+      if (runtime.signal?.aborted) return;
+      const target = targets.find((candidate) => candidate.id === selection.target);
+      if (!target) throw new Error(`Selected navigation target '${selection.target}' is no longer available.`);
+      await runtime.beforeDispatch?.();
+      if (runtime.signal?.aborted) return;
+      await dispatchNavigationTarget(target, runtime.herdr);
+      dispatched = true;
+    },
   });
-  if (!selection) return "cancelled";
-  const target = targets.find((candidate) => candidate.id === selection.target);
-  if (!target) throw new Error(`Selected navigation target '${selection.target}' is no longer available.`);
-  await dispatchNavigationTarget(target, runtime.herdr);
-  return "dispatched";
+  return dispatched ? "dispatched" : "cancelled";
 }
 
 function navigationRuntime(runtime: PickerRuntime) {
@@ -147,6 +189,7 @@ function navigationRuntime(runtime: PickerRuntime) {
     env: runtime.env,
     gitRunner: runtime.gitRunner,
     projectRoots: runtime.config?.projects.roots,
+    signal: runtime.signal,
   };
 }
 
@@ -172,7 +215,7 @@ function isAgentMode(mode: PickerMode): mode is AgentMode {
 // Repository scope prefers explicit workspace provenance; the worktree list is
 // the authoritative fallback when older Herdr records omit it.
 async function repositoryScopeKey(
-  workspaces: readonly import("./client/types.ts").WorkspaceRecord[],
+  workspaces: readonly WorkspaceRecord[],
   current: CurrentContext,
   herdr: Herdr,
 ): Promise<string | undefined> {

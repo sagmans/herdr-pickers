@@ -1,43 +1,93 @@
 import { Herdr } from "./client/herdr.ts";
-import { closePopup } from "./client/popup.ts";
+import { closePickerSurface } from "./client/popup.ts";
+import { PickerFocusDeparture, watchPickerFocus } from "./client/picker-focus.ts";
+import { PICKER_TOKEN_ENV, PickerSession } from "./picker-session.ts";
 import { loadConfig } from "./config/config.ts";
-import { parseMode, runPicker } from "./picker.ts";
+import { runPickerLoop } from "./picker-loop.ts";
 import { color, dim } from "./style.ts";
 import { boundedTerminalBlock } from "./util/terminal-text.ts";
 
-const MODE_ENV = "HERDR_PICKERS_MODE";
 const EXIT_SIGNALS = ["SIGHUP", "SIGINT", "SIGTERM"] as const;
 const COMBINED_FAILURE_MESSAGE = "Picker failed and its popup could not be closed.";
 
 async function main(): Promise<void> {
-  const removeSignalHandlers = closePopupOnSignals(process.env);
+  const env = process.env;
+  const session = new PickerSession(env);
+  const lifecycle = new AbortController();
+  let exitSignal: (typeof EXIT_SIGNALS)[number] | undefined;
+  let focusFailure: { error: unknown } | undefined;
+  const handlers = EXIT_SIGNALS.map(signal => ({
+    signal,
+    handler: () => { exitSignal ??= signal; lifecycle.abort(); },
+  }));
   try {
-    await withPopupClose(async () => {
-      const mode = parseMode(process.env[MODE_ENV]);
-      const config = loadConfig(process.env);
-      const outcome = await runPicker(mode, { herdr: new Herdr(), env: process.env, config });
+    const token = env[PICKER_TOKEN_ENV];
+    // A rejected child has no authority to close any existing surface.
+    if (!token || !session.claim(token, env.HERDR_PANE_ID)) throw new Error("Picker reservation is missing or stale.");
+    for (const { signal, handler } of handlers) process.on(signal, handler);
+    await withPopupClose(async beforeCleanup => {
+      const config = loadConfig(env);
+      const outcome = await runPickerLoop(session, token, {
+        env, signal: lifecycle.signal, beforeCleanup,
+        createRuntime: signal => {
+          let watch: Awaited<ReturnType<typeof watchPickerFocus>> | undefined;
+          const cancel = (error: unknown) => {
+            if (signal.aborted) return;
+            if (!(error instanceof PickerFocusDeparture)) focusFailure = { error };
+            lifecycle.abort(error);
+          };
+          // Every mode needs a fresh observer because acceptance stops its previous observer.
+          const focusReady = env.HERDR_PANE_ID
+            ? watchPickerFocus(env.HERDR_SOCKET_PATH!, env.HERDR_PANE_ID, signal).then(watcher => {
+              watch = watcher;
+              watcher.signal.addEventListener("abort", () => cancel(watcher.signal.reason), { once: true });
+              if (watcher.signal.aborted) cancel(watcher.signal.reason);
+            }).catch(cancel)
+            : undefined;
+          return {
+            herdr: new Herdr({ signal }), config,
+            beforeDispatch: async () => {
+              await focusReady;
+              signal.throwIfAborted();
+              await watch?.prepareDispatch();
+            },
+            dispose: async () => { watch?.stop(); await focusReady; watch?.stop(); },
+          };
+        },
+      });
+      // Cancellation owns cleanup, but observer failures must still reach the exit boundary.
+      if (focusFailure) throw focusFailure.error;
       if (outcome === "no-agents") {
-        console.log(dim(mode === "repo-agents" ? "No repository agents found." : "No agents found."));
+        console.log(dim(session.latestRequest()?.mode === "repo-agents" ? "No repository agents found." : "No agents found."));
       }
-    }, () => closePopup(process.env));
+    }, () => closePickerSurface(env));
   } finally {
-    removeSignalHandlers();
+    lifecycle.abort();
+    for (const { signal, handler } of handlers) process.off(signal, handler);
+    session.close();
+    if (exitSignal) process.kill(process.pid, exitSignal);
   }
 }
 
-export async function withPopupClose<T>(work: () => Promise<T>, close: () => Promise<void>): Promise<T> {
+export async function withPopupClose<T>(work: (beforeCleanup: () => Promise<void>) => Promise<T>, close: () => Promise<void>): Promise<T> {
+  let closing: Promise<void> | undefined;
+  const closeOnce = () => closing ??= Promise.resolve().then(close);
+  const beforeCleanup = async (): Promise<void> => {
+    // Report close errors outside terminal cleanup so the original picker error survives.
+    try { await closeOnce(); } catch {}
+  };
   let result: T;
   try {
-    result = await work();
+    result = await work(beforeCleanup);
   } catch (error) {
     try {
-      await close();
+      await closeOnce();
     } catch (closeError) {
       throw new AggregateError([error, closeError], COMBINED_FAILURE_MESSAGE);
     }
     throw error;
   }
-  await close();
+  await closeOnce();
   return result;
 }
 
@@ -52,27 +102,11 @@ export function formatPaneError(error: unknown): string {
   return boundedTerminalBlock(rendered);
 }
 
-function closePopupOnSignals(env: Record<string, string | undefined>): () => void {
-  let closing = false;
-  const handlers = EXIT_SIGNALS.map((signal) => {
-    const handler = (): void => {
-      if (closing) return;
-      closing = true;
-      remove();
-      void closePopup(env).finally(() => process.kill(process.pid, signal));
-    };
-    process.on(signal, handler);
-    return { signal, handler };
-  });
-  const remove = (): void => {
-    for (const { signal, handler } of handlers) process.off(signal, handler);
-  };
-  return remove;
-}
-
 if (import.meta.main) {
   try {
     await main();
+    // Overlay close can leave stdin handles; this process is the picker pane.
+    process.exit(0);
   } catch (error) {
     console.error(color("red", formatPaneError(error)));
     process.exit(1);

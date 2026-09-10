@@ -7,6 +7,9 @@ import { hasErrorCode, isRecord } from "../util/objects.ts";
 export const PLUGIN_ID = "herdr-pickers";
 export const CONFIG_FILE_NAME = "config.toml";
 
+export const PICKER_PLACEMENTS = ["popup", "overlay"] as const;
+export type PickerPlacement = (typeof PICKER_PLACEMENTS)[number];
+export const DEFAULT_PICKER_PLACEMENT: PickerPlacement = "popup";
 export type PickerKeyAction = "up" | "down" | "accept" | "reload";
 export type PickerKeymap = ReadonlyMap<string, PickerKeyAction>;
 
@@ -30,7 +33,13 @@ const DEFAULT_KEY_BINDINGS: Readonly<Record<PickerKeyAction, readonly string[]>>
   reload: ["ctrl-r"],
 };
 const INVALID_DEFAULT_KEY_MESSAGE = "Invalid default picker key";
+const PLACEMENT_SET: ReadonlySet<string> = new Set(PICKER_PLACEMENTS);
+const PLACEMENT_ERROR_MESSAGE = "placement must be 'popup' or 'overlay'";
 const DEFAULT_CONFIG = [
+  "# Optional. popup (default) is a 75% centered float.",
+  "# overlay is a full-pane zoom and hides Kitty images from the pane underneath.",
+  "# placement = \"overlay\"",
+  "",
   "[projects]",
   "# Optional. Parent directories that contain project repositories.",
   "# When empty, navigation mirrors repositories Herdr already tracks.",
@@ -51,6 +60,7 @@ const DEFAULT_CONFIG = [
 export const DEFAULT_PICKER_KEYMAP: PickerKeymap = buildDefaultPickerKeymap();
 
 export interface HerdrPickersConfig {
+  readonly placement: PickerPlacement;
   readonly keymap: PickerKeymap;
   readonly projects: {
     readonly roots: readonly string[];
@@ -114,8 +124,9 @@ export function parseConfig(source: string, configPath: string): HerdrPickersCon
     .map(expandHome)
     .map((value) => resolve(value));
   const keymap = resolvePickerKeymap(root.keymap, configPath);
+  const placement = resolvePickerPlacement(root.placement, configPath);
 
-  return { keymap, projects: { roots } };
+  return { placement, keymap, projects: { roots } };
 }
 
 export function expandHome(value: string): string {
@@ -134,6 +145,18 @@ function buildDefaultPickerKeymap(): PickerKeymap {
     }
   }
   return keymap;
+}
+
+function resolvePickerPlacement(value: unknown, configPath: string): PickerPlacement {
+  if (value === undefined) return DEFAULT_PICKER_PLACEMENT;
+  if (typeof value !== "string" || !isPickerPlacement(value)) {
+    throw new ConfigError(PLACEMENT_ERROR_MESSAGE, configPath);
+  }
+  return value;
+}
+
+function isPickerPlacement(value: string): value is PickerPlacement {
+  return PLACEMENT_SET.has(value);
 }
 
 function resolvePickerKeymap(value: unknown, configPath: string): PickerKeymap {

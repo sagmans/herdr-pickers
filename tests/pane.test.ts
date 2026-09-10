@@ -44,6 +44,33 @@ describe("popup pane lifecycle", () => {
     expect(closes).toBe(1);
   });
 
+  test("early surface dismissal runs once without masking picker failures", async () => {
+    const pickerError = new Error("picker failed");
+    const closeError = new Error("close failed");
+    let closes = 0;
+    try {
+      await withPopupClose(async beforeCleanup => {
+        await beforeCleanup();
+        throw pickerError;
+      }, async () => { closes++; throw closeError; });
+      throw new Error("expected failure");
+    } catch (error) {
+      expect(error).toBeInstanceOf(AggregateError);
+      expect((error as AggregateError).errors).toEqual([pickerError, closeError]);
+    }
+    expect(closes).toBe(1);
+  });
+
+  test("early surface dismissal is not repeated after successful work", async () => {
+    let closes = 0;
+    const result = await withPopupClose(async beforeCleanup => {
+      await beforeCleanup();
+      return "selected";
+    }, async () => { closes++; });
+    expect(result).toBe("selected");
+    expect(closes).toBe(1);
+  });
+
   test("formats both causes of a combined failure", () => {
     const error = new AggregateError([new Error("picker failed"), new Error("close failed")], "combined failure");
 

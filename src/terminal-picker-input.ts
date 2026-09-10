@@ -41,17 +41,23 @@ export interface ParsedInput {
   readonly remainder: string;
 }
 
-export function parseInput(data: string, keymap: PickerKeymap = DEFAULT_PICKER_KEYMAP): ParsedInput {
+export function parseInput(data: string, keymap: PickerKeymap = DEFAULT_PICKER_KEYMAP, stalePrefixLength = 0): ParsedInput {
   const events: InputEvent[] = [];
+  let sequenceStart = 0;
+  const emit = (event: InputEvent): void => {
+    // Only the sequence begun before replacement is stale, not its coalesced successors.
+    if (sequenceStart >= stalePrefixLength) events.push(event);
+  };
   const mappedSequences = [...keymap.keys()]
     .filter((sequence) => sequence.length > SINGLE_CHARACTER_LENGTH)
     .toSorted((left, right) => right.length - left.length);
   let remaining = data;
 
   while (remaining.length > 0) {
+    sequenceStart = data.length - remaining.length;
     const mouse = MOUSE_PATTERN.exec(remaining);
     if (mouse) {
-      events.push({
+      emit({
         type: "mouse",
         button: mouseButton(Number(mouse[1])),
         column: Number(mouse[2]),
@@ -67,7 +73,7 @@ export function parseInput(data: string, keymap: PickerKeymap = DEFAULT_PICKER_K
     const mappedSequence = mappedSequences.find((sequence) => remaining.startsWith(sequence));
     if (mappedSequence !== undefined) {
       const event = mappedKeyEvent(mappedSequence, keymap);
-      if (event !== undefined) events.push(event);
+      if (event !== undefined) emit(event);
       remaining = remaining.slice(mappedSequence.length);
       continue;
     }
@@ -93,22 +99,22 @@ export function parseInput(data: string, keymap: PickerKeymap = DEFAULT_PICKER_K
     if (character === undefined) break;
     remaining = remaining.slice(character.length);
     if (character === KEY_BACKSPACE) {
-      events.push({ type: "backspace" });
+      emit({ type: "backspace" });
       continue;
     }
     if (character === ESCAPE_KEY_SEQUENCE) {
-      events.push({ type: "escape" });
+      emit({ type: "escape" });
       continue;
     }
     if (character === KEY_CTRL_C) {
-      events.push({ type: "close" });
+      emit({ type: "close" });
       continue;
     }
     const event = mappedKeyEvent(character, keymap);
     if (event !== undefined) {
-      events.push(event);
+      emit(event);
     } else if (isPrintable(character)) {
-      events.push({ type: "text", value: character });
+      emit({ type: "text", value: character });
     }
   }
 

@@ -243,6 +243,18 @@ describe("terminal picker session", () => {
     expect(result).toBeUndefined();
   });
 
+  test("releases a pending input read when escape closes an overlay-style hang", async () => {
+    const terminal = new FakeTerminal([KEY_ESCAPE], VIEWPORT, true);
+
+    const result = await Promise.race([
+      runTerminalPicker({ ...AGENT_PICKER_OPTIONS, prompt: "agents> ", items: STATE.items, terminal }),
+      Bun.sleep(100).then(() => "timed-out" as const),
+    ]);
+
+    expect(result).toBeUndefined();
+    expect(terminal.inputReturned).toBe(true);
+  });
+
   test("combines an arrow sequence split across input chunks", async () => {
     const terminal = new FakeTerminal([KEY_ESCAPE, "[A", KEY_ENTER]);
 

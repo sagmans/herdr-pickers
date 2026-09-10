@@ -11,6 +11,7 @@ export class FakeTerminal implements TerminalAdapter {
   readonly writes: string[] = [];
   readonly rawModes: boolean[] = [];
   readonly input: AsyncIterable<string | Uint8Array>;
+  inputReturned = false;
   private resizeListener: (() => void) | undefined;
   private finishInput: (() => void) | undefined;
 
@@ -21,12 +22,27 @@ export class FakeTerminal implements TerminalAdapter {
     private failStopWrite = false,
   ) {
     let finishInput: (() => void) | undefined;
-    this.input = (async function* () {
+    const generator = (async function* () {
       for (const chunk of chunks) yield await chunk;
-      if (hangAfterInput) await new Promise<void>((resolve) => {
-        finishInput = resolve;
-      });
+      if (hangAfterInput) {
+        await new Promise<void>((resolve) => {
+          finishInput = resolve;
+        });
+      }
     })();
+    const terminal = this;
+    this.input = {
+      [Symbol.asyncIterator](): AsyncIterator<string | Uint8Array> {
+        return {
+          next: () => generator.next(),
+          return: async () => {
+            terminal.inputReturned = true;
+            finishInput?.();
+            return await generator.return(undefined);
+          },
+        };
+      },
+    };
     this.finishInput = () => finishInput?.();
   }
 
