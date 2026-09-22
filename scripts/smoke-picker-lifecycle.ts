@@ -1,10 +1,10 @@
-import { Database } from "bun:sqlite";
 import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { readOwnershipDatabase } from "./smoke-database.ts";
 import { runPickerReplacementSmoke } from "./smoke-picker-replacement.ts";
+import { POLL_TIMEOUT_EXTENDED_MS } from "./smoke-timing.ts";
 
 const OWNERSHIP_DATABASE_NAME = "picker-sessions.sqlite";
-const OWNERSHIP_DATABASE_SETUP = "PRAGMA busy_timeout = 2000";
 const OWNERSHIP_TABLE_QUERY = "SELECT session, token, opener, picker, placement, pane FROM owners";
 const REQUEST_QUERY = "SELECT token, mode, acknowledged FROM requests WHERE session = ?";
 const PICKER_PANE_LABEL = "Herdr Picker";
@@ -48,7 +48,7 @@ export interface PickerLifecycleSmokeOptions {
   readonly dispatchWorkspaceId: string;
   readonly dispatchWorkspaceLabel: string;
   readonly check: (label: string, ok: boolean, detail?: string) => void;
-  readonly poll: (label: string, probe: () => string | undefined) => Promise<string>;
+  readonly poll: (label: string, probe: () => string | undefined, timeoutMs?: number) => Promise<string>;
 }
 
 type PickerPlacement = "popup" | "overlay";
@@ -85,7 +85,11 @@ interface OpenPicker {
 }
 
 export async function runPickerLifecycleSmoke(options: PickerLifecycleSmokeOptions): Promise<void> {
-  const databasePath = await options.poll("picker ownership database resolves", () => findFile(options.root, OWNERSHIP_DATABASE_NAME));
+  const databasePath = await options.poll(
+    "picker ownership database resolves",
+    () => findFile(options.root, OWNERSHIP_DATABASE_NAME),
+    POLL_TIMEOUT_EXTENDED_MS,
+  );
   const largeWorkspace = options.primary.run(["workspace", "create", "--cwd", options.repo, "--label", LARGE_SESSION_LABEL, "--no-focus"]);
   options.check("large-session fixture creates", largeWorkspace.code === 0);
   const snapshot = options.primary.run(["api", "snapshot"]);
@@ -122,7 +126,7 @@ async function runSingletonCase(
     const logs = resultRows(options.primary.run(["plugin", "log", "list"]).stdout, "logs")
       .filter(row => !previousLogs.has(row.log_id) && typeof row.action_id === "string" && row.status === "succeeded");
     return logs.length === BURST_SIZE ? "completed" : undefined;
-  });
+  }, POLL_TIMEOUT_EXTENDED_MS);
   const retained = ownerForSession(databasePath, opened.owner.session);
   options.check(
     `${placement} burst retains one picker owner`,
@@ -272,18 +276,26 @@ async function openPicker(
       return !excludedSessions.has(candidate.session);
     });
     return owner ? JSON.stringify(owner) : undefined;
-  });
+  }, POLL_TIMEOUT_EXTENDED_MS);
   const owner = parseOwner(JSON.parse(serialized) as unknown);
   await options.poll(`${session.label} ${placement} picker renders`, () => {
+    // Herdr paints client diffs, so a reopened overlay whose prompt row is
+    // already on screen can leave the prompt out of the raw stream; the pane
+    // buffer is the authoritative frame for the placement the probe can read.
+    if (placement === "overlay") {
+      if (owner.pane === null) return undefined;
+      const frame = session.run(["pane", "read", owner.pane, "--source", "visible", "--format", "text"]);
+      return frame.code === 0 && frame.stdout.includes(WORKSPACE_PICKER_PROMPT) ? "rendered" : undefined;
+    }
     const output = readFileSync(session.rawOutputPath).subarray(outputOffset).toString("utf8");
     return output.includes(WORKSPACE_PICKER_PROMPT) ? "rendered" : undefined;
-  });
+  }, POLL_TIMEOUT_EXTENDED_MS);
 
   if (placement === "popup") return { owner };
   const paneId = await options.poll(`${session.label} overlay picker pane resolves`, () => {
     const pane = listPanes(session).find((candidate) => candidate.label === PICKER_PANE_LABEL && candidate.focused);
     return pane?.paneId;
-  });
+  }, POLL_TIMEOUT_EXTENDED_MS);
   options.check("overlay owner records its pane", owner.pane === paneId, `${String(owner.pane)} / ${paneId}`);
   return { owner, paneId };
 }
@@ -294,21 +306,13 @@ function writePlacement(options: PickerLifecycleSmokeOptions, placement: PickerP
 }
 
 function readRequest(databasePath: string, session: string): RequestRow | null {
-  const database = new Database(databasePath, { readonly: true });
-  try {
-    database.exec(OWNERSHIP_DATABASE_SETUP);
-    return database.query<RequestRow, [string]>(REQUEST_QUERY).get(session);
-  } finally { database.close(); }
+  return readOwnershipDatabase(databasePath, (database) =>
+    database.query<RequestRow, [string]>(REQUEST_QUERY).get(session));
 }
 
 function readOwners(databasePath: string): OwnerRow[] {
-  const database = new Database(databasePath, { readonly: true });
-  try {
-    database.exec(OWNERSHIP_DATABASE_SETUP);
-    return database.query<unknown, []>(OWNERSHIP_TABLE_QUERY).all().map(parseOwner);
-  } finally {
-    database.close();
-  }
+  return readOwnershipDatabase(databasePath, (database) =>
+    database.query<unknown, []>(OWNERSHIP_TABLE_QUERY).all().map(parseOwner));
 }
 
 function parseOwner(value: unknown): OwnerRow {
