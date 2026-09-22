@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
@@ -16,8 +17,8 @@ const WORKSPACE_ID = "workspace-owner";
 const OTHER_WORKSPACE_ID = "workspace-other";
 const SOCKET_NAME = "s";
 const TEMP_PREFIX = "hpf-";
-const PROTOCOL_VERSION = 20;
-const HERDR_VERSION = "0.8.2";
+const DEFAULT_HERDR_BINARY = "herdr";
+const HERDR_VERSION_PATTERN = /(\d+\.\d+\.\d+)/;
 const AGENT_STATUS = "idle";
 const MAX_ABORT_WAIT_MS = 2_000;
 const SPLIT_DELAY_MS = 5;
@@ -36,6 +37,26 @@ const EXPECTED_SUBSCRIPTIONS = [
   { type: "tab.focused" },
   { type: "workspace.focused" },
 ];
+
+interface HerdrRuntime {
+  readonly version: string;
+  readonly protocol: number;
+}
+
+// The native CLI refuses a socket whose API protocol differs from its own, and
+// these tests run against whichever Herdr HERDR_BIN_PATH or PATH provides.
+// Probing that exact binary keeps the fake socket compatible across releases.
+const HERDR_RUNTIME: HerdrRuntime = probeHerdrRuntime();
+
+function probeHerdrRuntime(): HerdrRuntime {
+  const binary = process.env.HERDR_BIN_PATH ?? DEFAULT_HERDR_BINARY;
+  const stdio = ["ignore", "pipe", "ignore"] as const;
+  const schema = JSON.parse(execFileSync(binary, ["api", "schema", "--json"], { encoding: "utf8", stdio: [...stdio] })) as { protocol?: unknown };
+  if (typeof schema.protocol !== "number") throw new Error(`Herdr did not report an API protocol: ${binary}`);
+  const version = HERDR_VERSION_PATTERN.exec(execFileSync(binary, ["--version"], { encoding: "utf8", stdio: [...stdio] }))?.[1];
+  if (!version) throw new Error(`Herdr did not report a version: ${binary}`);
+  return { version, protocol: schema.protocol };
+}
 
 interface TestServer {
   readonly path: string;
@@ -56,8 +77,8 @@ function snapshotResponse(id: unknown, focusedPaneId = PANE_ID, paneCount = 1): 
     result: {
       type: "session_snapshot",
       snapshot: {
-        version: HERDR_VERSION,
-        protocol: PROTOCOL_VERSION,
+        version: HERDR_RUNTIME.version,
+        protocol: HERDR_RUNTIME.protocol,
         focused_workspace_id: focusedPaneId === PANE_ID ? WORKSPACE_ID : OTHER_WORKSPACE_ID,
         focused_tab_id: focusedPaneId === PANE_ID ? TAB_ID : OTHER_TAB_ID,
         focused_pane_id: focusedPaneId,
@@ -124,7 +145,7 @@ async function startServer(onRequest: RequestHandler): Promise<TestServer> {
         const request = JSON.parse(raw) as Record<string, unknown>;
         // The native CLI checks protocol compatibility before requesting a snapshot.
         if (request.method === PING_METHOD) {
-          socket.end(line({ id: request.id, result: { type: PONG_TYPE, version: HERDR_VERSION, protocol: PROTOCOL_VERSION } }));
+          socket.end(line({ id: request.id, result: { type: PONG_TYPE, version: HERDR_RUNTIME.version, protocol: HERDR_RUNTIME.protocol } }));
           return;
         }
         requests.push(request);

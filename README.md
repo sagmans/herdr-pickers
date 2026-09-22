@@ -15,8 +15,8 @@ workspace action.
 - Git
 - macOS or Linux; Windows is out of scope
 
-Tested on macOS with Ghostty `1.3.1` and Herdr `0.8.2`. Linux is exercised
-by this repository's PTY smoke suite in CI.
+Tested on macOS with Ghostty `1.3.1` and Herdr `0.9.1`. Herdr `0.8.2` stays
+covered by the PTY smoke workflow, which also exercises Linux in CI.
 
 ## Install
 

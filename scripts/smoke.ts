@@ -11,12 +11,16 @@ import { runPickerLifecycleSmoke, type CliResult, type SmokeSession } from "./sm
 const PLUGIN_ROOT = join(import.meta.dir, "..");
 const PLUGIN_ID = "herdr-pickers";
 const CONFIG_FILE_NAME = "config.toml";
+const XDG_CONFIG_DIR = "x";
+const HERDR_CONFIG_DIR = "herdr";
+const HERDR_ONBOARDING_COMPLETE = "onboarding = false\n";
 const SMOKE_CONFIG = '[keymap]\nup = ["up", "ctrl-k"]\ndown = ["down", "ctrl-j"]\n';
 const KEY_CTRL_C = "\u0003";
 const KEY_CTRL_J = "\u000a";
 const KEY_ENTER = "\r";
 const KEY_ESCAPE = "\u001b";
 const KEY_INPUT_SETTLE_MS = 100;
+const CLIENT_EXIT_GRACE_MS = 1_000;
 const PICKER_PANE_LABEL = "Herdr Picker";
 const OVERLAY_PICKER_PROMPT = "workspaces › ";
 const SMOKE_QUERY = "smoke-";
@@ -64,7 +68,7 @@ function isolatedEnv(): Record<string, string> {
   // only moves the config file, not the sessions directory.
   // herdr spreads state across every XDG base dir; redirecting only
   // XDG_CONFIG_HOME leaked plugin state into the host ~/.local/state.
-  env.XDG_CONFIG_HOME = join(root, "x");
+  env.XDG_CONFIG_HOME = join(root, XDG_CONFIG_DIR);
   env.XDG_STATE_HOME = join(root, "s");
   env.XDG_DATA_HOME = join(root, "d");
   env.XDG_CACHE_HOME = join(root, "c");
@@ -144,10 +148,6 @@ function finish(code: number): never {
       writeFileSync(join(root, `${sessionName}-plugins.json`), cliFor(sessionName, ["plugin", "log", "list"]).stdout);
     }
   }
-  for (const proc of [attach, secondAttach]) {
-    if (!proc) continue;
-    try { proc.kill(); } catch { /* already gone */ }
-  }
   if (isolatedSessions.has(SESSION_NAME)) cli(["plugin", "unlink", PLUGIN_ID]);
   for (const sessionName of [SESSION_NAME, SECOND_SESSION_NAME]) {
     if (!isolatedSessions.has(sessionName)) continue;
@@ -155,6 +155,14 @@ function finish(code: number): never {
     cliFor(sessionName, ["session", "delete", sessionName]);
   }
   for (const proc of [server, secondServer]) {
+    if (!proc) continue;
+    try { proc.kill(); } catch { /* already gone */ }
+  }
+  // Attached TUI clients exit once their session disappears. Signalling them
+  // first wedged them in exit on macOS, and their PTY bridges then waited
+  // forever, so let the session shutdown reach them before the fallback kill.
+  Bun.sleepSync(CLIENT_EXIT_GRACE_MS);
+  for (const proc of [attach, secondAttach]) {
     if (!proc) continue;
     try { proc.kill(); } catch { /* already gone */ }
   }
@@ -209,6 +217,12 @@ function focusedWorkspaceId(): string | undefined {
 async function main(): Promise<void> {
   console.error(`smoke root: ${root}`);
   mkdirSync(fixtureRoot, { recursive: true });
+  // herdr 0.9.x renders setup in each client, and a fresh config still shows
+  // first-run onboarding that captures input before plugin popups. Real
+  // installations have completed it, so the isolated runtime must match.
+  const herdrConfigDir = join(root, XDG_CONFIG_DIR, HERDR_CONFIG_DIR);
+  mkdirSync(herdrConfigDir, { recursive: true });
+  writeFileSync(join(herdrConfigDir, CONFIG_FILE_NAME), HERDR_ONBOARDING_COMPLETE, "utf8");
 
   const logFd = openSync(serverLog, "a");
   server = Bun.spawn(["herdr", "--session", SESSION_NAME, "server"], {

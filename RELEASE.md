@@ -31,8 +31,8 @@ The release surface includes these controls:
 - `herdr-plugin.toml` defines the plugin version, Herdr requirement, platforms, actions, events, and popup pane.
 - `package.json` and `herdr-plugin.toml` use the same version. `tests/manifest.test.ts` enforces this rule.
 - `mise.toml`, `bun.lock`, and `bunfig.toml` pin tools and protect dependency installation.
-- Pull-request CI runs tests, type checks, and `bun audit` on macOS and Linux.
-- `scripts/smoke.ts` runs the plugin in an isolated Herdr runtime. The on-demand smoke workflow runs on macOS and Linux.
+- Pull-request CI runs tests, type checks, and `bun audit` on Linux.
+- `scripts/smoke.ts` runs the plugin in an isolated Herdr runtime. The on-demand smoke workflow runs on macOS and Linux across the declared Herdr version range.
 - `README.md`, `SECURITY.md`, `LICENSE`, and `THIRD_PARTY_NOTICES.md` define installation, trust, reporting, and license terms.
 
 ## Release procedure
@@ -45,7 +45,7 @@ Every release must use a dedicated release pull request.
 4. If version references, requirements, notices, or user documentation changed, update them.
 5. Run `bun install --frozen-lockfile`, `bun test`, `bun run typecheck`, and `bun audit`.
 6. If the release changes runtime behavior, run `bun run smoke`.
-7. Run the smoke workflow. It tests both supported platforms.
+7. Run the smoke workflow. It tests both supported platforms and the declared Herdr version range.
 8. Test mouse input and visual output in a disposable real terminal session.
 9. Get approval for the release pull request.
 10. When all checks pass, squash-merge the release pull request.
