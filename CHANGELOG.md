@@ -4,6 +4,16 @@ All notable user-facing changes to Herdr Pickers are recorded in this file.
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-09-23
+
+### Added
+
+- The isolated smoke suite now drives the overlay picker's mouse input: wheel scrolling, click selection, and double-click dispatch.
+
+### Changed
+
+- The isolated smoke suite waits on real events (client paints, picker prompts, persisted focus history, and pane removal) and reads overlay frames from the pane buffer, so Herdr's diffed client output and loaded CI runners no longer produce false failures.
+
 ## [0.3.1] - 2026-09-22
 
 ### Changed
