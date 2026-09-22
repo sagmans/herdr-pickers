@@ -1,6 +1,6 @@
 {
   "name": "herdr-plugin-herdr-pickers",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "private": true,
   "type": "module",
   "description": "Mouse-aware Herdr navigation and agent pickers with fzf-backed ranking.",

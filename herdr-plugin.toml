@@ -1,6 +1,6 @@
 id = "herdr-pickers"
 name = "Herdr Pickers"
-version = "0.3.1"
+version = "0.3.2"
 min_herdr_version = "0.8.0"
 description = "Mouse-aware Herdr navigation and agent pickers with fzf-backed ranking."
 platforms = ["macos", "linux"]
