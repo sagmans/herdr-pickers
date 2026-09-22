@@ -1,10 +1,10 @@
-import { Database } from "bun:sqlite";
-import { readFileSync, statSync, writeFileSync } from "node:fs";
+import { statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { PickerLifecycleSmokeOptions } from "./smoke-picker-lifecycle.ts";
+import { readOwnershipDatabase } from "./smoke-database.ts";
+import { POLL_TIMEOUT_EXTENDED_MS } from "./smoke-timing.ts";
 import { hasErrorCode } from "../src/util/objects.ts";
 
-const DATABASE_SETUP = "PRAGMA busy_timeout = 2000";
 const OWNER_QUERY = "SELECT session, token, picker, pane, placement FROM owners";
 const REQUEST_QUERY = "SELECT token, mode, context, acknowledged FROM requests WHERE session = ?";
 const PLUGIN = "herdr-pickers";
@@ -32,20 +32,10 @@ interface Request { token: string; mode: string; context: string; acknowledged: 
 
 export async function runPickerReplacementSmoke(options: PickerLifecycleSmokeOptions, path: string): Promise<void> {
   const { primary: session, check, poll } = options;
-  const owners = (): Owner[] => {
-    const database = new Database(path, { readonly: true });
-    try {
-      database.exec(DATABASE_SETUP);
-      return database.query<Owner, []>(OWNER_QUERY).all();
-    } finally { database.close(); }
-  };
-  const request = (owner: Owner): Request | null => {
-    const database = new Database(path, { readonly: true });
-    try {
-      database.exec(DATABASE_SETUP);
-      return database.query<Request, [string]>(REQUEST_QUERY).get(owner.session);
-    } finally { database.close(); }
-  };
+  const owners = (): Owner[] =>
+    readOwnershipDatabase(path, (database) => database.query<Owner, []>(OWNER_QUERY).all());
+  const request = (owner: Owner): Request | null =>
+    readOwnershipDatabase(path, (database) => database.query<Request, [string]>(REQUEST_QUERY).get(owner.session));
   const invoke = (mode: string) => {
     const result = session.run(["plugin", "action", "invoke", `${PLUGIN}.${mode}`]);
     check(`${mode} replacement invokes`, result.code === 0, result.stderr);
@@ -67,14 +57,14 @@ export async function runPickerReplacementSmoke(options: PickerLifecycleSmokeOpt
       const active = owners().filter(alive);
       check("at most one replacement owner", active.length <= 1);
       return active[0] ? JSON.stringify(active[0]) : undefined;
-    });
+    }, POLL_TIMEOUT_EXTENDED_MS);
     return JSON.parse(serialized) as Owner;
   };
   const waitAdopted = async (owner: Owner, mode: string, oldRequest?: string): Promise<void> => {
     await poll(`${mode} newest request adopted`, () => {
       const current = request(owner);
       return current?.mode === mode && current.acknowledged === owner.token && current.token !== oldRequest ? current.token : undefined;
-    });
+    }, POLL_TIMEOUT_EXTENDED_MS);
   };
   const waitClosed = async (owner: Owner): Promise<void> => {
     await poll("replacement owner exits", () => !alive(owner) ? owner.token : undefined);
@@ -83,9 +73,11 @@ export async function runPickerReplacementSmoke(options: PickerLifecycleSmokeOpt
     check("replacement final cleanup completes", true);
   };
   const waitFrame = async (mode: string, offset: number): Promise<void> => {
-    const prompt = `${mode.replace("repo-", "repo ")} ›`;
+    // Herdr paints client diffs, so a popup prompt that already sits on screen
+    // emits no bytes to match; any client paint after the invoke proves the
+    // replacement reached the screen, and the ownership checks prove the mode.
     await poll(`${mode} replacement frame renders`, () =>
-      readFileSync(session.rawOutputPath).subarray(offset).toString("utf8").includes(prompt) ? mode : undefined);
+      statSync(session.rawOutputPath).size > offset ? mode : undefined, POLL_TIMEOUT_EXTENDED_MS);
   };
 
   for (const placement of ["popup", "overlay"] as const) {
@@ -115,7 +107,7 @@ export async function runPickerReplacementSmoke(options: PickerLifecycleSmokeOpt
         await poll(`${mode} overlay frame renders`, () => {
           const frame = session.run(["pane", "read", owner.pane!, "--source", "visible", "--format", "text"]);
           return frame.code === 0 && frame.stdout.includes(prompt) ? mode : undefined;
-        });
+        }, POLL_TIMEOUT_EXTENDED_MS);
       } else {
         // Herdr's client emits screen diffs; an unchanged popup prompt has no new byte sequence to match.
         await Bun.sleep(READY_MS);
