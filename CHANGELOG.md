@@ -4,9 +4,15 @@ All notable user-facing changes to Herdr Pickers are recorded in this file.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-22
+
 ### Changed
 
 - Verified compatibility with Herdr `0.9.x`; the smoke workflow now covers Herdr `0.8.2` and `0.9.1`.
+
+### Fixed
+
+- Pickers open on the active workspace, worktree, or agent when Herdr's focus flags lag behind live focus or the pane in use is missing from the agent list.
 
 ## [0.3.0] - 2026-09-10
 
