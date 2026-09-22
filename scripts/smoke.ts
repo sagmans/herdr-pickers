@@ -20,6 +20,7 @@ const KEY_CTRL_J = "\u000a";
 const KEY_ENTER = "\r";
 const KEY_ESCAPE = "\u001b";
 const KEY_INPUT_SETTLE_MS = 100;
+const CLIENT_EXIT_GRACE_MS = 1_000;
 const PICKER_PANE_LABEL = "Herdr Picker";
 const OVERLAY_PICKER_PROMPT = "workspaces › ";
 const SMOKE_QUERY = "smoke-";
@@ -147,10 +148,6 @@ function finish(code: number): never {
       writeFileSync(join(root, `${sessionName}-plugins.json`), cliFor(sessionName, ["plugin", "log", "list"]).stdout);
     }
   }
-  for (const proc of [attach, secondAttach]) {
-    if (!proc) continue;
-    try { proc.kill(); } catch { /* already gone */ }
-  }
   if (isolatedSessions.has(SESSION_NAME)) cli(["plugin", "unlink", PLUGIN_ID]);
   for (const sessionName of [SESSION_NAME, SECOND_SESSION_NAME]) {
     if (!isolatedSessions.has(sessionName)) continue;
@@ -158,6 +155,14 @@ function finish(code: number): never {
     cliFor(sessionName, ["session", "delete", sessionName]);
   }
   for (const proc of [server, secondServer]) {
+    if (!proc) continue;
+    try { proc.kill(); } catch { /* already gone */ }
+  }
+  // Attached TUI clients exit once their session disappears. Signalling them
+  // first wedged them in exit on macOS, and their PTY bridges then waited
+  // forever, so let the session shutdown reach them before the fallback kill.
+  Bun.sleepSync(CLIENT_EXIT_GRACE_MS);
+  for (const proc of [attach, secondAttach]) {
     if (!proc) continue;
     try { proc.kill(); } catch { /* already gone */ }
   }
