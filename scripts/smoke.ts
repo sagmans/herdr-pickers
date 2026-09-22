@@ -11,6 +11,9 @@ import { runPickerLifecycleSmoke, type CliResult, type SmokeSession } from "./sm
 const PLUGIN_ROOT = join(import.meta.dir, "..");
 const PLUGIN_ID = "herdr-pickers";
 const CONFIG_FILE_NAME = "config.toml";
+const XDG_CONFIG_DIR = "x";
+const HERDR_CONFIG_DIR = "herdr";
+const HERDR_ONBOARDING_COMPLETE = "onboarding = false\n";
 const SMOKE_CONFIG = '[keymap]\nup = ["up", "ctrl-k"]\ndown = ["down", "ctrl-j"]\n';
 const KEY_CTRL_C = "\u0003";
 const KEY_CTRL_J = "\u000a";
@@ -64,7 +67,7 @@ function isolatedEnv(): Record<string, string> {
   // only moves the config file, not the sessions directory.
   // herdr spreads state across every XDG base dir; redirecting only
   // XDG_CONFIG_HOME leaked plugin state into the host ~/.local/state.
-  env.XDG_CONFIG_HOME = join(root, "x");
+  env.XDG_CONFIG_HOME = join(root, XDG_CONFIG_DIR);
   env.XDG_STATE_HOME = join(root, "s");
   env.XDG_DATA_HOME = join(root, "d");
   env.XDG_CACHE_HOME = join(root, "c");
@@ -209,6 +212,12 @@ function focusedWorkspaceId(): string | undefined {
 async function main(): Promise<void> {
   console.error(`smoke root: ${root}`);
   mkdirSync(fixtureRoot, { recursive: true });
+  // herdr 0.9.x renders setup in each client, and a fresh config still shows
+  // first-run onboarding that captures input before plugin popups. Real
+  // installations have completed it, so the isolated runtime must match.
+  const herdrConfigDir = join(root, XDG_CONFIG_DIR, HERDR_CONFIG_DIR);
+  mkdirSync(herdrConfigDir, { recursive: true });
+  writeFileSync(join(herdrConfigDir, CONFIG_FILE_NAME), HERDR_ONBOARDING_COMPLETE, "utf8");
 
   const logFd = openSync(serverLog, "a");
   server = Bun.spawn(["herdr", "--session", SESSION_NAME, "server"], {
