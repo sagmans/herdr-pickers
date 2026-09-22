@@ -14,7 +14,8 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-24.04, macos-15]
-        # The declared compatibility floor and the pinned toolchain both run.
+        # The declared floor (0.8.0) ships the same binary as 0.8.2, so 0.8.2
+        # is the oldest distinct runtime that can be exercised.
         herdr: ["0.8.2", "0.9.1"]
     runs-on: ${{ matrix.os }}
     steps:
