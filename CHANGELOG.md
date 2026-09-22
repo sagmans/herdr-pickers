@@ -4,6 +4,10 @@ All notable user-facing changes to Herdr Pickers are recorded in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Verified compatibility with Herdr `0.9.x`; the smoke workflow now covers Herdr `0.8.2` and `0.9.1`.
+
 ## [0.3.0] - 2026-09-10
 
 ### Added
