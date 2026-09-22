@@ -101,7 +101,11 @@ export function buildAgentTargets(
   options: AgentTargetOptions = {},
 ): AgentTarget[] {
   const workspaceById = indexWorkspacesById(workspaces);
-  return uniqueBy(agents.filter((agent) => !shouldExcludeAgent(agent, current, options.includeFocused === true)), (agent) => agent.target).map((agent) => {
+  // Resolve the preference across all visible rows first: an undetected source
+  // pane must not disable every row's claim to be the current one.
+  const visible = agents.filter((agent) => !shouldExcludeAgent(agent, current, options.includeFocused === true));
+  const isCurrent = agentFocusSelector(visible, current);
+  return uniqueBy(visible, (agent) => agent.target).map((agent) => {
     const workspace = agent.workspaceId ? workspaceById.get(agent.workspaceId) : undefined;
     const worktree = agentWorktreeLabel(agent, workspace);
     return {
@@ -112,7 +116,7 @@ export function buildAgentTargets(
       worktree,
       status: agent.status,
       cwd: agent.cwd,
-      focused: isCurrentAgent(agent, workspace, current),
+      focused: isCurrent(agent, workspace),
       repo: workspace ? workspaceRepoName(workspace) : undefined,
       repoKey: agentRepoKey(agent, workspace),
       boardLabel: worktree ?? agent.label,
@@ -299,15 +303,35 @@ function worktreeDetail(worktree: WorktreeRecord): string | undefined {
 }
 
 // Herdr's focused flags lag behind live focus, so the source pane id is the
-// authoritative current-agent signal; flags only fill gaps when the picker
-// runs without pane context.
-function isCurrentAgent(agent: AgentRecord, workspace: WorkspaceRecord | undefined, current: CurrentContext): boolean {
-  if (current.paneId) return agent.paneId === current.paneId;
-  return agent.focused === true || workspace?.focused === true;
+// authoritative current-agent signal. Detection can skip the source pane
+// entirely, and a switcher must still anchor to the source workspace instead
+// of springing back to the first row.
+function agentFocusSelector(
+  agents: readonly AgentRecord[],
+  current: CurrentContext,
+): (agent: AgentRecord, workspace: WorkspaceRecord | undefined) => boolean {
+  const paneId = current.paneId;
+  if (paneId && agents.some((agent) => agent.paneId === paneId)) {
+    return (agent) => agent.paneId === paneId;
+  }
+  const workspaceId = current.workspaceId;
+  const inSourceWorkspace = (agent: AgentRecord): boolean => workspaceId !== undefined && agent.workspaceId === workspaceId;
+  if (workspaceId && agents.some(inSourceWorkspace)) {
+    // A flagged sibling inside the source workspace stays closer to the live
+    // focus than an arbitrary agent flagged by an older focus change.
+    const flaggedSibling = agents.some((agent) => inSourceWorkspace(agent) && agent.focused === true);
+    return flaggedSibling
+      ? (agent) => inSourceWorkspace(agent) && agent.focused === true
+      : inSourceWorkspace;
+  }
+  return (agent, workspace) => agent.focused === true || workspace?.focused === true;
 }
 
 function isCurrentWorkspace(workspace: WorkspaceRecord | undefined, current: CurrentContext): boolean {
-  return workspace?.focused === true || (!!current.workspaceId && workspace?.workspaceId === current.workspaceId);
+  // The live source workspace outranks Herdr's lagging focused flag; the flag
+  // only stands in when the picker runs without workspace context.
+  if (current.workspaceId) return workspace?.workspaceId === current.workspaceId;
+  return workspace?.focused === true;
 }
 
 function isCurrentPath(path: string, current: CurrentContext, workspace: WorkspaceRecord | undefined = undefined): boolean {

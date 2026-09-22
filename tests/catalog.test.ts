@@ -154,4 +154,41 @@ describe("navigation target builders", () => {
 
     expect(targets.filter((target) => target.focused).map((target) => target.agentTarget)).toEqual(["p1"]);
   });
+
+  test("agent targets fall back to the source workspace when the pane agent is not listed", () => {
+    const targets = buildAgentTargets([
+      { target: "p1", paneId: "w:p1", workspaceId: "source", label: "pi" },
+      { target: "p2", paneId: "w:p2", workspaceId: "source", label: "codex", focused: true },
+      { target: "p3", paneId: "w:p3", workspaceId: "other", label: "pi" },
+    ], [], { paneId: "w:missing", workspaceId: "source" }, { includeFocused: true });
+
+    expect(targets.filter((target) => target.focused).map((target) => target.agentTarget)).toEqual(["p2"]);
+  });
+
+  test("agent targets prefer the source workspace over unrelated focused agents", () => {
+    const targets = buildAgentTargets([
+      { target: "p1", paneId: "w:p1", workspaceId: "source", label: "pi" },
+      { target: "p2", paneId: "w:p2", workspaceId: "other", label: "pi", focused: true },
+    ], [], { paneId: "w:missing", workspaceId: "source" }, { includeFocused: true });
+
+    expect(targets.filter((target) => target.focused).map((target) => target.agentTarget)).toEqual(["p1"]);
+  });
+
+  test("agent targets fall back to focused flags when the pane and workspace are unknown", () => {
+    const targets = buildAgentTargets([
+      { target: "p1", paneId: "w:p1", label: "pi", focused: true },
+      { target: "p2", paneId: "w:p2", label: "codex" },
+    ], [], { paneId: "w:missing" }, { includeFocused: true });
+
+    expect(targets.filter((target) => target.focused).map((target) => target.agentTarget)).toEqual(["p1"]);
+  });
+
+  test("workspace targets trust the source workspace id over stale focused flags", () => {
+    const targets = buildWorkspaceTargets([
+      { workspaceId: "stale", focused: true },
+      { workspaceId: "source" },
+    ], { workspaceId: "source" });
+
+    expect(targets.filter((target) => target.current).map((target) => target.workspaceId)).toEqual(["source"]);
+  });
 });
