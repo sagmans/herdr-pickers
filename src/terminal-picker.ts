@@ -5,18 +5,13 @@ import {
   type PickerItem,
   type PickerRows,
 } from "./picker-row.ts";
-import {
-  ESCAPE_KEY_SEQUENCE,
-  parseInput,
-  type InputEvent,
-} from "./terminal-picker-input.ts";
+import { CURSOR_SHOW, type TerminalLease } from "./picker-terminal.ts";
+import { InputFramer, type InputEvent } from "./terminal-picker-input.ts";
+import { reduceInteraction, type InteractionState } from "./terminal-picker-state.ts";
 import {
   fitSelection,
   initialSelection,
-  mouseAction,
-  moveSelection,
   renderFrame,
-  scrollRows,
   type PickerState,
   type Viewport,
 } from "./terminal-picker-view.ts";
@@ -26,38 +21,14 @@ export type { InputEvent, MouseEvent, ParsedInput } from "./terminal-picker-inpu
 export { mouseAction, renderFrame } from "./terminal-picker-view.ts";
 export type { PickerAction, PickerState, Viewport } from "./terminal-picker-view.ts";
 
-const DEFAULT_COLUMNS = 80;
-const DEFAULT_ROWS = 24;
 const ESCAPE_SEQUENCE_TIMEOUT_MILLISECONDS = 25;
 const LOADING_MESSAGE = "Loading…";
-const DOUBLE_CLICK_MILLISECONDS = 400;
-const WHEEL_STEP = 3;
-const ALTERNATE_SCREEN_ENTER = "\x1b[?1049h";
-const ALTERNATE_SCREEN_EXIT = "\x1b[?1049l";
-const MOUSE_TRACKING_ENABLE = "\x1b[?1000h";
-const MOUSE_TRACKING_DISABLE = "\x1b[?1000l";
-const SGR_MOUSE_ENABLE = "\x1b[?1006h";
-const SGR_MOUSE_DISABLE = "\x1b[?1006l";
-const LINE_WRAP_DISABLE = "\x1b[?7l";
-const LINE_WRAP_ENABLE = "\x1b[?7h";
 const CURSOR_HIDE = "\x1b[?25l";
-const CURSOR_SHOW = "\x1b[?25h";
 const CLEAR_SCREEN = "\x1b[2J";
 const CURSOR_HOME = "\x1b[H";
 const CURSOR_POSITION_SUFFIX = "H";
 const CSI_PREFIX = "\x1b[";
 const FIRST_TERMINAL_CELL = 1;
-const ESCAPE_INPUT_EVENT: InputEvent = { type: "escape" };
-export const TERMINAL_START = `${ALTERNATE_SCREEN_ENTER}${LINE_WRAP_DISABLE}${MOUSE_TRACKING_ENABLE}${SGR_MOUSE_ENABLE}`;
-export const TERMINAL_STOP = `${SGR_MOUSE_DISABLE}${MOUSE_TRACKING_DISABLE}${LINE_WRAP_ENABLE}${CURSOR_SHOW}${ALTERNATE_SCREEN_EXIT}`;
-
-export interface TerminalAdapter {
-  readonly input: AsyncIterable<string | Uint8Array>;
-  write(value: string): void;
-  setRawMode(enabled: boolean): void;
-  getViewport(): Viewport;
-  onResize(listener: () => void): () => void;
-}
 
 export interface PickerTimers {
   readonly setInterval: (callback: () => void, milliseconds: number) => unknown;
@@ -69,18 +40,15 @@ const SYSTEM_TIMERS: PickerTimers = {
   clearInterval: (handle) => clearInterval(handle as NodeJS.Timeout),
 };
 
-export interface TerminalPickerOptions extends PickerRows {
+/** What a mode asks of the picker; the terminal is supplied separately by its owner. */
+export interface PickerOptions extends PickerRows {
   readonly signal?: AbortSignal | undefined;
   readonly onAccept?: ((selection: PickerItem) => Promise<void>) | undefined;
-  readonly beforeCleanup?: (() => Promise<void>) | undefined;
-  readonly sharedTerminal?: boolean;
-  readonly inputState?: { remainder: string };
   readonly prompt: string;
   readonly noun: string;
   readonly live?: boolean | undefined;
   readonly emptyMessage?: string | undefined;
   readonly keymap?: PickerKeymap | undefined;
-  readonly terminal?: TerminalAdapter | undefined;
   readonly ranker?: ((query: string, items: readonly PickerItem[]) => Promise<PickerItem[]>) | undefined;
   readonly reload?: (() => Promise<PickerRows>) | undefined;
   readonly loadOnStart?: boolean | undefined;
@@ -89,48 +57,57 @@ export interface TerminalPickerOptions extends PickerRows {
   readonly refreshIntervalMilliseconds?: number | undefined;
 }
 
+export interface TerminalPickerOptions extends PickerOptions {
+  /** Borrowed from PickerTerminal, which alone restores the device afterwards. */
+  readonly terminal: TerminalLease;
+}
+
+type Outcome = { readonly done: false } | { readonly done: true; readonly selection?: PickerItem | undefined };
+const CONTINUE: Outcome = { done: false };
+const CLOSED: Outcome = { done: true };
+
+/**
+ * Runs one picker mode on a borrowed terminal until selection, dismissal, or
+ * cancellation. Terminal modes are not touched here: leaving the frame drawn
+ * lets the owner dismiss the surface before the primary screen returns.
+ */
 export async function runTerminalPicker(options: TerminalPickerOptions): Promise<PickerItem | undefined> {
   if (options.signal?.aborted) return undefined;
-  const terminal = options.terminal ?? systemTerminal();
+  const { terminal, signal } = options;
   const keymap = options.keymap ?? DEFAULT_PICKER_KEYMAP;
-  const ranker = options.ranker ?? ((query, items) => rankRows(query, items, options.signal));
+  const ranker = options.ranker ?? ((query, items) => rankRows(query, items, signal));
   const now = options.now ?? Date.now;
   const timers = options.timers ?? SYSTEM_TIMERS;
-  let sourceItems = [...options.items];
-  let focusedId = options.focusedId;
-  let state = fitSelection({
-    prompt: options.prompt,
-    noun: options.noun,
-    live: options.live,
-    emptyMessage: options.loadOnStart === true ? LOADING_MESSAGE : options.emptyMessage,
-    query: "",
-    items: arrangePickerItems(sourceItems),
-    sourceCount: sourceItems.length,
-    selected: initialSelection(sourceItems, focusedId),
-    scrollTop: 0,
-  }, terminal.getViewport());
-  let pending = options.inputState?.remainder ?? "";
-  let discardFragment = pending.length > 0;
-  const decoder = new TextDecoder();
-  let rawMode = false;
-  let removeResizeListener = (): void => {};
-  let cleaned = false;
-  let accepting = false;
-  let refreshRunning: Promise<void> | undefined;
-  let refreshPending = false;
-  let rankRevision = 0;
-  let timerFailureRaised = false;
-  let rejectTimerFailure!: (error: unknown) => void;
-  const timerFailure = new Promise<never>((_resolve, reject) => { rejectTimerFailure = reject; });
+  const framer = new InputFramer(terminal.inputState, keymap);
+  const failure = failureChannel();
   const intervalHandles: unknown[] = [];
-  let previousClick: { readonly itemId: string; readonly time: number } | undefined;
-
-  const draw = (): void => {
-    if (!cleaned && !accepting && !options.signal?.aborted) drawFrame(terminal, state);
+  let rows: PickerRows = { items: [...options.items], focusedId: options.focusedId };
+  let interaction: InteractionState = {
+    view: fitSelection({
+      prompt: options.prompt,
+      noun: options.noun,
+      live: options.live,
+      emptyMessage: options.loadOnStart === true ? LOADING_MESSAGE : options.emptyMessage,
+      query: "",
+      items: arrangePickerItems(rows.items),
+      sourceCount: rows.items.length,
+      selected: initialSelection(rows.items, rows.focusedId),
+      scrollTop: 0,
+    }, terminal.getViewport()),
   };
-  const cleanup = (): void => {
-    if (cleaned) return;
-    cleaned = true;
+  // "accepting" freezes the selected frame until the destination owns focus.
+  let phase: "running" | "accepting" | "closed" = "running";
+  let rankRevision = 0;
+  let removeResizeListener = (): void => {};
+
+  const idle = (): boolean => phase !== "running" || signal?.aborted === true;
+  const draw = (): void => {
+    if (!idle()) drawFrame(terminal, interaction.view);
+  };
+  const close = (): void => {
+    if (phase === "closed") return;
+    phase = "closed";
+    rankRevision++;
     for (const handle of intervalHandles) {
       try {
         timers.clearInterval(handle);
@@ -139,265 +116,180 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
     try {
       removeResizeListener();
     } catch {}
-    try {
-      if (!options.sharedTerminal) terminal.write(TERMINAL_STOP);
-    } catch {}
-    if (rawMode) {
-      try {
-        terminal.setRawMode(false);
-      } catch {}
-      rawMode = false;
-    }
   };
-  const failFromTimer = (error: unknown): void => {
-    if (cleaned || timerFailureRaised || (accepting && !options.signal?.aborted)) return;
-    timerFailureRaised = true;
-    rejectTimerFailure(error);
+  const failFromBackground = (error: unknown): void => {
+    // An accepted handoff ignores late refresh errors unless cancellation intervened.
+    if (phase === "closed" || (phase === "accepting" && !signal?.aborted)) return;
+    failure.fail(error);
   };
   const applyQuery = async (query: string): Promise<void> => {
-    if (cleaned || accepting || options.signal?.aborted) return;
-    previousClick = undefined;
+    if (idle()) return;
     // An unchanged query is a live refresh: keep the pointer where the user
     // put it. A changed query is typing: best match wins, and an empty query
     // returns to the focused/current row.
-    const preserveSelection = query === state.query;
-    state = { ...state, query };
+    const preserveSelection = query === interaction.view.query;
+    interaction = { view: { ...interaction.view, query } };
     const revision = ++rankRevision;
     let items: PickerItem[];
     try {
-      items = arrangePickerItems(await ranker(query, sourceItems));
+      items = arrangePickerItems(await ranker(query, rows.items));
     } catch (error) {
-      if (revision !== rankRevision || cleaned) return;
+      if (revision !== rankRevision || phase === "closed") return;
       throw error;
     }
-    if (revision !== rankRevision || cleaned) return;
+    if (revision !== rankRevision || phase === "closed") return;
+    const view = interaction.view;
     let selected = query.length === 0
-      ? initialSelection(items, focusedId)
+      ? initialSelection(items, rows.focusedId)
       : items.length === 0 ? -1 : 0;
     if (preserveSelection) {
-      const selectedItem = state.items[state.selected];
+      const selectedItem = view.items[view.selected];
       const previous = selectedItem === undefined ? -1 : items.findIndex((item) => item.id === selectedItem.id);
       if (previous >= 0) selected = previous;
     }
-    state = fitSelection({ ...state, query, items, selected }, terminal.getViewport());
+    interaction = { ...interaction, view: fitSelection({ ...view, query, items, selected }, terminal.getViewport()) };
   };
   const reloadRows = async (): Promise<void> => {
-    if (!options.reload || cleaned || accepting || options.signal?.aborted) return;
-    const rows = await options.reload();
-    if (cleaned || accepting || options.signal?.aborted) return;
-    sourceItems = [...rows.items];
-    focusedId = rows.focusedId;
+    if (!options.reload || idle()) return;
+    const loaded = await options.reload();
+    if (idle()) return;
+    rows = { items: [...loaded.items], focusedId: loaded.focusedId };
     // Loading copy is placeholder-only: once rows arrive, emptiness is real.
-    state = { ...state, emptyMessage: options.emptyMessage, sourceCount: sourceItems.length };
-    await applyQuery(state.query);
-    if (!cleaned) draw();
+    interaction = { ...interaction, view: { ...interaction.view, emptyMessage: options.emptyMessage, sourceCount: rows.items.length } };
+    await applyQuery(interaction.view.query);
+    draw();
   };
-  const refresh = (): Promise<void> => {
-    if (refreshRunning) {
-      refreshPending = true;
-      return refreshRunning;
-    }
-    const run = (async (): Promise<void> => {
-      try {
-        do {
-          refreshPending = false;
-          await reloadRows();
-        } while (refreshPending && !cleaned);
-      } finally {
-        refreshRunning = undefined;
-      }
-    })();
-    refreshRunning = run;
-    return run;
-  };
-  const handleEvents = async (events: readonly InputEvent[]): Promise<{ readonly done: boolean; readonly selection?: PickerItem | undefined }> => {
+  const refresh = coalesce(reloadRows, () => phase !== "closed");
+  const handleEvents = async (events: readonly InputEvent[]): Promise<Outcome> => {
     for (const event of events) {
-      if (cleaned || options.signal?.aborted) return { done: true };
-      let selection: PickerItem | undefined;
-      let done = false;
-      switch (event.type) {
+      if (phase === "closed" || signal?.aborted) return CLOSED;
+      const step = reduceInteraction(interaction, event, { viewport: terminal.getViewport(), now });
+      interaction = step.state;
+      const { effect } = step;
+      switch (effect.type) {
+        case "none":
+          break;
         case "close":
-          done = true;
-          break;
-        case "escape":
-          if (state.query.length === 0) {
-            done = true;
-          } else {
-            await applyQuery("");
-          }
-          break;
+          return CLOSED;
         case "accept":
-          selection = state.items[state.selected];
-          done = selection !== undefined;
-          break;
-        case "up":
-          previousClick = undefined;
-          state = moveSelection(state, -1, terminal.getViewport());
-          break;
-        case "down":
-          previousClick = undefined;
-          state = moveSelection(state, 1, terminal.getViewport());
-          break;
-        case "backspace":
-          await applyQuery(Array.from(state.query).slice(0, -1).join(""));
-          break;
-        case "text":
-          await applyQuery(state.query + event.value);
+          phase = "accepting";
+          rankRevision++;
+          await options.onAccept?.(effect.selection);
+          return { done: true, selection: effect.selection };
+        case "query":
+          await applyQuery(effect.query);
           break;
         case "reload":
           await refresh();
           break;
-        case "mouse": {
-          const action = mouseAction(event, state, terminal.getViewport());
-          if (action.type === "close") {
-            done = true;
-          } else if (action.type === "scroll") {
-            previousClick = undefined;
-            state = scrollRows(state, action.delta * WHEEL_STEP, terminal.getViewport());
-          } else if (action.type === "select") {
-            const clickedAt = now();
-            const clickedItem = state.items[action.index];
-            if (clickedItem !== undefined && previousClick?.itemId === clickedItem.id && clickedAt - previousClick.time <= DOUBLE_CLICK_MILLISECONDS) {
-              selection = clickedItem;
-              done = true;
-            } else {
-              state = fitSelection({ ...state, selected: action.index }, terminal.getViewport());
-              if (clickedItem !== undefined) previousClick = { itemId: clickedItem.id, time: clickedAt };
-            }
-          }
-          break;
-        }
         default: {
-          const exhaustive: never = event;
+          const exhaustive: never = effect;
           return exhaustive;
         }
       }
-      if (done) {
-        if (selection) {
-          // Keep the selected frame intact until the destination owns focus.
-          accepting = true;
-          rankRevision++;
-          await options.onAccept?.(selection);
-        }
-        return { done, selection };
-      }
       draw();
     }
-    return { done: false };
+    return CONTINUE;
   };
+  // Background failures (timers, cancellation) interrupt whichever await is pending.
+  const settle = (events: readonly InputEvent[]): Promise<Outcome> => Promise.race([handleEvents(events), failure.promise]);
 
-  let iterator: AsyncIterator<string | Uint8Array> | undefined;
-  const abort = (): void => failFromTimer(options.signal?.reason);
-  options.signal?.addEventListener("abort", abort, { once: true });
+  let iterator: AsyncIterator<string> | undefined;
+  const abort = (): void => failFromBackground(signal?.reason);
+  signal?.addEventListener("abort", abort, { once: true });
   try {
-    if (!options.sharedTerminal) {
-      terminal.setRawMode(true);
-      rawMode = true;
-      terminal.write(TERMINAL_START);
-    }
     removeResizeListener = terminal.onResize(() => {
-      state = fitSelection(state, terminal.getViewport());
+      interaction = { ...interaction, view: fitSelection(interaction.view, terminal.getViewport()) };
       draw();
     });
     if (options.reload && options.refreshIntervalMilliseconds !== undefined) {
       intervalHandles.push(timers.setInterval(() => {
-        void refresh().catch(failFromTimer);
+        void refresh().catch(failFromBackground);
       }, options.refreshIntervalMilliseconds));
     }
     draw();
     // First frame must precede discovery; loading failures ride the same
     // failure channel as timer refreshes so cleanup stays on one path.
-    if (options.loadOnStart === true) void refresh().catch(failFromTimer);
+    if (options.loadOnStart === true) void refresh().catch(failFromBackground);
 
     iterator = terminal.input[Symbol.asyncIterator]();
     let nextInput = iterator.next();
     while (true) {
-      let input: IteratorResult<string | Uint8Array>;
-      if (pending.startsWith(ESCAPE_KEY_SEQUENCE)) {
-        const raced = await Promise.race([
-          nextInput.then((result) => ({ type: "input" as const, result })),
-          Bun.sleep(ESCAPE_SEQUENCE_TIMEOUT_MILLISECONDS).then(() => ({ type: "timeout" as const })),
-          timerFailure,
-        ]);
-        if (raced.type === "timeout") {
-          if (pending !== ESCAPE_KEY_SEQUENCE) continue;
-          pending = "";
-          if (discardFragment) { discardFragment = false; continue; }
-          const outcome = await Promise.race([handleEvents([ESCAPE_INPUT_EVENT]), timerFailure]);
-          if (outcome.done) return outcome.selection;
-          continue;
-        }
-        input = raced.result;
-      } else {
-        input = await Promise.race([nextInput, timerFailure]);
-      }
-      if (input.done) {
-        if (pending === ESCAPE_KEY_SEQUENCE && !discardFragment) {
-          const outcome = await Promise.race([handleEvents([ESCAPE_INPUT_EVENT]), timerFailure]);
-          if (outcome.done) return outcome.selection;
-        }
-        return undefined;
-      }
-      const chunk = input.value;
-      const stalePrefixLength = discardFragment ? pending.length : 0;
-      pending += typeof chunk === "string" ? chunk : decoder.decode(chunk, { stream: true });
-      const parsed = parseInput(pending, keymap, stalePrefixLength);
-      discardFragment = stalePrefixLength > pending.length - parsed.remainder.length;
-      pending = parsed.remainder;
-      const outcome = await Promise.race([handleEvents(parsed.events), timerFailure]);
+      const raced = await Promise.race([
+        nextInput.then((result) => ({ type: "input" as const, result })),
+        // A buffered Escape is ambiguous until its continuation arrives or this window lapses.
+        ...(framer.awaitingEscape
+          ? [Bun.sleep(ESCAPE_SEQUENCE_TIMEOUT_MILLISECONDS).then(() => ({ type: "timeout" as const }))]
+          : []),
+        failure.promise,
+      ]);
+      const events = raced.type === "timeout"
+        ? framer.expireEscape()
+        : raced.result.done ? framer.finalEvents() : framer.feed(raced.result.value);
+      const outcome = events.length > 0 ? await settle(events) : CONTINUE;
       if (outcome.done) return outcome.selection;
-      nextInput = iterator.next();
+      if (raced.type === "input") {
+        if (raced.result.done) return undefined;
+        nextInput = iterator.next();
+      }
     }
   } catch (error) {
-    if (options.signal?.aborted) return undefined;
+    if (signal?.aborted) return undefined;
     throw error;
   } finally {
-    options.signal?.removeEventListener("abort", abort);
-    if (options.inputState) options.inputState.remainder = pending;
-    // Restoring the blank primary screen before surface removal exposes an empty pane.
-    accepting = true;
-    rankRevision++;
+    signal?.removeEventListener("abort", abort);
+    framer.save();
+    close();
+    // A pending Escape read must not delay teardown.
     try {
-      await options.beforeCleanup?.();
-    } finally {
-      cleanup();
-      // A pending Escape read must not delay teardown.
-      try {
-        void iterator?.return?.();
-      } catch {}
-    }
+      void iterator?.return?.();
+    } catch {}
   }
 }
 
-export function systemTerminal(): TerminalAdapter {
+/** One-shot rejection that lets background work interrupt the foreground loop. */
+function failureChannel(): { readonly promise: Promise<never>; fail(error: unknown): void } {
+  let raised = false;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<never>((_resolve, rejectPromise) => { reject = rejectPromise; });
   return {
-    input: process.stdin,
-    write: (value) => {
-      process.stdout.write(value);
-    },
-    setRawMode: (enabled) => {
-      if (!process.stdin.isTTY) throw new Error("Agent picker requires a TTY.");
-      process.stdin.setRawMode(enabled);
-      if (enabled) {
-        process.stdin.resume();
-        process.stdin.ref();
-      } else {
-        process.stdin.pause();
-        process.stdin.unref();
-      }
-    },
-    getViewport: () => ({
-      columns: process.stdout.columns ?? DEFAULT_COLUMNS,
-      rows: process.stdout.rows ?? DEFAULT_ROWS,
-    }),
-    onResize: (listener) => {
-      process.stdout.on("resize", listener);
-      return () => process.stdout.off("resize", listener);
+    promise,
+    fail: (error) => {
+      if (raised) return;
+      raised = true;
+      reject(error);
     },
   };
 }
 
-function drawFrame(terminal: TerminalAdapter, state: PickerState): void {
+/**
+ * Single-flight with one trailing rerun: overlapping timer ticks and Ctrl-r
+ * presses share a reload instead of stacking Herdr queries.
+ */
+function coalesce(task: () => Promise<void>, active: () => boolean): () => Promise<void> {
+  let running: Promise<void> | undefined;
+  let again = false;
+  return () => {
+    if (running) {
+      again = true;
+      return running;
+    }
+    const run = (async (): Promise<void> => {
+      try {
+        do {
+          again = false;
+          await task();
+        } while (again && active());
+      } finally {
+        running = undefined;
+      }
+    })();
+    running = run;
+    return run;
+  };
+}
+
+function drawFrame(terminal: TerminalLease, state: PickerState): void {
   const viewport = terminal.getViewport();
   const frame = renderFrame(state, viewport);
   terminal.write(`${CURSOR_HIDE}${CLEAR_SCREEN}${CURSOR_HOME}${frame.join("\r\n")}${searchCursorPosition(state, viewport)}${CURSOR_SHOW}`);

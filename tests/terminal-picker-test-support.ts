@@ -1,7 +1,10 @@
-import type {
-  PickerTimers,
-  TerminalAdapter,
-  Viewport,
+import { withPickerTerminal, type TerminalAdapter } from "../src/picker-terminal.ts";
+import type { PickerItem } from "../src/picker-row.ts";
+import {
+  runTerminalPicker,
+  type PickerOptions,
+  type PickerTimers,
+  type Viewport,
 } from "../src/terminal-picker.ts";
 
 export const VIEWPORT: Viewport = { columns: 24, rows: 6 };
@@ -94,4 +97,15 @@ export class FakeTimers implements PickerTimers {
   activeCount(): number {
     return this.intervals.filter((interval) => interval.active).length;
   }
+}
+
+/**
+ * Runs one picker on a raw adapter through the production terminal owner, so
+ * tests observe the same start, restore, and dismissal ordering as the pane.
+ */
+export function runAdapterPicker(
+  options: PickerOptions & { readonly terminal: TerminalAdapter; readonly dismiss?: () => Promise<void> },
+): Promise<PickerItem | undefined> {
+  const { terminal, dismiss, ...picker } = options;
+  return withPickerTerminal(terminal, owner => runTerminalPicker({ ...picker, terminal: owner.lease(picker.signal) }), dismiss);
 }

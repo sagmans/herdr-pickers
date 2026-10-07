@@ -7,23 +7,23 @@ import { agentModeSpec, isAgentMode, navigationModeSpec, type AgentMode, type Na
 import { loadNavigationTargets, type NavigationTarget } from "./navigation.ts";
 import type { PickerItem } from "./picker-row.ts";
 import { renderAgentRows, renderNavigationRows } from "./rows.ts";
-import { runTerminalPicker, type TerminalPickerOptions } from "./terminal-picker.ts";
+import type { PickerOptions } from "./terminal-picker.ts";
 
 const AGENT_REFRESH_INTERVAL_MILLISECONDS = 1000;
 
-export type PickerRunner = (options: TerminalPickerOptions) => Promise<PickerItem | undefined>;
+/** Supplies the terminal for one mode; the picker loop binds it to the session-wide PickerTerminal. */
+export type PickerRunner = (options: PickerOptions) => Promise<PickerItem | undefined>;
 
 export interface PickerRuntime {
   readonly signal?: AbortSignal | undefined;
   readonly beforeDispatch?: (() => void | Promise<void>) | undefined;
-  readonly beforeCleanup?: (() => Promise<void>) | undefined;
   readonly herdr: Herdr;
   /** Surface the picker was opened from; absent means no source to mark or scope by. */
   readonly context?: CurrentContext | undefined;
   /** Only locates plugin configuration; source context never travels through it. */
   readonly env?: Record<string, string | undefined> | undefined;
   readonly gitRunner?: CommandRunner | undefined;
-  readonly pickerRunner?: PickerRunner | undefined;
+  readonly pickerRunner: PickerRunner;
   readonly config?: HerdrPickersConfig | undefined;
 }
 
@@ -46,13 +46,12 @@ export async function runAgentPicker(mode: AgentMode, runtime: PickerRuntime): P
   let initialLoad = true;
   let noAgents = false;
   const presentation = agentModeSpec(mode);
-  const picker = runtime.pickerRunner ?? runTerminalPicker;
+  const picker = runtime.pickerRunner;
   let dispatched = false;
   try {
     await picker({
       prompt: presentation.prompt,
       signal,
-      beforeCleanup: runtime.beforeCleanup,
       noun: presentation.noun,
       live: true,
       emptyMessage: presentation.emptyMessage,
@@ -90,7 +89,7 @@ async function runNavigationPicker(mode: NavigationMode, runtime: PickerRuntime)
   // Discovery stays off the first-frame path: the popup draws immediately and
   // the startup load rides the same reload path as manual Ctrl-r refreshes.
   let targets: NavigationTarget[] = [];
-  const picker = runtime.pickerRunner ?? runTerminalPicker;
+  const picker = runtime.pickerRunner;
   const presentation = navigationModeSpec(mode);
   const loadRows = async () => {
     runtime.signal?.throwIfAborted();
@@ -103,7 +102,6 @@ async function runNavigationPicker(mode: NavigationMode, runtime: PickerRuntime)
   await picker({
     prompt: presentation.prompt,
     signal: runtime.signal,
-    beforeCleanup: runtime.beforeCleanup,
     noun: presentation.noun,
     emptyMessage: presentation.emptyMessage,
     items: [],

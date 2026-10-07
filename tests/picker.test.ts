@@ -6,9 +6,9 @@ import { parseConfig } from "../src/config/config.ts";
 import { parseMode } from "../src/modes.ts";
 import { AgentTargetError, loadAgentTargets } from "../src/agents.ts";
 import { runAgentPicker, runPicker, type PickerRunner } from "../src/picker.ts";
-import type { TerminalPickerOptions } from "../src/terminal-picker.ts";
+import type { PickerOptions } from "../src/terminal-picker.ts";
 
-type PickerCall = TerminalPickerOptions;
+type PickerCall = PickerOptions;
 
 function fakePicker(target: string | undefined): { readonly runner: PickerRunner; readonly calls: PickerCall[] } {
   const calls: PickerCall[] = [];

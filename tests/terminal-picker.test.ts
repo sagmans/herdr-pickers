@@ -2,12 +2,13 @@ import { describe, expect, test } from "bun:test";
 
 import { parseConfig } from "../src/config/config.ts";
 import type { PickerGroup, PickerItem } from "../src/picker-row.ts";
-import { runTerminalPicker, type PickerState } from "../src/terminal-picker.ts";
+import type { PickerState } from "../src/terminal-picker.ts";
 import {
   FakeTerminal,
   FakeTimers,
   TALL_VIEWPORT,
   VIEWPORT,
+  runAdapterPicker,
 } from "./terminal-picker-test-support.ts";
 
 const ANSI_PATTERN = /\x1b\[[0-?]*[ -/]*[@-~]/g;
@@ -50,7 +51,7 @@ function plain(value: string): string {
 describe("terminal picker session", () => {
   test("positions the visible cursor at the first search character", async () => {
     const terminal = new FakeTerminal([], VIEWPORT, true);
-    const run = runTerminalPicker({ ...AGENT_PICKER_OPTIONS, prompt: "agents › ", items: STATE.items, terminal });
+    const run = runAdapterPicker({ ...AGENT_PICKER_OPTIONS, prompt: "agents › ", items: STATE.items, terminal });
 
     expect(terminal.writes.at(-1)).toEndWith("\x1b[6;10H\x1b[?25h");
 
@@ -61,7 +62,7 @@ describe("terminal picker session", () => {
   test("restores terminal state after clicking the close button", async () => {
     const terminal = new FakeTerminal(["\x1b[<0;23;1M"]);
 
-    expect(await runTerminalPicker({ ...AGENT_PICKER_OPTIONS, prompt: "agents> ", items: STATE.items, terminal })).toBeUndefined();
+    expect(await runAdapterPicker({ ...AGENT_PICKER_OPTIONS, prompt: "agents> ", items: STATE.items, terminal })).toBeUndefined();
 
     expect(terminal.rawModes).toEqual([true, false]);
     const output = terminal.writes.join("");
@@ -79,7 +80,7 @@ describe("terminal picker session", () => {
       return items.filter((item) => item.searchText.includes("pi"));
     };
 
-    const result = await runTerminalPicker({ ...AGENT_PICKER_OPTIONS, prompt: "agents> ", items: STATE.items, terminal, ranker });
+    const result = await runAdapterPicker({ ...AGENT_PICKER_OPTIONS, prompt: "agents> ", items: STATE.items, terminal, ranker });
 
     expect(queries).toEqual(["p"]);
     expect(result?.target).toBe("pane-1");
@@ -89,7 +90,7 @@ describe("terminal picker session", () => {
     const terminal = new FakeTerminal([KEY_CTRL_J, KEY_ENTER]);
     const keymap = parseConfig(VIM_KEYMAP_TOML, CONFIG_PATH).keymap;
 
-    const result = await runTerminalPicker({
+    const result = await runAdapterPicker({
       ...AGENT_PICKER_OPTIONS,
       prompt: "agents> ",
       items: STATE.items,
@@ -103,7 +104,7 @@ describe("terminal picker session", () => {
   test("points at the focused row before any input", async () => {
     const terminal = new FakeTerminal(["\x03"]);
 
-    await runTerminalPicker({ ...AGENT_PICKER_OPTIONS, prompt: "agents> ", items: STATE.items, focusedId: "codex", terminal });
+    await runAdapterPicker({ ...AGENT_PICKER_OPTIONS, prompt: "agents> ", items: STATE.items, focusedId: "codex", terminal });
 
     const frame = plain(terminal.writes.filter((write) => write.includes("\x1b[2J"))[0] ?? "").split("\r\n");
     const focusedLine = frame.find((line) => line.includes("feat ▸ codex")) ?? "";
@@ -123,7 +124,7 @@ describe("terminal picker session", () => {
         ? [...ranked]
         : ranked.filter((item) => item.searchText.includes(query)).toSorted((left, right) => left.id.localeCompare(right.id));
 
-    const result = await runTerminalPicker({
+    const result = await runAdapterPicker({
       ...AGENT_PICKER_OPTIONS,
       prompt: "agents> ",
       items,
@@ -142,7 +143,7 @@ describe("terminal picker session", () => {
     const terminal = new FakeTerminal([click, click]);
     const times = [100, 250];
 
-    const result = await runTerminalPicker({
+    const result = await runAdapterPicker({
       ...AGENT_PICKER_OPTIONS,
       prompt: "agents> ",
       items: STATE.items,
@@ -162,7 +163,7 @@ describe("terminal picker session", () => {
       return [...items];
     };
 
-    await runTerminalPicker({ ...AGENT_PICKER_OPTIONS, prompt: "agents> ", items: STATE.items, terminal, ranker });
+    await runAdapterPicker({ ...AGENT_PICKER_OPTIONS, prompt: "agents> ", items: STATE.items, terminal, ranker });
 
     expect(queries).toEqual(["π"]);
   });
@@ -178,7 +179,7 @@ describe("terminal picker session", () => {
       target: `pane-${index}`,
     }));
 
-    await runTerminalPicker({ ...AGENT_PICKER_OPTIONS, prompt: "agents> ", items, terminal });
+    await runAdapterPicker({ ...AGENT_PICKER_OPTIONS, prompt: "agents> ", items, terminal });
 
     const redraw = plain(terminal.writes.at(-2) ?? "");
     expect(redraw).toContain("row-3");
@@ -193,7 +194,7 @@ describe("terminal picker session", () => {
     const ranker = async (): Promise<PickerItem[]> => [items[1]!];
     const times = [100, 200];
 
-    const result = await runTerminalPicker({
+    const result = await runAdapterPicker({
       ...AGENT_PICKER_OPTIONS,
       prompt: "agents> ",
       items,
@@ -210,7 +211,7 @@ describe("terminal picker session", () => {
     const queries: string[] = [];
     let reloads = 0;
 
-    await runTerminalPicker({
+    await runAdapterPicker({
       ...AGENT_PICKER_OPTIONS,
       prompt: "agents> ",
       items: STATE.items,
@@ -231,7 +232,7 @@ describe("terminal picker session", () => {
 
   test("closes from a standalone Escape without waiting for another input chunk", async () => {
     const terminal = new FakeTerminal(["\x1b"], VIEWPORT, true);
-    const run = runTerminalPicker({ ...AGENT_PICKER_OPTIONS, prompt: "agents> ", items: STATE.items, terminal });
+    const run = runAdapterPicker({ ...AGENT_PICKER_OPTIONS, prompt: "agents> ", items: STATE.items, terminal });
 
     const result = await Promise.race([
       run,
@@ -247,7 +248,7 @@ describe("terminal picker session", () => {
     const terminal = new FakeTerminal([KEY_ESCAPE], VIEWPORT, true);
 
     const result = await Promise.race([
-      runTerminalPicker({ ...AGENT_PICKER_OPTIONS, prompt: "agents> ", items: STATE.items, terminal }),
+      runAdapterPicker({ ...AGENT_PICKER_OPTIONS, prompt: "agents> ", items: STATE.items, terminal }),
       Bun.sleep(100).then(() => "timed-out" as const),
     ]);
 
@@ -258,7 +259,7 @@ describe("terminal picker session", () => {
   test("combines an arrow sequence split across input chunks", async () => {
     const terminal = new FakeTerminal([KEY_ESCAPE, "[A", KEY_ENTER]);
 
-    const result = await runTerminalPicker({
+    const result = await runAdapterPicker({
       ...AGENT_PICKER_OPTIONS,
       prompt: "agents> ",
       items: STATE.items,
@@ -273,7 +274,7 @@ describe("terminal picker session", () => {
     const delayedTail = Bun.sleep(DELAYED_SEQUENCE_MILLISECONDS).then(() => KEY_UP_FINAL);
     const terminal = new FakeTerminal([CSI_PREFIX, delayedTail, KEY_ENTER]);
 
-    const result = await runTerminalPicker({
+    const result = await runAdapterPicker({
       ...AGENT_PICKER_OPTIONS,
       prompt: "agents> ",
       items: STATE.items,
@@ -289,7 +290,7 @@ describe("terminal picker session", () => {
     const terminal = new FakeTerminal(["p", KEY_ESCAPE, delayedClose]);
     const queries: string[] = [];
 
-    const result = await runTerminalPicker({
+    const result = await runAdapterPicker({
       ...AGENT_PICKER_OPTIONS,
       prompt: "agents> ",
       items: STATE.items,
@@ -308,7 +309,7 @@ describe("terminal picker session", () => {
   test("restores raw mode even when terminal cleanup output fails", async () => {
     const terminal = new FakeTerminal(["\x03"], VIEWPORT, false, true);
 
-    expect(await runTerminalPicker({ ...AGENT_PICKER_OPTIONS, prompt: "agents> ", items: STATE.items, terminal })).toBeUndefined();
+    expect(await runAdapterPicker({ ...AGENT_PICKER_OPTIONS, prompt: "agents> ", items: STATE.items, terminal })).toBeUndefined();
     expect(terminal.rawModes).toEqual([true, false]);
   });
 
@@ -316,14 +317,14 @@ describe("terminal picker session", () => {
     const rankTerminal = new FakeTerminal(["p"]);
     const reloadTerminal = new FakeTerminal(["\x12"]);
 
-    await expect(runTerminalPicker({
+    await expect(runAdapterPicker({
       ...AGENT_PICKER_OPTIONS,
       prompt: "agents> ",
       items: STATE.items,
       terminal: rankTerminal,
       ranker: async () => { throw new Error("rank failed"); },
     })).rejects.toThrow("rank failed");
-    await expect(runTerminalPicker({
+    await expect(runAdapterPicker({
       ...AGENT_PICKER_OPTIONS,
       prompt: "agents> ",
       items: STATE.items,
@@ -340,7 +341,7 @@ describe("terminal picker session", () => {
   test("renders the full list without scheduling an animation interval", async () => {
     const terminal = new FakeTerminal([], TALL_VIEWPORT, true);
     const timers = new FakeTimers();
-    const run = runTerminalPicker({ ...AGENT_PICKER_OPTIONS, prompt: "agents> ", items: STATE.items, terminal, timers });
+    const run = runAdapterPicker({ ...AGENT_PICKER_OPTIONS, prompt: "agents> ", items: STATE.items, terminal, timers });
 
     expect(plain(terminal.writes.at(-1) ?? "")).toContain("main ▸ pi");
     expect(plain(terminal.writes.at(-1) ?? "")).toContain("feat ▸ codex");
@@ -354,7 +355,7 @@ describe("terminal picker session", () => {
     const timers = new FakeTimers();
     const resolvers: Array<(rows: { readonly items: readonly PickerItem[] }) => void> = [];
     let reloads = 0;
-    const run = runTerminalPicker({
+    const run = runAdapterPicker({
       ...AGENT_PICKER_OPTIONS,
       prompt: "agents> ",
       items: STATE.items,
@@ -392,7 +393,7 @@ describe("terminal picker session", () => {
     const terminal = new FakeTerminal([], VIEWPORT, true);
     const timers = new FakeTimers();
     let resolveReload!: (rows: { readonly items: readonly PickerItem[] }) => void;
-    const run = runTerminalPicker({
+    const run = runAdapterPicker({
       ...AGENT_PICKER_OPTIONS,
       prompt: "agents> ",
       items: STATE.items,
@@ -423,7 +424,7 @@ describe("terminal picker session", () => {
     let resolveOldRank!: (items: PickerItem[]) => void;
     let markOldRankStarted!: () => void;
     const oldRankStarted = new Promise<void>((resolve) => { markOldRankStarted = resolve; });
-    const run = runTerminalPicker({
+    const run = runAdapterPicker({
       ...AGENT_PICKER_OPTIONS,
       prompt: "agents> ",
       items: [oldItem],
@@ -472,7 +473,7 @@ describe("terminal picker session", () => {
     let resolveRefreshRank!: (items: PickerItem[]) => void;
     let markRefreshRankStarted!: () => void;
     const refreshRankStarted = new Promise<void>((resolve) => { markRefreshRankStarted = resolve; });
-    const run = runTerminalPicker({
+    const run = runAdapterPicker({
       ...AGENT_PICKER_OPTIONS,
       prompt: "agents> ",
       items: oldItems,
@@ -492,13 +493,10 @@ describe("terminal picker session", () => {
     timers.fire(REFRESH_INTERVAL_MILLISECONDS);
     await refreshRankStarted;
     sendDown("\x1b[B");
-    await Promise.resolve();
-    await Promise.resolve();
+    // Input crosses the shared terminal owner, so drain every queued hop rather than counting microtasks.
+    await Bun.sleep(0);
     resolveRefreshRank(refreshedItems);
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    await Bun.sleep(0);
     const latestFrame = plain(terminal.writes.filter((write) => write.includes("\x1b[2J")).at(-1) ?? "");
 
     expect(latestFrame).toContain("→ new beta");
@@ -525,7 +523,7 @@ test("keeps input responsive while the initial reload is pending", async () => {
       target: "workspace:beta",
     };
 
-    const run = runTerminalPicker({
+    const run = runAdapterPicker({
       prompt: "workspaces › ",
       noun: "workspaces",
       emptyMessage: "No workspaces found.",
@@ -556,7 +554,7 @@ test("keeps input responsive while the initial reload is pending", async () => {
 
   test("replaces loading copy with the configured empty message", async () => {
     const terminal = new FakeTerminal([], VIEWPORT, true);
-    const run = runTerminalPicker({
+    const run = runAdapterPicker({
       prompt: "workspaces › ",
       noun: "workspaces",
       emptyMessage: "No workspaces found.",
@@ -580,7 +578,7 @@ test("keeps input responsive while the initial reload is pending", async () => {
 
   test("restores terminal state after an initial reload failure", async () => {
     const terminal = new FakeTerminal([], VIEWPORT, true);
-    const run = runTerminalPicker({
+    const run = runAdapterPicker({
       prompt: "workspaces › ",
       noun: "workspaces",
       emptyMessage: "No workspaces found.",

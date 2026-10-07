@@ -158,3 +158,61 @@ function isPrintable(value: string): boolean {
   const code = value.codePointAt(0);
   return code !== undefined && code >= PRINTABLE_CODE_MIN && (code < DELETE_CODE || code > C1_CONTROL_MAX);
 }
+
+const ESCAPE_INPUT_EVENT: InputEvent = { type: "escape" };
+
+/**
+ * Frames decoded terminal text into events across chunk boundaries. The
+ * remainder lives in shared state so a replacement mode inherits, and then
+ * discards, a key sequence its predecessor only half received.
+ */
+export class InputFramer {
+  private pending: string;
+  private discardFragment: boolean;
+
+  constructor(private readonly shared: { remainder: string }, private readonly keymap: PickerKeymap) {
+    this.pending = shared.remainder;
+    this.discardFragment = this.pending.length > 0;
+  }
+
+  /** True while a buffered Escape may still be the start of a longer sequence. */
+  get awaitingEscape(): boolean {
+    return this.pending.startsWith(ESCAPE_KEY_SEQUENCE);
+  }
+
+  feed(chunk: string): readonly InputEvent[] {
+    const stalePrefixLength = this.discardFragment ? this.pending.length : 0;
+    this.pending += chunk;
+    const parsed = parseInput(this.pending, this.keymap, stalePrefixLength);
+    this.discardFragment = stalePrefixLength > this.pending.length - parsed.remainder.length;
+    this.pending = parsed.remainder;
+    return parsed.events;
+  }
+
+  /**
+   * Called when no continuation arrived in time: a lone Escape becomes a key
+   * press unless it belonged to the predecessor mode.
+   */
+  expireEscape(): readonly InputEvent[] {
+    if (this.pending !== ESCAPE_KEY_SEQUENCE) return [];
+    this.pending = "";
+    if (this.discardFragment) {
+      this.discardFragment = false;
+      return [];
+    }
+    return [ESCAPE_INPUT_EVENT];
+  }
+
+  /**
+   * Input ended: a lone Escape still counts, but stays buffered so a successor
+   * mode treats it as stale rather than replaying it.
+   */
+  finalEvents(): readonly InputEvent[] {
+    return this.pending === ESCAPE_KEY_SEQUENCE && !this.discardFragment ? [ESCAPE_INPUT_EVENT] : [];
+  }
+
+  /** Hands the unparsed tail to whichever mode reads next. */
+  save(): void {
+    this.shared.remainder = this.pending;
+  }
+}

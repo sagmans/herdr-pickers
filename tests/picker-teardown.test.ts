@@ -3,8 +3,7 @@ import { expect, test } from "bun:test";
 import { Herdr } from "../src/client/herdr.ts";
 import type { PickerMode } from "../src/modes.ts";
 import { runPicker } from "../src/picker.ts";
-import { runTerminalPicker } from "../src/terminal-picker.ts";
-import { FakeTerminal, FakeTimers, VIEWPORT } from "./terminal-picker-test-support.ts";
+import { FakeTerminal, FakeTimers, VIEWPORT, runAdapterPicker } from "./terminal-picker-test-support.ts";
 
 const STOP_SCREEN = "\x1b[?1049l";
 const CANCEL = "\x03";
@@ -23,10 +22,10 @@ for (const key of [CANCEL, ESCAPE, ENTER]) {
     const terminal = new FakeTerminal([key]);
     const timers = new FakeTimers();
     let closed = false;
-    await runTerminalPicker({
+    await runAdapterPicker({
       ...OPTIONS, terminal, timers, refreshIntervalMilliseconds: INTERVAL_MS,
       reload: async () => ({ items: [] }),
-      beforeCleanup: async () => {
+      dismiss: async () => {
         expect(terminal.writes.join("")).not.toContain(STOP_SCREEN);
         const writes = terminal.writes.length;
         timers.fire(INTERVAL_MS);
@@ -47,9 +46,9 @@ test("focus cancellation closes the surface before restoring the terminal", asyn
   const terminal = new FakeTerminal([], VIEWPORT, true);
   const controller = new AbortController();
   let closed = false;
-  const run = runTerminalPicker({
+  const run = runAdapterPicker({
     ...OPTIONS, terminal, signal: controller.signal,
-    beforeCleanup: async () => {
+    dismiss: async () => {
       expect(terminal.writes.join("")).not.toContain(STOP_SCREEN);
       closed = true;
     },
@@ -64,10 +63,10 @@ test("focus cancellation closes the surface before restoring the terminal", asyn
 test("surface close failure still restores every terminal resource", async () => {
   const terminal = new FakeTerminal([CANCEL]);
   const timers = new FakeTimers();
-  await expect(runTerminalPicker({
+  await expect(runAdapterPicker({
     ...OPTIONS, terminal, timers, refreshIntervalMilliseconds: INTERVAL_MS,
     reload: async () => ({ items: [ITEM] }),
-    beforeCleanup: async () => { throw FAILURE; },
+    dismiss: async () => { throw FAILURE; },
   })).rejects.toBe(FAILURE);
   expect(terminal.rawModes).toEqual([true, false]);
   expect(terminal.writes.at(-1)).toContain(STOP_SCREEN);
@@ -84,11 +83,13 @@ for (const mode of MODES) {
     }) });
     const result = await runPicker(mode, {
       herdr, env: {},
-      beforeCleanup: async () => {
-        expect(terminal.writes.join("")).not.toContain(STOP_SCREEN);
-        closed = true;
-      },
-      pickerRunner: options => runTerminalPicker({ ...options, terminal }),
+      pickerRunner: options => runAdapterPicker({
+        ...options, terminal,
+        dismiss: async () => {
+          expect(terminal.writes.join("")).not.toContain(STOP_SCREEN);
+          closed = true;
+        },
+      }),
     });
     expect(result).toBe("cancelled");
     expect(closed).toBe(true);

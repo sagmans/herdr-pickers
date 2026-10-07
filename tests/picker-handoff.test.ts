@@ -3,8 +3,7 @@ import { expect, test } from "bun:test";
 import { Herdr } from "../src/client/herdr.ts";
 import type { PickerMode } from "../src/modes.ts";
 import { runPicker } from "../src/picker.ts";
-import { runTerminalPicker } from "../src/terminal-picker.ts";
-import { FakeTerminal, FakeTimers, VIEWPORT } from "./terminal-picker-test-support.ts";
+import { FakeTerminal, FakeTimers, VIEWPORT, runAdapterPicker } from "./terminal-picker-test-support.ts";
 
 const STOP_SCREEN = "\x1b[?1049l";
 const ENTER = "\r";
@@ -36,7 +35,7 @@ for (const mode of MODES) {
       beforeDispatch: async () => { expect(terminal.writes.join("")).not.toContain(STOP_SCREEN); },
       pickerRunner: async options => {
         const rows = options.loadOnStart ? await options.reload!() : options;
-        return runTerminalPicker({ ...options, ...rows, loadOnStart: false, terminal });
+        return runAdapterPicker({ ...options, ...rows, loadOnStart: false, terminal });
       },
     });
     expect(result).toBe("dispatched");
@@ -51,7 +50,7 @@ test("acceptance freezes live refresh until handoff finishes", async () => {
   const timers = new FakeTimers();
   let accepted = 0;
   let reloads = 0;
-  const selection = await runTerminalPicker({
+  const selection = await runAdapterPicker({
     ...OPTIONS, terminal, timers, refreshIntervalMilliseconds: INTERVAL_MS,
     reload: async () => { reloads++; return { items: [ITEM] }; },
     onAccept: async () => {
@@ -71,7 +70,7 @@ test("acceptance freezes live refresh until handoff finishes", async () => {
 
 test("rejected handoff restores terminal state", async () => {
   const terminal = new FakeTerminal([ENTER]);
-  await expect(runTerminalPicker({ ...OPTIONS, terminal, onAccept: async () => { throw FAILURE; } })).rejects.toBe(FAILURE);
+  await expect(runAdapterPicker({ ...OPTIONS, terminal, onAccept: async () => { throw FAILURE; } })).rejects.toBe(FAILURE);
   expect(terminal.rawModes).toEqual([true, false]);
   expect(terminal.writes.at(-1)).toContain(STOP_SCREEN);
 });
@@ -82,7 +81,7 @@ test("aborted handoff restores promptly without late output", async () => {
   let finish!: () => void;
   let started!: () => void;
   const ready = new Promise<void>(resolve => { started = resolve; });
-  const run = runTerminalPicker({
+  const run = runAdapterPicker({
     ...OPTIONS, terminal, signal: controller.signal,
     onAccept: () => { started(); return new Promise<void>(resolve => { finish = resolve; }); },
   });
