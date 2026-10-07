@@ -6,6 +6,7 @@ import type { CurrentContext } from "./context.ts";
 import type { PickerMode } from "./modes.ts";
 import { encodeRequestContext, readPickerRequest, type PickerRequest } from "./picker-request.ts";
 import type { PickerPlacement } from "./config/config.ts";
+import { POPUP_SURFACE, type PickerSurface } from "./client/popup.ts";
 import { hasErrorCode } from "./util/objects.ts";
 
 export const PICKER_TOKEN_ENV = "HERDR_PICKERS_SESSION_TOKEN";
@@ -148,9 +149,9 @@ export class PickerSession {
     return this.database.query(ACK_REQUEST).run(owner, this.session, request, this.session, owner, process.pid).changes === 1;
   }
 
-  claim(token: string, paneId?: string): boolean {
-    const placement: PickerPlacement = paneId ? "overlay" : "popup";
-    return this.database.query(CLAIM_OWNER).run(process.pid, paneId ?? null, this.session, token, placement).changes === 1;
+  claim(token: string, surface: PickerSurface = POPUP_SURFACE): boolean {
+    const paneId = surface.placement === "overlay" ? surface.paneId : null;
+    return this.database.query(CLAIM_OWNER).run(process.pid, paneId, this.session, token, surface.placement).changes === 1;
   }
 
   close(): void {

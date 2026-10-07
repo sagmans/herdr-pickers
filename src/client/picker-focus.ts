@@ -1,5 +1,6 @@
 import { createConnection, type Socket } from "node:net";
 
+import type { PickerSurface } from "./popup.ts";
 import { readPickerSnapshot } from "./picker-snapshot.ts";
 
 import {
@@ -338,7 +339,7 @@ const SOCKET_REQUIRED_MESSAGE = "HERDR_SOCKET_PATH is required to observe overla
 /** Where a guard observes focus; a popup has no pane of its own to watch. */
 export interface PickerFocusTarget {
   readonly socketPath: string | undefined;
-  readonly paneId: string | undefined;
+  readonly surface: PickerSurface;
 }
 
 /**
@@ -361,7 +362,7 @@ export function createPickerFocusGuard(
   signal: AbortSignal,
   onLost: (reason: unknown) => void,
 ): PickerFocusGuard {
-  const { socketPath, paneId } = target;
+  const { socketPath, surface } = target;
   let watch: Awaited<ReturnType<typeof watchPickerFocus>> | undefined;
   let failure: { readonly error: unknown } | undefined;
   const lose = (error: unknown): void => {
@@ -369,11 +370,11 @@ export function createPickerFocusGuard(
     if (!(error instanceof PickerFocusDeparture)) failure = { error };
     onLost(error);
   };
-  const ready = paneId === undefined
+  const ready = surface.placement === "popup"
     ? undefined
     : (socketPath === undefined
       ? Promise.reject(new Error(SOCKET_REQUIRED_MESSAGE))
-      : watchPickerFocus(socketPath, paneId, signal)
+      : watchPickerFocus(socketPath, surface.paneId, signal)
     ).then(watcher => {
       watch = watcher;
       watcher.signal.addEventListener("abort", () => lose(watcher.signal.reason), { once: true });

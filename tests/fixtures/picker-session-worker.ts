@@ -5,6 +5,7 @@ const OVERLAY_MODE = "overlay";
 const UNCLAIMED_MODE = "unclaimed";
 const REQUEST_MODE = "request";
 const PANE_ID = "w1:p2";
+const OVERLAY_SURFACE = { placement: "overlay", paneId: PANE_ID } as const;
 
 const mode = process.argv[MODE_INDEX];
 const session = new PickerSession(process.env);
@@ -12,7 +13,7 @@ try {
   const token = mode === REQUEST_MODE
     ? session.request("agents", {}).token
     : await session.reserve(mode === OVERLAY_MODE ? "overlay" : "popup", async () => false);
-  if (token && mode !== UNCLAIMED_MODE && mode !== REQUEST_MODE) session.claim(token, mode === OVERLAY_MODE ? PANE_ID : undefined);
+  if (token && mode !== UNCLAIMED_MODE && mode !== REQUEST_MODE) session.claim(token, mode === OVERLAY_MODE ? OVERLAY_SURFACE : undefined);
   console.log(JSON.stringify({ token: token ?? null, pid: process.pid }));
   await Bun.stdin.text();
 } finally {

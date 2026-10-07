@@ -1,5 +1,5 @@
 import { Herdr } from "./client/herdr.ts";
-import { closePickerSurface, withPopupClose } from "./client/popup.ts";
+import { closePickerSurface, pickerSurfaceFromEnv, withPopupClose } from "./client/popup.ts";
 import { createPickerFocusGuard, type PickerFocusGuard } from "./client/picker-focus.ts";
 import { PICKER_TOKEN_ENV, PickerSession } from "./picker-session.ts";
 import { loadConfig } from "./config/config.ts";
@@ -20,8 +20,9 @@ async function main(): Promise<void> {
   }));
   try {
     const token = env[PICKER_TOKEN_ENV];
+    const surface = pickerSurfaceFromEnv(env);
     // A rejected child has no authority to close any existing surface.
-    if (!token || !session.claim(token, env.HERDR_PANE_ID)) throw new Error("Picker reservation is missing or stale.");
+    if (!token || !session.claim(token, surface)) throw new Error("Picker reservation is missing or stale.");
     for (const { signal, handler } of handlers) process.on(signal, handler);
     await withPopupClose(async dismissSurface => {
       const config = loadConfig(env);
@@ -32,7 +33,7 @@ async function main(): Promise<void> {
         env, signal: lifecycle.signal, dismissSurface,
         createRuntime: signal => {
           const guard = createPickerFocusGuard(
-            { socketPath: env.HERDR_SOCKET_PATH, paneId: env.HERDR_PANE_ID },
+            { socketPath: env.HERDR_SOCKET_PATH, surface },
             signal,
             reason => lifecycle.abort(reason),
           );

@@ -12,6 +12,7 @@ const TEMP_PREFIX = "/tmp/hps-owner-";
 const SOCKET_NAME = "herdr.sock";
 const SECOND_SOCKET_NAME = "other.sock";
 const PANE_ID = "w1:p2";
+const OVERLAY_SURFACE = { placement: "overlay", paneId: PANE_ID } as const;
 const STALE_TOKEN = "stale-generation";
 const WORKER_PATH = join(import.meta.dir, "fixtures", "picker-session-worker.ts");
 const WORKER_COUNT = 6;
@@ -89,7 +90,7 @@ test("a real pre-submission spawn failure permits a new owner in another process
 test("new requests replace the mailbox and reject stale acknowledgements", async () => {
   const { session } = await fixture();
   const owner = await session.reserve("overlay", async () => false);
-  session.claim(owner!, PANE_ID);
+  session.claim(owner!, OVERLAY_SURFACE);
   const first = session.request("agents", { paneId: "w1:p1", cwd: "/source" });
   const latest = session.request("worktrees", { paneId: PANE_ID, cwd: "/plugin" });
   expect(session.latestRequest()?.token).toBe(latest.token);
@@ -209,8 +210,8 @@ test("reserves once across modes and placements before a child starts", async ()
   const token = await session.reserve("overlay", async () => false);
   expect(typeof token).toBe("string");
   expect(await other.reserve("popup", async () => false)).toBeUndefined();
-  expect(session.claim(token!, PANE_ID)).toBe(true);
-  expect(session.claim(token!, PANE_ID)).toBe(false);
+  expect(session.claim(token!, OVERLAY_SURFACE)).toBe(true);
+  expect(session.claim(token!, OVERLAY_SURFACE)).toBe(false);
   expect(await other.reserve("overlay", async () => false)).toBeUndefined();
 });
 
@@ -338,8 +339,8 @@ test("concurrent processes converge on one owner and recover after exit", async 
   for (const candidate of contenders) { candidate.proc.stdin.end(); await candidate.proc.exited; }
   const next = await session.reserve("overlay", async () => false);
   expect(next).toBeString();
-  expect(session.claim(winners[0]!.token!, PANE_ID)).toBe(false);
-  expect(session.claim(next!, PANE_ID)).toBe(true);
+  expect(session.claim(winners[0]!.token!, OVERLAY_SURFACE)).toBe(false);
+  expect(session.claim(next!, OVERLAY_SURFACE)).toBe(true);
 });
 
 test("waits for overlay removal even after its owner process exits", async () => {

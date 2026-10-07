@@ -8,16 +8,32 @@ const OVERLAY_CLOSE_TIMEOUT_MS = 100;
 const NEWLINE_BYTE = 0x0a;
 const COMBINED_FAILURE_MESSAGE = "Picker failed and its popup could not be closed.";
 
+/**
+ * Where a picker child draws. Herdr gives a plugin pane child HERDR_PANE_ID only
+ * when it runs as an overlay pane; a native popup has no pane of its own. This
+ * is the one place that inference is made so claim, focus, and close agree.
+ */
+export type PickerSurface =
+  | { readonly placement: "overlay"; readonly paneId: string }
+  | { readonly placement: "popup" };
+
+export const POPUP_SURFACE: PickerSurface = { placement: "popup" };
+
+export function pickerSurfaceFromEnv(env: Record<string, string | undefined>): PickerSurface {
+  const paneId = env[PANE_ID_ENV];
+  return paneId ? { placement: "overlay", paneId } : POPUP_SURFACE;
+}
+
 export type SocketWriter = (path: string, payload: string) => Promise<void>;
 
 export async function closePickerSurface(
   env: Record<string, string | undefined> = process.env,
   write: SocketWriter = writeSocket,
 ): Promise<void> {
-  const paneId = env[PANE_ID_ENV];
-  if (paneId) {
+  const surface = pickerSurfaceFromEnv(env);
+  if (surface.placement === "overlay") {
     await Promise.race([
-      closeOverlayPane(paneId, env, write),
+      closeOverlayPane(surface.paneId, env, write),
       delay(OVERLAY_CLOSE_TIMEOUT_MS),
     ]);
     return;
