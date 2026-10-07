@@ -2,7 +2,7 @@
 // processes. Read-modify-write runs under a kernel-held SQLite lock and
 // writes are atomic renames, so racing events never corrupt or interleave.
 import { Database } from "bun:sqlite";
-import { closeSync, constants, fstatSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { closeSync, constants, fchmodSync, fstatSync, ftruncateSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { hasErrorCode } from "../util/objects.ts";
@@ -26,6 +26,14 @@ const LOCK_FILE_MODE = 0o600;
 const ACQUIRE_LOCK = "BEGIN IMMEDIATE";
 // No row is ever written, so rollback only releases the lock.
 const RELEASE_LOCK = "ROLLBACK";
+// Only contention may be reported as a timeout; other failures keep their own
+// diagnosis so a broken lock file is not mistaken for a slow peer.
+const LOCK_BUSY_CODE = "SQLITE_BUSY";
+// A lock file that SQLite cannot read as a database would otherwise fail every
+// later hook forever. It never holds data, so it can be reset and retried.
+const UNREADABLE_LOCK_CODES: readonly string[] = ["SQLITE_NOTADB", "SQLITE_CORRUPT"];
+// SQLite accepts a zero-length file as an empty database.
+const EMPTY_LOCK_SIZE = 0;
 
 /** `now` is injectable so persisted timestamps are deterministic in tests. */
 export interface StateStoreOptions {
@@ -104,13 +112,8 @@ export class StateStore {
 }
 
 function withLock<T>(lockPath: string, critical: () => T): T {
-  const database = openLockDatabase(lockPath);
+  const database = acquireLock(lockPath);
   try {
-    try {
-      database.exec(ACQUIRE_LOCK);
-    } catch (error) {
-      throw new Error(`timed out acquiring state lock: ${lockPath}`, { cause: error });
-    }
     try {
       return critical();
     } finally {
@@ -121,14 +124,67 @@ function withLock<T>(lockPath: string, critical: () => T): T {
   }
 }
 
-function openLockDatabase(lockPath: string): Database {
-  // O_NOFOLLOW keeps a planted symlink from redirecting SQLite to another file.
-  const fd = openSync(lockPath, constants.O_CREAT | constants.O_RDWR | constants.O_NOFOLLOW, LOCK_FILE_MODE);
+// One reset is enough: an unreadable file becomes a valid empty database, so a
+// second unreadable failure means something else is wrong and must surface.
+function acquireLock(lockPath: string): Database {
   try {
-    if (!fstatSync(fd).isFile()) throw new Error(`state lock is not a regular file: ${lockPath}`);
+    return openAndLock(lockPath);
+  } catch (error) {
+    if (!isUnreadableLock(error)) throw error;
+    resetLockFile(lockPath);
+    return openAndLock(lockPath);
+  }
+}
+
+function openAndLock(lockPath: string): Database {
+  const database = openLockDatabase(lockPath);
+  try {
+    database.exec(ACQUIRE_LOCK);
+  } catch (error) {
+    database.close();
+    if (hasErrorCode(error, LOCK_BUSY_CODE)) {
+      throw new Error(`timed out acquiring state lock: ${lockPath}`, { cause: error });
+    }
+    throw error;
+  }
+  return database;
+}
+
+function isUnreadableLock(error: unknown): boolean {
+  return UNREADABLE_LOCK_CODES.some((code) => hasErrorCode(error, code));
+}
+
+// Truncating in place keeps the same inode. Replacing the file would let a
+// peer that already opened the fresh file and a peer that opens the
+// replacement hold separate locks and run their critical sections together.
+// Truncation is idempotent because no lock holder ever writes to the file.
+// O_CREAT only applies the private mode to new files, so a reset file whose
+// origin is unknown is narrowed explicitly.
+function resetLockFile(lockPath: string): void {
+  const fd = openRegularLockFile(lockPath);
+  try {
+    ftruncateSync(fd, EMPTY_LOCK_SIZE);
+    fchmodSync(fd, LOCK_FILE_MODE);
   } finally {
     closeSync(fd);
   }
+}
+
+// O_NOFOLLOW keeps a planted symlink from redirecting SQLite or a reset to
+// another file; the caller owns closing the returned descriptor.
+function openRegularLockFile(lockPath: string): number {
+  const fd = openSync(lockPath, constants.O_CREAT | constants.O_RDWR | constants.O_NOFOLLOW, LOCK_FILE_MODE);
+  try {
+    if (!fstatSync(fd).isFile()) throw new Error(`state lock is not a regular file: ${lockPath}`);
+  } catch (error) {
+    closeSync(fd);
+    throw error;
+  }
+  return fd;
+}
+
+function openLockDatabase(lockPath: string): Database {
+  closeSync(openRegularLockFile(lockPath));
   const database = new Database(lockPath);
   try {
     database.exec(`PRAGMA busy_timeout = ${LOCK_TIMEOUT_MILLISECONDS}`);
