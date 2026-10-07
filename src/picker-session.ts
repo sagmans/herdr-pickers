@@ -58,7 +58,11 @@ const ADD_RESERVED_AT = `ALTER TABLE owners ADD COLUMN ${RESERVED_AT_COLUMN} INT
 const DELETE_OWNER = "DELETE FROM owners WHERE session = ? AND token = ?";
 const RELEASE_UNSUBMITTED = "DELETE FROM owners WHERE session = ? AND token = ? AND opener = ? AND picker IS NULL";
 const CLAIM_OWNER = "UPDATE owners SET picker = ?, pane = ? WHERE session = ? AND token = ? AND picker IS NULL AND placement = ?";
-const UNCERTAIN_STARTUP = "Picker startup could not be verified yet. Retry after the pending picker starts or its reservation expires.";
+const MILLISECONDS_PER_SECOND = 1_000;
+// Users only see this after an opener's whole delivery deadline, so it names
+// the wait that actually unblocks them instead of an internal state.
+const UNCERTAIN_STARTUP = "Picker startup is pending. Retry after the earlier picker opens, or after "
+  + `${UNCLAIMED_RESERVATION_GRACE_MS / MILLISECONDS_PER_SECOND} seconds when its reservation expires.`;
 
 /** A reserved picker may still start; openers wait rather than risk a duplicate surface. */
 export class PickerStartupUncertainError extends Error {

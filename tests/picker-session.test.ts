@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "n
 import { createServer, type Server } from "node:net";
 import { join } from "node:path";
 
-import { PickerSession } from "../src/picker-session.ts";
+import { PickerSession, PickerStartupUncertainError } from "../src/picker-session.ts";
 import { buildPaneOpenArgs, openPicker } from "../src/actions/open.ts";
 import { Herdr } from "../src/client/herdr.ts";
 import { readPickerPaneIds } from "../src/client/types.ts";
@@ -357,7 +357,7 @@ test("uncertain startup never permits a second request", async () => {
   const owner = await worker(env, "unclaimed");
   owner.proc.stdin.end();
   await owner.proc.exited;
-  await expect(session.reserve("popup", async () => false)).rejects.toThrow("could not be verified");
+  await expect(session.reserve("popup", async () => false)).rejects.toThrow(PickerStartupUncertainError);
 });
 
 test("a delayed reaper cannot remove a newer generation", async () => {

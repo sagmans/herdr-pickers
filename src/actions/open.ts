@@ -72,16 +72,23 @@ export async function openPicker(
       throw error;
     }
   };
+  // Remembers why the latest reservation attempt waited, so a deadline that
+  // expires while no picker exists reports the actionable pending state.
+  let startupUncertain = false;
   try {
     const request = session.request(mode, currentContextFromEnv(env));
     let launched = false;
     // Delivery ends when a picker acknowledges this request or a newer one supersedes it.
     while (isUndelivered(session, request.token)) {
       if (!launched) {
-        const token = await untilAborted(session.reserve(config.placement, paneExists).catch(error => {
+        const token = await untilAborted(session.reserve(config.placement, paneExists).then(reserved => {
+          startupUncertain = false;
+          return reserved;
+        }, error => {
           // A submitted child can claim after its opener exits; waiting never authorizes a duplicate.
-          if (error instanceof PickerStartupUncertainError) return undefined;
-          throw error;
+          if (!(error instanceof PickerStartupUncertainError)) throw error;
+          startupUncertain = true;
+          return undefined;
         }), signal);
         if (token) {
           // Even a superseded opener must launch its reserved child; the child reads the newest request.
@@ -92,8 +99,9 @@ export async function openPicker(
       await untilAborted(Bun.sleep(PICKER_REQUEST_POLL_MS), signal);
     }
   } catch (error) {
-    // Whatever was in flight at the deadline, the user-facing cause is the deadline.
-    if (deadline.aborted) throw new Error(DELIVERY_FAILURE);
+    // Whatever was in flight at the deadline, the user-facing cause is the
+    // deadline, unless no picker could take the request yet.
+    if (deadline.aborted) throw startupUncertain ? new PickerStartupUncertainError() : new Error(DELIVERY_FAILURE);
     throw error;
   } finally {
     cancellation.abort();
