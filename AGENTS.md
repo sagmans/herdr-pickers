@@ -19,7 +19,7 @@ Use [README.md](README.md) for user-facing behavior and [SECURITY.md](SECURITY.m
 
 ## Commands
 
-Use tool versions from `mise.toml`:
+Use tool versions from `mise.toml`; `mise.lock` pins their checksums, so run `mise lock --platform linux-x64,macos-arm64` after changing a tool version:
 
 ```sh
 mise install

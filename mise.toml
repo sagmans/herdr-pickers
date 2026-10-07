@@ -4,3 +4,8 @@
 bun = "1.3.14"
 fzf = "0.55.0"
 herdr = "0.9.1"
+
+# Checksummed mise.lock pins every tool download; CI installs in locked mode
+# so a tampered or re-tagged release cannot be swapped in silently.
+[settings]
+lockfile = true
