@@ -56,7 +56,7 @@ describe("modes", () => {
   });
 
   test("builds plugin pane open args with mode", () => {
-    expect(buildPaneOpenArgs({ pluginId: "herdr-pickers", mode: "agents" })).toEqual([
+    expect(buildPaneOpenArgs({ pluginId: "herdr-pickers" })).toEqual([
       "plugin",
       "pane",
       "open",
@@ -64,14 +64,11 @@ describe("modes", () => {
       "herdr-pickers",
       "--entrypoint",
       "picker",
-      "--env",
-      "HERDR_PICKERS_MODE=agents",
     ]);
-    expect(buildPaneOpenArgs({ pluginId: "herdr-pickers", mode: "repo-workspaces" })).toContain("HERDR_PICKERS_MODE=repo-workspaces");
   });
 
   test("omits placement flags for popup", () => {
-    expect(buildPaneOpenArgs({ pluginId: "herdr-pickers", mode: "agents", placement: "popup" })).toEqual([
+    expect(buildPaneOpenArgs({ pluginId: "herdr-pickers", placement: "popup" })).toEqual([
       "plugin",
       "pane",
       "open",
@@ -79,15 +76,12 @@ describe("modes", () => {
       "herdr-pickers",
       "--entrypoint",
       "picker",
-      "--env",
-      "HERDR_PICKERS_MODE=agents",
     ]);
   });
 
   test("adds overlay placement after the picker entrypoint", () => {
     const args = buildPaneOpenArgs({
       pluginId: "herdr-pickers",
-      mode: "agents",
       placement: "overlay",
     });
 
@@ -102,7 +96,6 @@ describe("modes", () => {
       "--placement",
       "overlay",
     ]);
-    expect(args).toContain("HERDR_PICKERS_MODE=agents");
   });
 });
 

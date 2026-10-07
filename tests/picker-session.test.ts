@@ -200,7 +200,7 @@ test("delivery deadline also bounds a stalled Herdr open command", async () => {
 });
 
 test("forwards the exact reserved generation to the pane", () => {
-  expect(buildPaneOpenArgs({ pluginId: PLUGIN_ID, mode: "all", token: STALE_TOKEN })).toContain(`HERDR_PICKERS_SESSION_TOKEN=${STALE_TOKEN}`);
+  expect(buildPaneOpenArgs({ pluginId: PLUGIN_ID, token: STALE_TOKEN })).toContain(`HERDR_PICKERS_SESSION_TOKEN=${STALE_TOKEN}`);
 });
 
 test("reserves once across modes and placements before a child starts", async () => {
