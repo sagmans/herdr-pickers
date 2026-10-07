@@ -19,7 +19,7 @@ Use [README.md](README.md) for user-facing behavior and [SECURITY.md](SECURITY.m
 
 ## Commands
 
-Use tool versions from `mise.toml`; `mise.lock` pins their checksums, so run `mise lock --platform linux-x64,macos-arm64` after changing a tool version:
+Use tool versions from `mise.toml`; `mise.lock` pins their checksums, so run `mise lock --platform linux-x64,macos-arm64` after changing a tool version. The smoke workflow's floor Herdr lives in `mise.herdr-floor.toml`; refresh its lock with `MISE_ENV=herdr-floor` set:
 
 ```sh
 mise install
