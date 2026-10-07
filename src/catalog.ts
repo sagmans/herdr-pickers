@@ -6,6 +6,9 @@ import { canonicalPathKey, isPathWithin } from "./util/paths.ts";
 
 // Below any real path length, so a list with no enclosing path marks nothing current.
 const NO_PATH_DEPTH = -1;
+// Workspace ids are internal Herdr identities and must never reach visible or
+// searchable rows, so an unlabeled workspace with no path gets a neutral name.
+const UNNAMED_WORKSPACE_LABEL = "unnamed workspace";
 
 export interface AgentTarget {
   readonly kind: "agent";
@@ -229,7 +232,7 @@ function workspacePath(workspace: WorkspaceRecord): string | undefined {
 
 function workspaceLabel(workspace: WorkspaceRecord): string {
   const path = workspacePath(workspace);
-  return path ? basename(path) : workspace.workspaceId;
+  return path ? basename(path) : UNNAMED_WORKSPACE_LABEL;
 }
 
 function indexWorkspacesByPath(workspaces: readonly WorkspaceRecord[]): Map<string, WorkspaceRecord> {
@@ -397,7 +400,7 @@ function agentRepoKey(agent: AgentRecord, workspace: WorkspaceRecord | undefined
 }
 
 function agentLabel(agent: AgentRecord, workspace: WorkspaceRecord | undefined): string {
-  const where = workspace ? workspaceLabel(workspace) : (agent.cwd ? basename(agent.cwd) : agent.workspaceId);
+  const where = workspace ? workspaceLabel(workspace) : (agent.cwd ? basename(agent.cwd) : undefined);
   return where ? `${where} ▸ ${agent.label}` : agent.label;
 }
 
