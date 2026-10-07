@@ -1,4 +1,5 @@
-import { closeSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { Database } from "bun:sqlite";
+import { closeSync, constants, fstatSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { hasErrorCode } from "../util/objects.ts";
@@ -12,12 +13,16 @@ import {
 } from "./memory.ts";
 
 const STATE_FILE_NAME = "state.json";
-const LOCK_FILE_NAME = "state.lock";
-const LOCK_STALE_MILLISECONDS = 10_000;
+// SQLite holds its write lock through the kernel, so the lock dies with its
+// holder and is never broken by age. Path-based stale breaking cannot verify
+// ownership atomically: one waiter could unlink a lock that another waiter or
+// a slow holder had just made fresh, and two writers would then overlap.
+const LOCK_DATABASE_NAME = "state.lock.sqlite";
 const LOCK_TIMEOUT_MILLISECONDS = 2_000;
-const LOCK_POLL_MILLISECONDS = 25;
-const LOCK_BUFFER_BYTES = 4;
-const LOCK_BUFFER_INDEX = 0;
+const LOCK_FILE_MODE = 0o600;
+const ACQUIRE_LOCK = "BEGIN IMMEDIATE";
+// No row is ever written, so rollback only releases the lock.
+const RELEASE_LOCK = "ROLLBACK";
 
 export interface StateStoreOptions {
   readonly stateDir: string;
@@ -81,7 +86,7 @@ export class StateStore {
 
   update<T>(change: (memory: WorkspaceMemory) => { readonly memory: WorkspaceMemory; readonly value: T }): T {
     mkdirSync(this.stateDir, { recursive: true });
-    return withLock(join(this.stateDir, LOCK_FILE_NAME), () => {
+    return withLock(join(this.stateDir, LOCK_DATABASE_NAME), () => {
       const loaded = this.read();
       const result = change(loaded.memory);
       if (loaded.malformed || result.memory !== loaded.memory) {
@@ -93,59 +98,39 @@ export class StateStore {
 }
 
 function withLock<T>(lockPath: string, critical: () => T): T {
-  acquireLock(lockPath);
+  const database = openLockDatabase(lockPath);
   try {
-    return critical();
+    try {
+      database.exec(ACQUIRE_LOCK);
+    } catch (error) {
+      throw new Error(`timed out acquiring state lock: ${lockPath}`, { cause: error });
+    }
+    try {
+      return critical();
+    } finally {
+      database.exec(RELEASE_LOCK);
+    }
   } finally {
-    try {
-      unlinkSync(lockPath);
-    } catch (error) {
-      if (!hasErrorCode(error, "ENOENT")) throw error;
-    }
+    database.close();
   }
 }
 
-function acquireLock(lockPath: string): void {
-  const deadline = Date.now() + LOCK_TIMEOUT_MILLISECONDS;
-  for (;;) {
-    try {
-      const fd = openSync(lockPath, "wx");
-      closeSync(fd);
-      return;
-    } catch (error) {
-      if (!hasErrorCode(error, "EEXIST")) throw error;
-    }
-
-    try {
-      const mtimeMilliseconds = statSync(lockPath).mtimeMs;
-      if (Date.now() - mtimeMilliseconds > LOCK_STALE_MILLISECONDS) {
-        unlinkSync(lockPath);
-        continue;
-      }
-    } catch (error) {
-      if (hasErrorCode(error, "ENOENT")) continue;
-      throw error;
-    }
-
-    if (Date.now() >= deadline) throw new Error(`timed out acquiring state lock: ${lockPath}`);
-    sleepSync(LOCK_POLL_MILLISECONDS);
+function openLockDatabase(lockPath: string): Database {
+  // O_NOFOLLOW keeps a planted symlink from redirecting SQLite to another file.
+  const fd = openSync(lockPath, constants.O_CREAT | constants.O_RDWR | constants.O_NOFOLLOW, LOCK_FILE_MODE);
+  try {
+    if (!fstatSync(fd).isFile()) throw new Error(`state lock is not a regular file: ${lockPath}`);
+  } finally {
+    closeSync(fd);
   }
-}
-
-function sleepSync(milliseconds: number): void {
-  if (typeof SharedArrayBuffer !== "undefined") {
-    try {
-      const buffer = new Int32Array(new SharedArrayBuffer(LOCK_BUFFER_BYTES));
-      Atomics.wait(buffer, LOCK_BUFFER_INDEX, LOCK_BUFFER_INDEX, milliseconds);
-      return;
-    } catch {
-      // A bounded fallback preserves lock safety on runtimes without Atomics.wait.
-    }
+  const database = new Database(lockPath);
+  try {
+    database.exec(`PRAGMA busy_timeout = ${LOCK_TIMEOUT_MILLISECONDS}`);
+  } catch (error) {
+    database.close();
+    throw error;
   }
-  const end = Date.now() + milliseconds;
-  while (Date.now() < end) {
-    // One-shot event processes have no concurrent work while waiting for state.
-  }
+  return database;
 }
 
 export function readPersistedStateRaw(stateDir: string): PersistedState | undefined {
