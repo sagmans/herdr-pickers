@@ -50,12 +50,17 @@ export function encodeContext(context: CurrentContext): string | undefined {
 }
 
 /**
- * Parses stored context as untrusted input; undefined means it is malformed.
- * Invalid JSON still throws, matching every other request-decoding failure.
+ * Parses stored context as untrusted input; undefined means it is malformed,
+ * including invalid JSON, so callers report one request error for every shape.
  */
 export function decodeContext(encoded: string): CurrentContext | undefined {
   if (Buffer.byteLength(encoded) > MAX_CONTEXT_BYTES) return undefined;
-  const value: unknown = JSON.parse(encoded);
+  let value: unknown;
+  try {
+    value = JSON.parse(encoded);
+  } catch {
+    return undefined;
+  }
   return isRecord(value) ? pickContextFields(value) : undefined;
 }
 
