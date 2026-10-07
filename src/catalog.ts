@@ -66,22 +66,16 @@ export interface WorktreeTarget extends NavigationTargetBase {
 
 export type PickerTarget = ProjectTarget | WorkspaceTarget | WorktreeTarget;
 
-export interface AgentTargetOptions {
-  readonly includeFocused?: boolean | undefined;
-}
-
 export function buildAgentTargets(
   agents: readonly AgentRecord[],
   workspaces: readonly WorkspaceRecord[] = [],
   current: CurrentContext = {},
-  options: AgentTargetOptions = {},
 ): AgentTarget[] {
   const workspaceById = indexWorkspacesById(workspaces);
-  // Resolve the preference across all visible rows first: an undetected source
+  // Resolve the preference across all rows first: an undetected source
   // pane must not disable every row's claim to be the current one.
-  const visible = agents.filter((agent) => !shouldExcludeAgent(agent, current, options.includeFocused === true));
-  const isCurrent = agentFocusSelector(visible, current);
-  return uniqueBy(visible, (agent) => agent.target).map((agent) => {
+  const isCurrent = agentFocusSelector(agents, current);
+  return uniqueBy(agents, (agent) => agent.target).map((agent) => {
     const workspace = agent.workspaceId ? workspaceById.get(agent.workspaceId) : undefined;
     const worktree = agentWorktreeLabel(agent, workspace);
     return {
@@ -188,10 +182,6 @@ export function buildWorktreeTargets(
     });
 }
 
-export function workspaceRepoRoot(workspace: WorkspaceRecord): string | undefined {
-  return workspace.worktree?.repoRoot;
-}
-
 function indexWorkspacesById(workspaces: readonly WorkspaceRecord[]): Map<string, WorkspaceRecord> {
   return new Map(workspaces.map((workspace) => [workspace.workspaceId, workspace]));
 }
@@ -257,11 +247,6 @@ export function workspaceProvenanceRepoKey(workspace: WorkspaceRecord): string |
 // A bare cwd still groups rows, but it is never treated as recorded provenance.
 function workspaceRepoKey(workspace: WorkspaceRecord): string | undefined {
   return workspaceProvenanceRepoKey(workspace) ?? (workspace.cwd ? canonicalPathKey(workspace.cwd) : undefined);
-}
-
-function shouldExcludeAgent(agent: AgentRecord, current: CurrentContext, includeFocused: boolean): boolean {
-  if (!includeFocused && agent.focused === true) return true;
-  return !includeFocused && !!current.paneId && (agent.paneId === current.paneId || agent.target === current.paneId);
 }
 
 function workspaceLabelWithRelation(workspace: WorkspaceRecord): string {

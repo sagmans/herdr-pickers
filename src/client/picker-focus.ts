@@ -3,16 +3,11 @@ import { createConnection, type Socket } from "node:net";
 import type { PickerSurface } from "./popup.ts";
 import { readPickerSnapshot } from "./picker-snapshot.ts";
 
-import {
-  parsePickerFocusLifecycleMessage,
-  type PickerFocusLifecycleMessage,
-  type PickerFocusRequestIds,
-} from "./types.ts";
+import { parsePickerFocusLifecycleMessage, type PickerFocusLifecycleMessage } from "./types.ts";
 
-const REQUEST_IDS: PickerFocusRequestIds = {
-  subscribe: "herdr-pickers:focus-subscribe",
-  snapshot: "herdr-pickers:focus-snapshot",
-};
+// Snapshots travel over their own native-client connection, so the
+// subscription socket only ever answers this one request.
+const SUBSCRIBE_REQUEST_ID = "herdr-pickers:focus-subscribe";
 const REQUEST_METHODS = {
   subscribe: "events.subscribe",
 } as const;
@@ -180,7 +175,8 @@ export async function watchPickerFocus(
 
   return await new Promise((resolve, reject) => {
     let stage: FocusStage = { kind: "connecting" };
-    const buffers = new Map<Socket, Buffer>();
+    // Partial newline-delimited message carried between socket chunks.
+    let pending = Buffer.alloc(0);
     // Bounds each setup step or snapshot; restarted for every snapshot request.
     let stepTimer = setTimeout(() => terminate(), SETUP_TIMEOUT_MS);
     // Bounds the whole dispatch confirmation so replayed events cannot extend it forever.
@@ -225,7 +221,7 @@ export async function watchPickerFocus(
       clearTimeout(dispatchTimer);
       signal?.removeEventListener("abort", terminate);
       snapshots.abort();
-      buffers.clear();
+      pending = Buffer.alloc(0);
     }
 
     function writeRequest(connection: Socket, payload: unknown): void {
@@ -276,16 +272,16 @@ export async function watchPickerFocus(
       apply(advanceFocus(stage, message, paneId));
     }
 
-    function handleData(connection: Socket, chunk: Buffer): void {
+    function handleData(chunk: Buffer): void {
       const budget = MAX_MESSAGE_BUFFER_BYTES;
-      let buffer = Buffer.concat([buffers.get(connection) ?? Buffer.alloc(0), chunk]);
+      let buffer = Buffer.concat([pending, chunk]);
       let newline = buffer.indexOf(NEWLINE_BYTE);
       while (newline >= 0) {
         if (newline > budget) return terminate();
         const raw = buffer.subarray(0, newline).toString("utf8");
         buffer = buffer.subarray(newline + 1);
         try {
-          handleMessage(parsePickerFocusLifecycleMessage(raw, REQUEST_IDS, paneId));
+          handleMessage(parsePickerFocusLifecycleMessage(raw, SUBSCRIBE_REQUEST_ID));
         } catch {
           terminate();
         }
@@ -293,7 +289,7 @@ export async function watchPickerFocus(
         newline = buffer.indexOf(NEWLINE_BYTE);
       }
       if (buffer.length > budget) return terminate();
-      if (!connection.destroyed) buffers.set(connection, buffer);
+      if (!socket.destroyed) pending = buffer;
     }
 
     signal?.addEventListener("abort", terminate, { once: true });
@@ -301,12 +297,12 @@ export async function watchPickerFocus(
       if (stage.kind !== "connecting") return;
       stage = { kind: "subscribing" };
       writeRequest(socket, {
-        id: REQUEST_IDS.subscribe,
+        id: SUBSCRIBE_REQUEST_ID,
         method: REQUEST_METHODS.subscribe,
         params: { subscriptions: FOCUS_SUBSCRIPTIONS },
       });
     });
-    socket.on("data", (chunk: Buffer) => handleData(socket, chunk));
+    socket.on("data", handleData);
     socket.once("error", terminate);
     socket.once("end", terminate);
     socket.once("close", terminate);

@@ -35,7 +35,7 @@ export async function loadAgentTargets(
   if (agentList.agents.length === 0 && agentList.skippedWithoutTarget > 0) {
     throw new AgentTargetError(agentList.observedKeys);
   }
-  const targets = buildAgentTargets(agentList.agents, workspaces, current, { includeFocused: true });
+  const targets = buildAgentTargets(agentList.agents, workspaces, current);
   if (agentModeSpec(mode).repoScoped) {
     const scopeKey = await resolveSourceRepositoryKey(workspaces, current, herdr);
     return scopeKey ? targets.filter((target) => target.repoKey === scopeKey) : [];

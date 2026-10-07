@@ -25,8 +25,6 @@ export interface WorkspaceRecord {
   readonly label?: string | undefined;
   readonly cwd?: string | undefined;
   readonly worktree?: WorktreeProvenance | undefined;
-  readonly tabCount?: number | undefined;
-  readonly paneCount?: number | undefined;
   readonly agentStatus?: string | undefined;
   readonly focused?: boolean | undefined;
 }
@@ -45,7 +43,6 @@ export interface WorktreeRecord {
 
 export interface WorktreeListResult {
   readonly sourceRepoRoot?: string | undefined;
-  readonly sourceWorkspaceId?: string | undefined;
   readonly worktrees: readonly WorktreeRecord[];
 }
 
@@ -63,13 +60,7 @@ export interface AgentRecord {
 export interface AgentListResult {
   readonly agents: readonly AgentRecord[];
   readonly skippedWithoutTarget: number;
-  readonly skippedWithoutIdentity: number;
   readonly observedKeys: readonly string[];
-}
-
-export interface PickerFocusRequestIds {
-  readonly subscribe: string;
-  readonly snapshot: string;
 }
 
 export type PickerFocusLifecycleMessage =
@@ -85,11 +76,7 @@ export type PickerFocusLifecycleMessage =
   | { readonly kind: "tab-focused"; readonly tabId: string; readonly workspaceId: string }
   | { readonly kind: "workspace-focused"; readonly workspaceId: string };
 
-export function parsePickerFocusLifecycleMessage(
-  raw: string,
-  requestIds: PickerFocusRequestIds,
-  paneId: string,
-): PickerFocusLifecycleMessage {
+export function parsePickerFocusLifecycleMessage(raw: string, subscribeRequestId: string): PickerFocusLifecycleMessage {
   let value: unknown;
   try {
     value = JSON.parse(raw) as unknown;
@@ -104,11 +91,8 @@ export function parsePickerFocusLifecycleMessage(
 
     const id = expectString(envelope.id);
     const result = expectRecord(envelope.result);
-    if (id === requestIds.subscribe && result.type === SUBSCRIPTION_STARTED_TYPE) {
+    if (id === subscribeRequestId && result.type === SUBSCRIPTION_STARTED_TYPE) {
       return { kind: "subscription-started" };
-    }
-    if (id === requestIds.snapshot && result.type === SESSION_SNAPSHOT_TYPE) {
-      return readPickerFocusSnapshot(result.snapshot, paneId);
     }
     throw new Error(MALFORMED_PICKER_FOCUS_MESSAGE);
   } catch {
@@ -154,7 +138,6 @@ export function readWorktrees(envelope: unknown): WorktreeListResult {
   const source = optionalRecord(result.source);
   return {
     sourceRepoRoot: optionalString(source?.repo_root),
-    sourceWorkspaceId: optionalString(source?.source_workspace_id),
     worktrees: getArray(result.worktrees).flatMap(readWorktree),
   };
 }
@@ -178,20 +161,16 @@ export function readAgentList(envelope: unknown): AgentListResult {
   const agents: AgentRecord[] = [];
   const observedKeys = new Set<string>();
   let skippedWithoutTarget = 0;
-  let skippedWithoutIdentity = 0;
 
   for (const row of rows) {
     for (const key of Object.keys(row)) observedKeys.add(key);
-    if (!hasAgentIdentity(row)) {
-      skippedWithoutIdentity += 1;
-      continue;
-    }
+    if (!hasAgentIdentity(row)) continue;
     const agent = readAgent(row, nameCounts, labelCounts);
     if (agent) agents.push(agent);
     else skippedWithoutTarget += 1;
   }
 
-  return { agents, skippedWithoutTarget, skippedWithoutIdentity, observedKeys: [...observedKeys].sort((left, right) => left.localeCompare(right)) };
+  return { agents, skippedWithoutTarget, observedKeys: [...observedKeys].sort((left, right) => left.localeCompare(right)) };
 }
 
 function readPickerFocusEvent(envelope: Record<string, unknown>): PickerFocusLifecycleMessage {
@@ -272,10 +251,6 @@ function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;
 }
 
-function optionalNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
 function optionalBoolean(value: unknown): boolean {
   return optionalBooleanOrUndefined(value) ?? false;
 }
@@ -299,8 +274,6 @@ function readWorkspace(value: unknown): WorkspaceRecord[] {
     label: optionalString(record.label),
     cwd: optionalString(record.cwd),
     worktree,
-    tabCount: optionalNumber(record.tab_count),
-    paneCount: optionalNumber(record.pane_count),
     agentStatus: firstString(record, ["agent_status", "status", "state"]),
     focused: optionalBooleanOrUndefined(record.focused),
   }];

@@ -69,8 +69,6 @@ describe("navigation target builders", () => {
       workspaceId: "feature",
       label: "herdr",
       cwd: "/repo/sample-repo/herdr",
-      tabCount: 2,
-      paneCount: 3,
       agentStatus: "idle",
       worktree: { repoName: "sample-repo", branch: "feat/herdr", isLinkedWorktree: true },
     }], { workspaceId: "source" });
@@ -141,7 +139,7 @@ describe("navigation target builders", () => {
     const targets = buildAgentTargets([
       { target: "p1", paneId: "w:p1", label: "pi", focused: true },
       { target: "p2", paneId: "w:p2", label: "codex" },
-    ], [], { paneId: "w:p2" }, { includeFocused: true });
+    ], [], { paneId: "w:p2" });
 
     expect(targets.filter((target) => target.focused).map((target) => target.agentTarget)).toEqual(["p2"]);
   });
@@ -150,7 +148,7 @@ describe("navigation target builders", () => {
     const targets = buildAgentTargets([
       { target: "p1", paneId: "w:p1", label: "pi", focused: true },
       { target: "p2", paneId: "w:p2", label: "codex" },
-    ], [], {}, { includeFocused: true });
+    ], [], {});
 
     expect(targets.filter((target) => target.focused).map((target) => target.agentTarget)).toEqual(["p1"]);
   });
@@ -160,7 +158,7 @@ describe("navigation target builders", () => {
       { target: "p1", paneId: "w:p1", workspaceId: "source", label: "pi" },
       { target: "p2", paneId: "w:p2", workspaceId: "source", label: "codex", focused: true },
       { target: "p3", paneId: "w:p3", workspaceId: "other", label: "pi" },
-    ], [], { paneId: "w:missing", workspaceId: "source" }, { includeFocused: true });
+    ], [], { paneId: "w:missing", workspaceId: "source" });
 
     expect(targets.filter((target) => target.focused).map((target) => target.agentTarget)).toEqual(["p2"]);
   });
@@ -169,7 +167,7 @@ describe("navigation target builders", () => {
     const targets = buildAgentTargets([
       { target: "p1", paneId: "w:p1", workspaceId: "source", label: "pi" },
       { target: "p2", paneId: "w:p2", workspaceId: "other", label: "pi", focused: true },
-    ], [], { paneId: "w:missing", workspaceId: "source" }, { includeFocused: true });
+    ], [], { paneId: "w:missing", workspaceId: "source" });
 
     expect(targets.filter((target) => target.focused).map((target) => target.agentTarget)).toEqual(["p1"]);
   });
@@ -178,7 +176,7 @@ describe("navigation target builders", () => {
     const targets = buildAgentTargets([
       { target: "p1", paneId: "w:p1", label: "pi", focused: true },
       { target: "p2", paneId: "w:p2", label: "codex" },
-    ], [], { paneId: "w:missing" }, { includeFocused: true });
+    ], [], { paneId: "w:missing" });
 
     expect(targets.filter((target) => target.focused).map((target) => target.agentTarget)).toEqual(["p1"]);
   });

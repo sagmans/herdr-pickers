@@ -17,8 +17,6 @@ describe("Herdr navigation adapters", () => {
       workspaceId: "w1",
       label: "api",
       cwd: "/repo",
-      tabCount: 2,
-      paneCount: 3,
     });
   });
 
@@ -38,7 +36,6 @@ describe("Herdr navigation adapters", () => {
     } });
 
     expect(result.sourceRepoRoot).toBe("/repo");
-    expect(result.sourceWorkspaceId).toBe("w1");
     expect(result.worktrees[0]).toMatchObject({ path: "/repo/wt", branch: "feat/x", openWorkspaceId: "w2" });
   });
 
