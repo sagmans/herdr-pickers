@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { closeSync, constants, fstatSync, mkdirSync, openSync, realpathSync, lstatSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
-import type { CurrentContext } from "./catalog.ts";
+import type { CurrentContext } from "./context.ts";
 import type { PickerMode } from "./modes.ts";
 import { encodeRequestContext, readPickerRequest, type PickerRequest } from "./picker-request.ts";
 import type { PickerPlacement } from "./config/config.ts";

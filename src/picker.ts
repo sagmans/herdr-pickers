@@ -1,6 +1,7 @@
 import { Herdr, type CommandRunner } from "./client/herdr.ts";
 import { readAgentList, readWorkspaces, readWorktreeScope, type WorkspaceRecord } from "./client/types.ts";
-import { buildAgentTargets, currentContextFromEnv, type AgentTarget, type CurrentContext } from "./catalog.ts";
+import { buildAgentTargets, type AgentTarget } from "./catalog.ts";
+import type { CurrentContext } from "./context.ts";
 import type { HerdrPickersConfig } from "./config/config.ts";
 import { dispatchAgent, dispatchNavigationTarget } from "./dispatch.ts";
 import { agentModeSpec, isAgentMode, navigationModeSpec, type AgentMode, type NavigationMode, type PickerMode } from "./modes.ts";
@@ -26,6 +27,9 @@ export interface PickerRuntime {
   readonly beforeDispatch?: (() => void | Promise<void>) | undefined;
   readonly beforeCleanup?: (() => Promise<void>) | undefined;
   readonly herdr: Herdr;
+  /** Surface the picker was opened from; absent means no source to mark or scope by. */
+  readonly context?: CurrentContext | undefined;
+  /** Only locates plugin configuration; source context never travels through it. */
   readonly env?: Record<string, string | undefined> | undefined;
   readonly gitRunner?: CommandRunner | undefined;
   readonly pickerRunner?: PickerRunner | undefined;
@@ -37,7 +41,7 @@ export type PickerOutcome = "dispatched" | "cancelled" | "no-agents";
 export async function loadAgentTargets(
   mode: AgentMode,
   herdr: Herdr,
-  env: Record<string, string | undefined> | undefined,
+  current: CurrentContext = {},
 ): Promise<AgentTarget[]> {
   // Both Herdr round-trips start before either is awaited so the 1s agent
   // refresh pays one call latency instead of two.
@@ -50,7 +54,6 @@ export async function loadAgentTargets(
   if (agentList.agents.length === 0 && agentList.skippedWithoutTarget > 0) {
     throw new AgentTargetError(agentList.observedKeys);
   }
-  const current = currentContextFromEnv(env);
   const targets = buildAgentTargets(agentList.agents, workspaces, current, { includeFocused: true });
   if (agentModeSpec(mode).repoScoped) {
     const scopeKey = await repositoryScopeKey(workspaces, current, herdr);
@@ -91,7 +94,7 @@ export async function runAgentPicker(mode: AgentMode, runtime: PickerRuntime): P
       keymap: runtime.config?.keymap,
       reload: async () => {
         signal.throwIfAborted();
-        const targets = await loadAgentTargets(mode, runtime.herdr, runtime.env);
+        const targets = await loadAgentTargets(mode, runtime.herdr, runtime.context);
         signal.throwIfAborted();
         // Initial emptiness still dismisses the picker; later refreshes may recover.
         if (initialLoad && targets.length === 0) {
@@ -156,6 +159,7 @@ async function runNavigationPicker(mode: NavigationMode, runtime: PickerRuntime)
 function navigationRuntime(runtime: PickerRuntime) {
   return {
     herdr: runtime.herdr,
+    context: runtime.context,
     env: runtime.env,
     gitRunner: runtime.gitRunner,
     projectRoots: runtime.config?.projects.roots,

@@ -1,6 +1,6 @@
 import { Herdr, HerdrCommandError, type CommandRunner } from "../client/herdr.ts";
 import { readWorktrees, type WorktreeListResult, type WorktreeRecord } from "../client/types.ts";
-import type { CurrentContext } from "../catalog.ts";
+import type { CurrentContext } from "../context.ts";
 
 const GIT_COMMAND = "git";
 

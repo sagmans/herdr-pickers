@@ -8,11 +8,10 @@ import {
   buildProjectTargets,
   buildWorkspaceTargets,
   buildWorktreeTargets,
-  currentContextFromEnv,
-  type CurrentContext,
   type PickerTarget,
 } from "./catalog.ts";
 import { navigationModeSpec, type NavigationMode, type NavigationModeSpec } from "./modes.ts";
+import type { CurrentContext } from "./context.ts";
 import { canonicalPathKey } from "./util/paths.ts";
 
 export type NavigationTarget = PickerTarget;
@@ -21,6 +20,9 @@ export interface NavigationRuntime {
   readonly signal?: AbortSignal | undefined;
   readonly herdr: Herdr;
   readonly gitRunner?: CommandRunner | undefined;
+  /** Surface the picker was opened from; absent means no source to mark or scope by. */
+  readonly context?: CurrentContext | undefined;
+  /** Only locates plugin configuration when explicit project roots are absent. */
   readonly env?: Record<string, string | undefined> | undefined;
   readonly projectRoots?: readonly string[] | undefined;
 }
@@ -64,7 +66,7 @@ async function loadNavigationSources(
 ): Promise<NavigationSources> {
   // Every navigation catalog marks or filters rows against open workspaces.
   const workspaces = readWorkspaces(await runtime.herdr.json(["workspace", "list"]));
-  const current = currentContextFromEnv(runtime.env);
+  const current = runtime.context ?? {};
   const workspaceScopeKey = spec.repoScoped ? sourceWorkspaceRepoKey(workspaces, current) : undefined;
   // Repo workspace loading keeps the scoped call even with provenance so
   // filtering remains aligned with Herdr's open-worktree view.

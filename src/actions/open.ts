@@ -2,7 +2,7 @@ import { Herdr, HerdrCommandError, HerdrSpawnError } from "../client/herdr.ts";
 import { readPickerPaneIds } from "../client/types.ts";
 import { PICKER_TOKEN_ENV, PickerSession, PickerStartupUncertainError } from "../picker-session.ts";
 import { PICKER_REQUEST_POLL_MS, PICKER_REQUEST_TIMEOUT_MS } from "../picker-request.ts";
-import { CURRENT_CONTEXT_ENV, currentContextFromEnv } from "../catalog.ts";
+import { currentContextFromEnv } from "../context.ts";
 import { loadConfig, type PickerPlacement } from "../config/config.ts";
 import { parseMode, type PickerMode } from "../modes.ts";
 import { formatPaneError } from "../pane.ts";
@@ -13,7 +13,6 @@ const DELIVERY_FAILURE = "Picker request could not be delivered before the deadl
 export function buildPaneOpenArgs(options: {
   readonly pluginId: string;
   readonly mode: PickerMode;
-  readonly env?: Record<string, string | undefined> | undefined;
   readonly placement?: PickerPlacement;
   readonly token?: string;
 }): string[] {
@@ -28,7 +27,10 @@ export function buildPaneOpenArgs(options: {
     "--entrypoint",
     "picker",
     ...(options.placement === "overlay" ? ["--placement", "overlay"] : []),
-    ...paneEnvArgs(options.mode, options.env),
+    // Source context travels in the picker request, not the pane environment,
+    // so a replacement keeps the original source without respawning the pane.
+    "--env",
+    `${MODE_ENV}=${options.mode}`,
     ...(options.token ? ["--env", `${PICKER_TOKEN_ENV}=${options.token}`] : []),
   ];
 }
@@ -76,7 +78,7 @@ export async function openPicker(
             // Even a superseded opener must launch its reserved child; the child reads the newest request.
             opened = true;
             try {
-              await client.run(buildPaneOpenArgs({ pluginId, mode, env, placement: config.placement, token }));
+              await client.run(buildPaneOpenArgs({ pluginId, mode, placement: config.placement, token }));
             } catch (error) {
               // A spawn failure or an explicit Herdr refusal proves no child holds this
               // token; transport loss and aborts stay reserved until the grace period ends.
@@ -95,18 +97,6 @@ export async function openPicker(
     cancellation.abort();
     session.close();
   }
-}
-
-function paneEnvArgs(mode: PickerMode, env: Record<string, string | undefined> | undefined): string[] {
-  const current = currentContextFromEnv(env);
-  const entries: Array<readonly [string, string | undefined]> = [
-    [MODE_ENV, mode],
-    [CURRENT_CONTEXT_ENV.workspaceId, current.workspaceId],
-    [CURRENT_CONTEXT_ENV.tabId, current.tabId],
-    [CURRENT_CONTEXT_ENV.paneId, current.paneId],
-    [CURRENT_CONTEXT_ENV.cwd, current.cwd],
-  ];
-  return entries.flatMap(([key, value]) => value ? ["--env", `${key}=${value}`] : []);
 }
 
 if (import.meta.main) {

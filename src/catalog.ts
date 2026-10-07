@@ -1,6 +1,7 @@
 import { basename } from "node:path";
 
 import type { AgentRecord, WorkspaceRecord, WorktreeRecord } from "./client/types.ts";
+import type { CurrentContext } from "./context.ts";
 import { isBareRepository } from "./discovery/projects.ts";
 import { canonicalPathKey, isPathWithin } from "./util/paths.ts";
 
@@ -64,37 +65,6 @@ export interface WorktreeTarget extends NavigationTargetBase {
 }
 
 export type PickerTarget = ProjectTarget | WorkspaceTarget | WorktreeTarget;
-
-export interface CurrentContext {
-  readonly workspaceId?: string | undefined;
-  readonly tabId?: string | undefined;
-  readonly paneId?: string | undefined;
-  readonly cwd?: string | undefined;
-}
-
-export const CURRENT_CONTEXT_ENV = {
-  workspaceId: "HERDR_PICKERS_SOURCE_WORKSPACE_ID",
-  tabId: "HERDR_PICKERS_SOURCE_TAB_ID",
-  paneId: "HERDR_PICKERS_SOURCE_PANE_ID",
-  cwd: "HERDR_PICKERS_SOURCE_CWD",
-} as const;
-
-const HERDR_CONTEXT_ENV = {
-  workspaceId: "HERDR_WORKSPACE_ID",
-  tabId: "HERDR_TAB_ID",
-  paneId: "HERDR_PANE_ID",
-  activeWorkspaceId: "HERDR_ACTIVE_WORKSPACE_ID",
-  activePaneCwd: "HERDR_ACTIVE_PANE_CWD",
-} as const;
-
-export function currentContextFromEnv(env: Record<string, string | undefined> | undefined): CurrentContext {
-  return {
-    workspaceId: nonEmpty(env?.[CURRENT_CONTEXT_ENV.workspaceId]) ?? nonEmpty(env?.[HERDR_CONTEXT_ENV.workspaceId]) ?? nonEmpty(env?.[HERDR_CONTEXT_ENV.activeWorkspaceId]),
-    tabId: nonEmpty(env?.[CURRENT_CONTEXT_ENV.tabId]) ?? nonEmpty(env?.[HERDR_CONTEXT_ENV.tabId]),
-    paneId: nonEmpty(env?.[CURRENT_CONTEXT_ENV.paneId]) ?? nonEmpty(env?.[HERDR_CONTEXT_ENV.paneId]),
-    cwd: nonEmpty(env?.[CURRENT_CONTEXT_ENV.cwd]) ?? nonEmpty(env?.[HERDR_CONTEXT_ENV.activePaneCwd]) ?? nonEmpty(env?.PWD),
-  };
-}
 
 export interface AgentTargetOptions {
   readonly includeFocused?: boolean | undefined;
@@ -381,10 +351,6 @@ function visibleAgentStatus(status: string | undefined): string | undefined {
 function joinDetail(...parts: Array<string | undefined>): string | undefined {
   const detail = parts.filter((part): part is string => Boolean(part));
   return detail.length > 0 ? detail.join(" · ") : undefined;
-}
-
-function nonEmpty(value: string | undefined): string | undefined {
-  return value && value.trim().length > 0 ? value : undefined;
 }
 
 // Agents share generic labels like "pi", so lead with their workspace relation

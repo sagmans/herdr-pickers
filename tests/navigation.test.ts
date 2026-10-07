@@ -40,7 +40,7 @@ describe("navigation modes", () => {
 
     const targets = await loadNavigationTargets("repo-worktrees", {
       herdr,
-      env: { HERDR_PICKERS_SOURCE_WORKSPACE_ID: "current" },
+      context: { workspaceId: "current" },
     });
 
     expect(targets.map((target) => target.kind === "worktree" ? [target.branch, target.existingWorkspaceId, target.current] : [])).toEqual([
@@ -69,7 +69,7 @@ describe("navigation modes", () => {
 
     const targets = await loadNavigationTargets("repo-workspaces", {
       herdr,
-      env: { HERDR_PICKERS_SOURCE_WORKSPACE_ID: "current" },
+      context: { workspaceId: "current" },
     });
 
     expect(targets.map((target) => target.kind === "workspace" ? target.workspaceId : "")).toEqual(["current", "main", "other"]);
@@ -135,11 +135,8 @@ describe("navigation modes", () => {
 
     const targets = await loadNavigationTargets("all", {
       herdr,
-      env: {
-        HERDR_PLUGIN_CONFIG_DIR: configDir,
-        HERDR_PICKERS_SOURCE_WORKSPACE_ID: "w1",
-        HERDR_PICKERS_SOURCE_PANE_ID: "w1:p1",
-      },
+      env: { HERDR_PLUGIN_CONFIG_DIR: configDir },
+      context: { workspaceId: "w1", paneId: "w1:p1" },
     });
 
     expect(targets.map((target) => [target.id, target.current]).sort()).toEqual([

@@ -54,7 +54,7 @@ describe("modes", () => {
     expect(() => parseMode("bad")).toThrow(/Valid modes/);
   });
 
-  test("builds plugin pane open args with mode and source context", () => {
+  test("builds plugin pane open args with mode", () => {
     expect(buildPaneOpenArgs({ pluginId: "herdr-pickers", mode: "agents" })).toEqual([
       "plugin",
       "pane",
@@ -66,11 +66,6 @@ describe("modes", () => {
       "--env",
       "HERDR_PICKERS_MODE=agents",
     ]);
-    expect(buildPaneOpenArgs({
-      pluginId: "herdr-pickers",
-      mode: "repo-agents",
-      env: { HERDR_WORKSPACE_ID: "w7", HERDR_TAB_ID: "w7:t1", HERDR_PANE_ID: "w7:p1", PWD: "/repo/sample-repo" },
-    })).toContain("HERDR_PICKERS_SOURCE_PANE_ID=w7:p1");
     expect(buildPaneOpenArgs({ pluginId: "herdr-pickers", mode: "repo-workspaces" })).toContain("HERDR_PICKERS_MODE=repo-workspaces");
   });
 
@@ -93,7 +88,6 @@ describe("modes", () => {
       pluginId: "herdr-pickers",
       mode: "agents",
       placement: "overlay",
-      env: { HERDR_WORKSPACE_ID: "w7", HERDR_TAB_ID: "w7:t1", HERDR_PANE_ID: "w7:p1", PWD: "/repo/sample-repo" },
     });
 
     expect(args.slice(0, 9)).toEqual([
@@ -108,7 +102,6 @@ describe("modes", () => {
       "overlay",
     ]);
     expect(args).toContain("HERDR_PICKERS_MODE=agents");
-    expect(args).toContain("HERDR_PICKERS_SOURCE_PANE_ID=w7:p1");
   });
 });
 
@@ -311,7 +304,7 @@ describe("repository agent scoping", () => {
       "agent list": () => ({ stdout: AGENTS, stderr: "", exitCode: 0 }),
     });
 
-    const targets = await loadAgentTargets("repo-agents", herdr, { HERDR_PICKERS_SOURCE_WORKSPACE_ID: "w1" });
+    const targets = await loadAgentTargets("repo-agents", herdr, { workspaceId: "w1" });
 
     expect(targets.map((target) => target.agentTarget).sort()).toEqual(["t1", "t2"]);
   });
@@ -325,7 +318,7 @@ describe("repository agent scoping", () => {
       "worktree list": () => ({ stdout: '{"result":{"source":{"repo_root":"/repo/sample-repo"},"worktrees":[]}}', stderr: "", exitCode: 0 }),
     }, commands);
 
-    const targets = await loadAgentTargets("repo-agents", herdr, { HERDR_PICKERS_SOURCE_WORKSPACE_ID: "w1" });
+    const targets = await loadAgentTargets("repo-agents", herdr, { workspaceId: "w1" });
 
     // Without workspace provenance, the scope comes from the worktree list,
     // and agents without their own cwd in the repository stay excluded.
@@ -340,7 +333,7 @@ describe("repository agent scoping", () => {
       "agent list": () => ({ stdout: other, stderr: "", exitCode: 0 }),
     });
 
-    const targets = await loadAgentTargets("repo-agents", herdr, { HERDR_PICKERS_SOURCE_WORKSPACE_ID: "w1" });
+    const targets = await loadAgentTargets("repo-agents", herdr, { workspaceId: "w1" });
 
     expect(targets).toEqual([]);
   });

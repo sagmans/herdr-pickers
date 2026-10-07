@@ -1,4 +1,3 @@
-import { CURRENT_CONTEXT_ENV, type CurrentContext } from "./catalog.ts";
 import { runPicker, type PickerOutcome, type PickerRuntime } from "./picker.ts";
 import { PICKER_REQUEST_POLL_MS } from "./picker-request.ts";
 import type { PickerSession } from "./picker-session.ts";
@@ -48,7 +47,8 @@ export async function runPickerLoop(session: RequestSession, owner: string, opti
         const confirmFocus = runtime.beforeDispatch;
         outcome = await runPicker(request.mode, {
           ...runtime,
-          env: sourceEnvironment(options.env, request.context),
+          env: options.env,
+          context: request.context,
           signal,
           beforeCleanup: undefined,
           pickerRunner: picker => runner({ ...picker, ...terminal.options(picker.signal ?? signal) }),
@@ -80,17 +80,4 @@ export async function runPickerLoop(session: RequestSession, owner: string, opti
   } finally {
     try { await options.beforeCleanup?.(); } finally { terminal.close(); }
   }
-}
-
-function sourceEnvironment(env: Record<string, string | undefined>, context: CurrentContext): Record<string, string | undefined> {
-  return {
-    ...env,
-    HERDR_WORKSPACE_ID: context.workspaceId,
-    HERDR_TAB_ID: context.tabId,
-    HERDR_PANE_ID: context.paneId,
-    HERDR_ACTIVE_WORKSPACE_ID: context.workspaceId,
-    HERDR_ACTIVE_PANE_CWD: context.cwd,
-    PWD: context.cwd,
-    ...Object.fromEntries(Object.entries(CURRENT_CONTEXT_ENV).map(([key, name]) => [name, context[key as keyof CurrentContext]])),
-  };
 }
