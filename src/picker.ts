@@ -73,10 +73,14 @@ export async function loadAgentTargets(
   herdr: Herdr,
   env: Record<string, string | undefined> | undefined,
 ): Promise<AgentTarget[]> {
-  const [workspaces, agentList] = await Promise.all([
-    readWorkspaces(await herdr.json(["workspace", "list"])),
-    readAgentList(await herdr.json(["agent", "list"])),
+  // Both Herdr round-trips start before either is awaited so the 1s agent
+  // refresh pays one call latency instead of two.
+  const [workspaceEnvelope, agentEnvelope] = await Promise.all([
+    herdr.json(["workspace", "list"]),
+    herdr.json(["agent", "list"]),
   ]);
+  const workspaces = readWorkspaces(workspaceEnvelope);
+  const agentList = readAgentList(agentEnvelope);
   if (agentList.agents.length === 0 && agentList.skippedWithoutTarget > 0) {
     throw new AgentTargetError(agentList.observedKeys);
   }
