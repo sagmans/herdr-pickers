@@ -2,6 +2,8 @@ import { runArgv, type CommandResult, type CommandRunner } from "../util/subproc
 import { boundedTerminalText } from "../util/terminal-text.ts";
 
 const UNKNOWN_COMMAND_FAMILY = "command";
+// A subcommand word is short; the cap only stops a hostile argv from flooding errors.
+const MAX_COMMAND_FAMILY_LENGTH = 64;
 const DEFAULT_HERDR_BIN = "herdr";
 
 /**
@@ -16,7 +18,7 @@ export function herdrBinary(): string {
 // workspace ids and absolute paths that must never reach terminal output.
 function commandFamily(args: readonly string[]): string {
   const family = args.find((arg) => arg.length > 0 && !arg.startsWith("-"));
-  return family ? boundedTerminalText(family, 64) : UNKNOWN_COMMAND_FAMILY;
+  return family ? boundedTerminalText(family, MAX_COMMAND_FAMILY_LENGTH) : UNKNOWN_COMMAND_FAMILY;
 }
 
 export class HerdrCommandError extends Error {

@@ -25,8 +25,11 @@ const PROBE_SIGNAL = 0;
 // late child exit without UI, so reclaiming cannot create a duplicate surface.
 const UNCLAIMED_RESERVATION_GRACE_MS = 10_000;
 const RESERVED_AT_COLUMN = "reserved_at";
+// Openers and pickers contend only for single-row writes, so a short wait
+// absorbs contention without stalling an opener past its delivery deadline.
+const SQLITE_BUSY_TIMEOUT_MS = 2_000;
 const SCHEMA = `
-  PRAGMA busy_timeout = 2000;
+  PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS};
   CREATE TABLE IF NOT EXISTS owners (
     session TEXT PRIMARY KEY, token TEXT NOT NULL, opener INTEGER NOT NULL,
     picker INTEGER, placement TEXT NOT NULL CHECK (placement IN ('popup', 'overlay')), pane TEXT,

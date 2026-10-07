@@ -1,13 +1,11 @@
 import { DEFAULT_PICKER_KEYMAP, type PickerKeyAction, type PickerKeymap } from "./config/config.ts";
+import { ESCAPE_KEY_SEQUENCE, KEY_BACKSPACE, KEY_CTRL_C } from "./terminal-keys.ts";
 
 const MOUSE_PATTERN = /^\x1b\[<(\d+);(\d+);(\d+)([Mm])/;
 const CSI_PATTERN = /^\x1b\[[0-9;?]*[ -/]*[@-~]/;
 const C1_CSI_PATTERN = /^\u009b[0-9;?]*[ -/]*[@-~]/;
-export const ESCAPE_KEY_SEQUENCE = "\x1b";
 const MOUSE_PREFIX = "\x1b[<";
 const CSI_PREFIX = "\x1b[";
-const KEY_BACKSPACE = "\x7f";
-const KEY_CTRL_C = "\x03";
 const MOUSE_LEFT = 0;
 const MOUSE_WHEEL_UP = 64;
 const MOUSE_WHEEL_DOWN = 65;

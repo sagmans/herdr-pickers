@@ -16,6 +16,8 @@ const GROUP_PREFIX = "▾ ";
 const CURRENT_MARKER = "●";
 const CURRENT_MARKER_SUFFIX = " ";
 const SEARCH_FIELD_SEPARATOR = " ";
+// Rows nest under their repository header so the list reads as a tree.
+const ROW_INDENT = "  ";
 const KIND_PRIORITY: Readonly<Record<TargetKind, number>> = {
   project: 0,
   workspace: 1,
@@ -125,9 +127,7 @@ function renderTargetLine(target: AgentTarget, state: AgentState, selected: bool
   const identity = selected
     ? bold(trueColor(statusColor(state), relation + label))
     : `${worktree ? trueColor(PICKER_PALETTE.muted, relation) : ""}${trueColor(PICKER_PALETTE.identity, label)}`;
-  // Children nest under their repository header so the list reads as a tree:
-  // the header owns the first column, agent rows indent beneath it.
-  return `  ${glyph} ${identity}`;
+  return `${ROW_INDENT}${glyph} ${identity}`;
 }
 
 function navigationGroup(
@@ -163,7 +163,7 @@ function renderNavigationTarget(
       ? kindColor
       : PICKER_PALETTE.muted;
   const primary = bold(trueColor(primaryColor, identity));
-  return `  ${marker}${badge}${primary}${detail ? ` ${trueColor(PICKER_PALETTE.muted, detail)}` : ""}`;
+  return `${ROW_INDENT}${marker}${badge}${primary}${detail ? ` ${trueColor(PICKER_PALETTE.muted, detail)}` : ""}`;
 }
 
 function navigationIdentity(

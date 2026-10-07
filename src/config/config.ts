@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
+import { CONTROL_CODE_MASK, KEY_DOWN, KEY_ENTER, KEY_UP } from "../terminal-keys.ts";
 import { hasErrorCode, isRecord } from "../util/objects.ts";
 
 export const PLUGIN_ID = "herdr-pickers";
@@ -13,11 +14,7 @@ export const DEFAULT_PICKER_PLACEMENT: PickerPlacement = "popup";
 export type PickerKeyAction = "up" | "down" | "accept" | "reload";
 export type PickerKeymap = ReadonlyMap<string, PickerKeyAction>;
 
-const KEY_UP = "\x1b[A";
-const KEY_DOWN = "\x1b[B";
-const KEY_ENTER = "\r";
 const CONTROL_KEY_PATTERN = /^ctrl-([a-z])$/;
-const CONTROL_CODE_MASK = 0x1f;
 const KEYMAP_ACTIONS = ["up", "down", "accept", "reload"] as const satisfies readonly PickerKeyAction[];
 const KEYMAP_ACTION_SET: ReadonlySet<string> = new Set(KEYMAP_ACTIONS);
 const FIXED_KEY_NAMES: ReadonlySet<string> = new Set(["escape", "ctrl-c"]);

@@ -9,6 +9,13 @@ const PICKER_FOCUS_EVENTS = {
   tab: "tab_focused",
   workspace: "workspace_focused",
 } as const;
+// Herdr names an agent under different keys across versions and agent kinds.
+const AGENT_IDENTITY_KEYS = ["label", "name", "agent", "kind"] as const;
+// Herdr reports live run state under agent_status; status/state cover other
+// Herdr versions and agent kinds.
+const STATUS_KEYS = ["agent_status", "status", "state"] as const;
+const AGENT_CWD_KEYS = ["cwd", "foreground_cwd"] as const;
+const AGENT_TARGET_KEYS = ["target", "pane_id", "terminal_id"] as const;
 
 export interface WorktreeProvenance {
   readonly branch?: string | undefined;
@@ -274,7 +281,7 @@ function readWorkspace(value: unknown): WorkspaceRecord[] {
     label: optionalString(record.label),
     cwd: optionalString(record.cwd),
     worktree,
-    agentStatus: firstString(record, ["agent_status", "status", "state"]),
+    agentStatus: firstString(record, STATUS_KEYS),
     focused: optionalBooleanOrUndefined(record.focused),
   }];
 }
@@ -318,20 +325,18 @@ function readAgent(record: Record<string, unknown>, nameCounts: ReadonlyMap<stri
   const sessionAgent = readSessionAgent(record.agent_session);
   return {
     target,
-    label: firstString(record, ["label", "name", "agent", "kind"]) ?? sessionAgent ?? target,
+    label: firstString(record, AGENT_IDENTITY_KEYS) ?? sessionAgent ?? target,
     workspaceId: optionalString(record.workspace_id),
     tabId: optionalString(record.tab_id),
     paneId: optionalString(record.pane_id),
-    // Herdr reports the live run state under agent_status; keep status/state as
-    // fallbacks for other Herdr versions or agent kinds.
-    status: firstString(record, ["agent_status", "status", "state"]),
-    cwd: firstString(record, ["cwd", "foreground_cwd"]),
+    status: firstString(record, STATUS_KEYS),
+    cwd: firstString(record, AGENT_CWD_KEYS),
     focused: typeof record.focused === "boolean" ? record.focused : undefined,
   };
 }
 
 function hasAgentIdentity(record: Record<string, unknown>): boolean {
-  return firstString(record, ["label", "name", "agent", "kind"]) !== undefined || readSessionAgent(record.agent_session) !== undefined;
+  return firstString(record, AGENT_IDENTITY_KEYS) !== undefined || readSessionAgent(record.agent_session) !== undefined;
 }
 
 function readSessionAgent(value: unknown): string | undefined {
@@ -342,7 +347,7 @@ function readSessionAgent(value: unknown): string | undefined {
 // agent names (terminal ids stopped resolving); prefer pane_id so selection
 // keeps working across herdr versions that still expose a legacy target field.
 function stableAgentTarget(record: Record<string, unknown>, nameCounts: ReadonlyMap<string, number>, labelCounts: ReadonlyMap<string, number>): string | undefined {
-  return firstString(record, ["target", "pane_id", "terminal_id"])
+  return firstString(record, AGENT_TARGET_KEYS)
     ?? uniqueField(record, "name", nameCounts)
     ?? uniqueField(record, "label", labelCounts);
 }
