@@ -12,9 +12,9 @@ import {
   type CurrentContext,
   type PickerTarget,
 } from "./catalog.ts";
+import { navigationModeSpec, type NavigationMode, type NavigationModeSpec } from "./modes.ts";
 import { canonicalPathKey } from "./util/paths.ts";
 
-export type NavigationMode = "all" | "projects" | "workspaces" | "worktrees" | "repo-worktrees" | "repo-workspaces";
 export type NavigationTarget = PickerTarget;
 
 export interface NavigationRuntime {
@@ -33,62 +33,52 @@ interface NavigationSources {
   readonly worktrees: readonly WorktreeRecord[];
 }
 
-const VALID_MODES = "all, projects, workspaces, worktrees, repo-worktrees, repo-workspaces";
-
-export function parseNavigationMode(value: string | undefined): NavigationMode {
-  switch (value) {
-    case "all":
-    case "projects":
-    case "workspaces":
-    case "worktrees":
-    case "repo-worktrees":
-    case "repo-workspaces":
-      return value;
-    default:
-      throw new Error(`Unknown herdr-pickers navigation mode '${value ?? ""}'. Valid modes: ${VALID_MODES}`);
-  }
-}
-
 export async function loadNavigationTargets(
   mode: NavigationMode,
   runtime: NavigationRuntime,
 ): Promise<NavigationTarget[]> {
-  const { workspaces, current, repositoryScopeKey, projects, worktrees } = await loadNavigationSources(mode, runtime);
-  const targets: NavigationTarget[] = [];
-
-  if (mode === "all" || mode === "projects") {
-    targets.push(...buildProjectTargets(projects, workspaces, current));
-  }
-  if (mode === "all" || mode === "workspaces") {
-    targets.push(...buildWorkspaceTargets(workspaces, current));
-  }
-  if (mode === "repo-workspaces") {
-    targets.push(...buildWorkspaceTargets(workspaces, current).filter((target) => target.repoKey === repositoryScopeKey));
-  }
-  if (mode === "all" || mode === "worktrees" || mode === "repo-worktrees") {
-    targets.push(...buildWorktreeTargets(worktrees, workspaces, current));
-  }
-  return targets;
+  const spec = navigationModeSpec(mode);
+  const { workspaces, current, repositoryScopeKey, projects, worktrees } = await loadNavigationSources(spec, runtime);
+  return spec.targetKinds.flatMap((kind): NavigationTarget[] => {
+    switch (kind) {
+      case "project":
+        return buildProjectTargets(projects, workspaces, current);
+      case "workspace": {
+        const built = buildWorkspaceTargets(workspaces, current);
+        return spec.repoScoped ? built.filter((target) => target.repoKey === repositoryScopeKey) : built;
+      }
+      case "worktree":
+        // Scoped worktrees already come from the source repository's own list.
+        return buildWorktreeTargets(worktrees, workspaces, current);
+      default: {
+        const exhaustive: never = kind;
+        return exhaustive;
+      }
+    }
+  });
 }
 
 async function loadNavigationSources(
-  mode: NavigationMode,
+  spec: NavigationModeSpec,
   runtime: NavigationRuntime,
 ): Promise<NavigationSources> {
-  const workspaces = needsWorkspaces(mode)
-    ? readWorkspaces(await runtime.herdr.json(["workspace", "list"]))
-    : [];
+  // Every navigation catalog marks or filters rows against open workspaces.
+  const workspaces = readWorkspaces(await runtime.herdr.json(["workspace", "list"]));
   const current = currentContextFromEnv(runtime.env);
-  const workspaceScopeKey = mode === "repo-workspaces" ? sourceWorkspaceRepoKey(workspaces, current) : undefined;
-  const scoped = needsWorktreeScope(mode)
+  const workspaceScopeKey = spec.repoScoped ? sourceWorkspaceRepoKey(workspaces, current) : undefined;
+  // Repo workspace loading keeps the scoped call even with provenance so
+  // filtering remains aligned with Herdr's open-worktree view.
+  const scoped = spec.repoScoped
     ? await listWorktreesForContext(current, runtime.herdr, runtime.signal)
     : undefined;
   const repositoryScopeKey = workspaceScopeKey
     ?? (scoped?.sourceRepoRoot ? canonicalPathKey(scoped.sourceRepoRoot) : undefined);
-  const projects = needsProjects(mode) ? resolveProjects(runtime, workspaces) : [];
-  const worktrees = mode === "repo-worktrees"
+  // Unscoped worktree catalogs are discovered per project, so they need the project list too.
+  const catalogWorktrees = spec.targetKinds.includes("worktree") && !spec.repoScoped;
+  const projects = spec.targetKinds.includes("project") || catalogWorktrees ? resolveProjects(runtime, workspaces) : [];
+  const worktrees = spec.repoScoped
     ? scoped?.worktrees ?? []
-    : needsWorktrees(mode)
+    : catalogWorktrees
       ? await listWorktreesForProjects(projects, runtime.herdr, runtime.gitRunner, runtime.signal)
       : [];
   return { workspaces, current, repositoryScopeKey, projects, worktrees };
@@ -114,27 +104,4 @@ function sourceWorkspaceRepoKey(
   const source = workspaces.find((workspace) => workspace.workspaceId === current.workspaceId);
   const repoRoot = source?.worktree?.repoRoot;
   return repoRoot ? canonicalPathKey(repoRoot) : source?.worktree?.repoKey;
-}
-
-function needsWorktreeScope(mode: NavigationMode): boolean {
-  // Repo workspace loading keeps the scoped call even with provenance so
-  // filtering remains aligned with Herdr's open-worktree view.
-  return mode === "repo-worktrees" || mode === "repo-workspaces";
-}
-
-function needsProjects(mode: NavigationMode): boolean {
-  return mode === "all" || mode === "projects" || mode === "worktrees";
-}
-
-function needsWorkspaces(mode: NavigationMode): boolean {
-  return mode === "all"
-    || mode === "projects"
-    || mode === "workspaces"
-    || mode === "worktrees"
-    || mode === "repo-worktrees"
-    || mode === "repo-workspaces";
-}
-
-function needsWorktrees(mode: NavigationMode): boolean {
-  return mode === "all" || mode === "worktrees";
 }

@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 
 import { Herdr, type CommandRunner } from "../src/client/herdr.ts";
-import { runPicker, type PickerMode } from "../src/picker.ts";
+import type { PickerMode } from "../src/modes.ts";
+import { runPicker } from "../src/picker.ts";
 import type { PickerItem } from "../src/picker-row.ts";
 import { runTerminalPicker } from "../src/terminal-picker.ts";
 import { FakeTerminal, FakeTimers, VIEWPORT } from "./terminal-picker-test-support.ts";

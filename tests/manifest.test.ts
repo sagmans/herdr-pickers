@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 
+import { PICKER_MODES, type PickerMode } from "../src/modes.ts";
+
 const EXPECTED_RELEASE_VERSION = "0.3.2";
 
 describe("plugin manifest", () => {
@@ -46,21 +48,15 @@ describe("plugin manifest", () => {
   test("declares all eight picker actions through one open entrypoint", () => {
     const pickerActions = manifest.actions?.filter((action) => action.command?.[1] === "src/actions/open.ts") ?? [];
 
-    expect(pickerActions.map((action) => action.id)).toEqual([
-      "all",
-      "projects",
-      "workspaces",
-      "repo-workspaces",
-      "worktrees",
-      "repo-worktrees",
-      "agents",
-      "repo-agents",
-    ]);
+    // The mode table is the runtime contract, so the manifest must expose exactly its modes in its order.
+    expect(pickerActions.map((action) => action.id)).toEqual(Object.keys(PICKER_MODES));
     expect(pickerActions.every((action) => action.command?.[0] === "bun")).toBe(true);
   });
 
   test("scopes repository picker actions to workspaces", () => {
-    for (const id of ["repo-workspaces", "repo-worktrees", "repo-agents"]) {
+    const repoScoped = (Object.keys(PICKER_MODES) as PickerMode[]).filter((mode) => PICKER_MODES[mode].repoScoped);
+    expect(repoScoped).toEqual(["repo-workspaces", "repo-worktrees", "repo-agents"]);
+    for (const id of repoScoped) {
       const action = manifest.actions?.find((candidate) => candidate.id === id);
       expect(action?.contexts).toEqual(["workspace"]);
       expect(action?.command).toEqual(["bun", "src/actions/open.ts", id]);

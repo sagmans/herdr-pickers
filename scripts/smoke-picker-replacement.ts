@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { PickerLifecycleSmokeOptions } from "./smoke-picker-lifecycle.ts";
 import { readOwnershipDatabase } from "./smoke-database.ts";
 import { POLL_TIMEOUT_EXTENDED_MS } from "./smoke-timing.ts";
+import { PICKER_MODES, type PickerMode } from "../src/modes.ts";
 import { hasErrorCode } from "../src/util/objects.ts";
 
 const OWNER_QUERY = "SELECT session, token, picker, pane, placement FROM owners";
@@ -18,8 +19,10 @@ const CTRL_C = "\u0003";
 const ENTER = "\r";
 const READY_MS = 400;
 const PROBE_SIGNAL = 0;
-const MODES = ["agents", "worktrees", "repo-agents", "all", "projects", "workspaces", "repo-workspaces", "repo-worktrees"] as const;
-const STARTUP_MODES = ["workspaces", "projects", "all"] as const;
+// Replacement order is deliberate: it repeats the opening mode, alternates kinds,
+// and ends on repo-worktrees so the follow-up dispatch proves source scope.
+const MODES = ["agents", "worktrees", "repo-agents", "all", "projects", "workspaces", "repo-workspaces", "repo-worktrees"] as const satisfies readonly PickerMode[];
+const STARTUP_MODES = ["workspaces", "projects", "all"] as const satisfies readonly PickerMode[];
 
 interface Owner {
   session: string;
@@ -103,7 +106,7 @@ export async function runPickerReplacementSmoke(options: PickerLifecycleSmokeOpt
       invoke(mode);
       await waitAdopted(owner, mode, previous);
       if (owner.pane) {
-        const prompt = `${mode.replace("repo-", "repo ")} ›`;
+        const prompt = PICKER_MODES[mode].prompt.trimEnd();
         await poll(`${mode} overlay frame renders`, () => {
           const frame = session.run(["pane", "read", owner.pane!, "--source", "visible", "--format", "text"]);
           return frame.code === 0 && frame.stdout.includes(prompt) ? mode : undefined;

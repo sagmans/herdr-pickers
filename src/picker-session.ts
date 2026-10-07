@@ -3,7 +3,7 @@ import { closeSync, constants, fstatSync, mkdirSync, openSync, realpathSync, lst
 import { basename, dirname, join } from "node:path";
 
 import type { CurrentContext } from "./catalog.ts";
-import type { PickerMode } from "./picker.ts";
+import type { PickerMode } from "./modes.ts";
 import { encodeRequestContext, readPickerRequest, type PickerRequest } from "./picker-request.ts";
 import type { PickerPlacement } from "./config/config.ts";
 import { hasErrorCode } from "./util/objects.ts";

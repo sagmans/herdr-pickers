@@ -4,7 +4,7 @@ import { PICKER_TOKEN_ENV, PickerSession, PickerStartupUncertainError } from "..
 import { PICKER_REQUEST_POLL_MS, PICKER_REQUEST_TIMEOUT_MS } from "../picker-request.ts";
 import { CURRENT_CONTEXT_ENV, currentContextFromEnv } from "../catalog.ts";
 import { loadConfig, type PickerPlacement } from "../config/config.ts";
-import { parseMode, type PickerMode } from "../picker.ts";
+import { parseMode, type PickerMode } from "../modes.ts";
 import { formatPaneError } from "../pane.ts";
 
 const MODE_ENV = "HERDR_PICKERS_MODE";

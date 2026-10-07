@@ -3,7 +3,8 @@ import { describe, expect, test } from "bun:test";
 import { buildPaneOpenArgs } from "../src/actions/open.ts";
 import { Herdr, type CommandRunner } from "../src/client/herdr.ts";
 import { parseConfig } from "../src/config/config.ts";
-import { AgentTargetError, loadAgentTargets, parseMode, runAgentPicker, runPicker, type PickerRunner } from "../src/picker.ts";
+import { parseMode } from "../src/modes.ts";
+import { AgentTargetError, loadAgentTargets, runAgentPicker, runPicker, type PickerRunner } from "../src/picker.ts";
 import type { TerminalPickerOptions } from "../src/terminal-picker.ts";
 
 type PickerCall = TerminalPickerOptions;

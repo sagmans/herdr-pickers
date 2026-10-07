@@ -1,5 +1,5 @@
 import type { CurrentContext } from "./catalog.ts";
-import { parseMode, type PickerMode } from "./picker.ts";
+import { parseMode, type PickerMode } from "./modes.ts";
 import { isRecord } from "./util/objects.ts";
 
 export const PICKER_REQUEST_POLL_MS = 25;

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 
 import { Herdr } from "../src/client/herdr.ts";
-import { loadNavigationTargets, parseNavigationMode } from "../src/navigation.ts";
+import { loadNavigationTargets } from "../src/navigation.ts";
 
 const REPO_WORKTREES_PREFIX = "herdr-pickers-repo-worktrees-";
 const REPO_WORKSPACES_PREFIX = "herdr-pickers-repo-workspaces-";
@@ -21,13 +21,6 @@ function herdrWith(handler: (args: readonly string[]) => string, commands: strin
 }
 
 describe("navigation modes", () => {
-  test("parses all navigation modes and rejects unknown values", () => {
-    for (const mode of ["all", "projects", "workspaces", "worktrees", "repo-worktrees", "repo-workspaces"] as const) {
-      expect(parseNavigationMode(mode)).toBe(mode);
-    }
-    expect(() => parseNavigationMode("bad")).toThrow(/Valid modes/);
-  });
-
   test("builds same-repository worktrees with open and unopened checkouts", async () => {
     const repo = mkdtempSync(join(tmpdir(), REPO_WORKTREES_PREFIX));
     const current = join(repo, "current");

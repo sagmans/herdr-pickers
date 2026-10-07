@@ -2,7 +2,7 @@ import { dirname, parse, sep } from "node:path";
 
 import { parseAgentStatus, statusColor, statusGlyph, type AgentState } from "./agent-status.ts";
 import type { AgentTarget, PickerTarget, TargetKind } from "./catalog.ts";
-import type { NavigationMode } from "./navigation.ts";
+import { navigationModeSpec, type NavigationMode, type NavigationModeSpec } from "./modes.ts";
 import { PICKER_PALETTE } from "./palette.ts";
 import type { PickerGroup, PickerItem, PickerRows } from "./picker-row.ts";
 import { bold, dim, trueColor } from "./style.ts";
@@ -80,24 +80,25 @@ export function renderNavigationRows(
   mode: NavigationMode,
   targets: readonly PickerTarget[],
 ): PickerRows {
-  const ordered = orderNavigationTargets(mode, targets);
+  const spec = navigationModeSpec(mode);
+  const ordered = orderNavigationTargets(spec, targets);
   const qualifiers: NavigationQualifiers = {
     repositories: repositoryQualifiers(ordered),
     workspaces: workspaceQualifiers(ordered),
   };
   const items = ordered.map((target): PickerItem => {
-    const group = mode === "projects" ? undefined : navigationGroup(target, qualifiers.repositories);
-    const identity = navigationIdentity(mode, target, qualifiers);
+    const group = spec.grouped ? navigationGroup(target, qualifiers.repositories) : undefined;
+    const identity = navigationIdentity(spec, target, qualifiers);
     const detail = target.detail ? sanitize(target.detail) : undefined;
-    const badge = mode === "all" ? target.kind : undefined;
+    const badge = spec.kindBadges ? target.kind : undefined;
     const marker = target.current ? currentMarker() : "";
     return {
       id: target.id,
       target: target.id,
       group,
       searchText: [group?.label, badge, identity, detail].filter(Boolean).join(SEARCH_FIELD_SEPARATOR),
-      display: renderNavigationTarget(mode, target, identity, detail, false, marker),
-      selectedDisplay: renderNavigationTarget(mode, target, identity, detail, true, marker),
+      display: renderNavigationTarget(spec, target, identity, detail, false, marker),
+      selectedDisplay: renderNavigationTarget(spec, target, identity, detail, true, marker),
     };
   });
   return { items, focusedId: preselectedTarget(ordered)?.id };
@@ -147,7 +148,7 @@ function currentMarker(): string {
 }
 
 function renderNavigationTarget(
-  mode: NavigationMode,
+  spec: NavigationModeSpec,
   target: PickerTarget,
   identity: string,
   detail: string | undefined,
@@ -155,10 +156,10 @@ function renderNavigationTarget(
   marker = "",
 ): string {
   const kindColor = PICKER_PALETTE.kind[target.kind];
-  const badge = mode === "all" ? `${trueColor(kindColor, `[${target.kind}]`)} ` : "";
+  const badge = spec.kindBadges ? `${trueColor(kindColor, `[${target.kind}]`)} ` : "";
   const primaryColor = selected
     ? PICKER_PALETTE.selected
-    : mode === "all"
+    : spec.kindBadges
       ? kindColor
       : PICKER_PALETTE.muted;
   const primary = bold(trueColor(primaryColor, identity));
@@ -166,12 +167,13 @@ function renderNavigationTarget(
 }
 
 function navigationIdentity(
-  mode: NavigationMode,
+  spec: NavigationModeSpec,
   target: PickerTarget,
   qualifiers: NavigationQualifiers,
 ): string {
   const label = navigationDisplayLabel(target);
-  const qualifier = mode === "projects"
+  // Without a group header, the repository qualifier must ride on the row itself.
+  const qualifier = !spec.grouped
     ? qualifiers.repositories.get(repositoryKey(target))
     : qualifiers.workspaces.get(target.id);
   return sanitize(qualifier ? `${label}${GROUP_QUALIFIER_SEPARATOR}${qualifier}` : label);
@@ -253,13 +255,13 @@ function orderAgents(targets: readonly AgentTarget[]): AgentTarget[] {
   });
 }
 
-function orderNavigationTargets(mode: NavigationMode, targets: readonly PickerTarget[]): PickerTarget[] {
+function orderNavigationTargets(spec: NavigationModeSpec, targets: readonly PickerTarget[]): PickerTarget[] {
   return targets.toSorted((left, right) => {
-    if (mode !== "projects") {
+    if (spec.grouped) {
       const byRepo = compareRepositories(left, right);
       if (byRepo !== 0) return byRepo;
     }
-    if (mode === "all") {
+    if (spec.kindBadges) {
       const byKind = KIND_PRIORITY[left.kind] - KIND_PRIORITY[right.kind];
       if (byKind !== 0) return byKind;
     }
