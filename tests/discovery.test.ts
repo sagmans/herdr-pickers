@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 
-import { Herdr, HerdrJsonError, type CommandRunner } from "../src/client/herdr.ts";
+import { Herdr, HerdrJsonError } from "../src/client/herdr.ts";
+import { type CommandRunner } from "../src/util/subprocess.ts";
 import { listProjects } from "../src/discovery/projects.ts";
 import { listGitWorktrees, listWorktreesForContext, listWorktreesForProject } from "../src/discovery/worktrees.ts";
 

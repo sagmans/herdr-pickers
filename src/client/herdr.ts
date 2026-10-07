@@ -1,14 +1,16 @@
+import { runArgv, type CommandResult, type CommandRunner } from "../util/subprocess.ts";
 import { boundedTerminalText } from "../util/terminal-text.ts";
 
-export interface CommandResult {
-  readonly stdout: string;
-  readonly stderr: string;
-  readonly exitCode: number;
-}
-
-export type CommandRunner = (argv: readonly string[], signal?: AbortSignal) => Promise<CommandResult>;
-
 const UNKNOWN_COMMAND_FAMILY = "command";
+const DEFAULT_HERDR_BIN = "herdr";
+
+/**
+ * Herdr exports HERDR_BIN_PATH to plugins so every invocation reaches the same
+ * binary, and therefore the same protocol version, that launched the plugin.
+ */
+export function herdrBinary(): string {
+  return process.env.HERDR_BIN_PATH ?? DEFAULT_HERDR_BIN;
+}
 
 // Only the leading subcommand word is rendered; argv beyond it can carry
 // workspace ids and absolute paths that must never reach terminal output.
@@ -55,7 +57,7 @@ export class Herdr {
   private readonly signal: AbortSignal | undefined;
 
   constructor(options: HerdrOptions = {}) {
-    this.bin = options.bin ?? process.env.HERDR_BIN_PATH ?? "herdr";
+    this.bin = options.bin ?? herdrBinary();
     this.runner = options.runner ?? runCommand;
     this.signal = options.signal;
   }
@@ -86,34 +88,7 @@ export class Herdr {
   }
 }
 
-async function runCommand(argv: readonly string[], signal?: AbortSignal): Promise<CommandResult> {
-  signal?.throwIfAborted();
-  let proc: Bun.Subprocess<"ignore", "pipe", "pipe">;
-  try {
-    proc = Bun.spawn([...argv], {
-      stdin: "ignore",
-      stdout: "pipe",
-      stderr: "pipe",
-      ...(signal === undefined ? {} : { signal }),
-    });
-  } catch (error) {
-    // Only failure to create the process proves that no command reached Herdr.
-    throw new HerdrSpawnError(error);
-  }
-
-  let result: [string, string, number];
-  try {
-    result = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
-  } catch (error) {
-    signal?.throwIfAborted();
-    throw error;
-  }
-  signal?.throwIfAborted();
-  const [stdout, stderr, exitCode] = result;
-
-  return { stdout, stderr, exitCode };
+// Only failure to create the process proves that no command reached Herdr.
+function runCommand(argv: readonly string[], signal?: AbortSignal): Promise<CommandResult> {
+  return runArgv(argv, { signal, spawnError: (cause) => new HerdrSpawnError(cause) });
 }

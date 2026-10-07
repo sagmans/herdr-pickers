@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
-import { Herdr, type CommandRunner } from "../src/client/herdr.ts";
+import { Herdr } from "../src/client/herdr.ts";
+import { type CommandRunner } from "../src/util/subprocess.ts";
 import { dispatchAgent, dispatchNavigationTarget } from "../src/dispatch.ts";
 
 function recordingHerdr(commands: string[][], failures: readonly string[] = [], stderr = "failed"): Herdr {

@@ -1,4 +1,3 @@
-import type { CommandRunner } from "./client/herdr.ts";
 import type { Herdr } from "./client/herdr.ts";
 import { readWorkspaces, workspaceRepoRoots, type WorkspaceRecord, type WorktreeRecord } from "./client/types.ts";
 import { loadConfig } from "./config/config.ts";
@@ -13,6 +12,7 @@ import {
 import { navigationModeSpec, type NavigationMode, type NavigationModeSpec } from "./modes.ts";
 import type { CurrentContext } from "./context.ts";
 import { canonicalPathKey } from "./util/paths.ts";
+import type { CommandRunner } from "./util/subprocess.ts";
 
 export type NavigationTarget = PickerTarget;
 

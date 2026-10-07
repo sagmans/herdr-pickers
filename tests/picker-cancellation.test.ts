@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 
-import { Herdr, type CommandRunner } from "../src/client/herdr.ts";
+import { Herdr } from "../src/client/herdr.ts";
+import { type CommandRunner } from "../src/util/subprocess.ts";
 import type { PickerMode } from "../src/modes.ts";
 import { runPicker } from "../src/picker.ts";
 import type { PickerItem } from "../src/picker-row.ts";

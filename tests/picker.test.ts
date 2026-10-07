@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
 import { buildPaneOpenArgs } from "../src/actions/open.ts";
-import { Herdr, type CommandRunner } from "../src/client/herdr.ts";
+import { Herdr } from "../src/client/herdr.ts";
+import { type CommandRunner } from "../src/util/subprocess.ts";
 import { parseConfig } from "../src/config/config.ts";
 import { parseMode } from "../src/modes.ts";
 import { AgentTargetError, loadAgentTargets } from "../src/agents.ts";

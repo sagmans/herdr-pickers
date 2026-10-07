@@ -1,8 +1,9 @@
-import { Herdr, HerdrCommandError, type CommandRunner } from "../client/herdr.ts";
+import { Herdr, HerdrCommandError } from "../client/herdr.ts";
 import { readWorktrees, readWorktreeScope, type WorkspaceRecord, type WorktreeListResult, type WorktreeRecord } from "../client/types.ts";
 import { workspaceProvenanceRepoKey } from "../catalog.ts";
 import type { CurrentContext } from "../context.ts";
 import { canonicalPathKey } from "../util/paths.ts";
+import { runCommand, type CommandRunner } from "../util/subprocess.ts";
 
 const GIT_COMMAND = "git";
 const MISSING_WORKTREE_SOURCE = "Cannot open repository worktrees without a source workspace or cwd.";
@@ -12,7 +13,7 @@ const MISSING_SOURCE_REPO_ROOT = "Herdr worktree list response did not include s
 export async function listWorktreesForProjects(
   projects: readonly string[],
   herdr: Herdr,
-  gitRunner: CommandRunner = runGitCommand,
+  gitRunner: CommandRunner = runCommand,
   signal?: AbortSignal,
 ): Promise<WorktreeRecord[]> {
   signal?.throwIfAborted();
@@ -98,7 +99,7 @@ function sourceWorktreeListArgs(context: CurrentContext): string[] | undefined {
 export async function listWorktreesForProject(
   project: string,
   herdr: Herdr,
-  gitRunner: CommandRunner = runGitCommand,
+  gitRunner: CommandRunner = runCommand,
   signal?: AbortSignal,
 ): Promise<WorktreeRecord[]> {
   signal?.throwIfAborted();
@@ -138,29 +139,6 @@ export async function listGitWorktrees(
     if (record) records.push(record);
   }
   return records;
-}
-
-async function runGitCommand(argv: readonly string[], signal?: AbortSignal) {
-  signal?.throwIfAborted();
-  const proc = Bun.spawn([...argv], {
-    stdout: "pipe",
-    stderr: "pipe",
-    ...(signal === undefined ? {} : { signal }),
-  });
-  let result: [string, string, number];
-  try {
-    result = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
-  } catch (error) {
-    signal?.throwIfAborted();
-    throw error;
-  }
-  signal?.throwIfAborted();
-  const [stdout, stderr, exitCode] = result;
-  return { stdout, stderr, exitCode };
 }
 
 function parsePorcelainBlock(block: string, project: string): WorktreeRecord | undefined {

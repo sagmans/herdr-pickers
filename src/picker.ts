@@ -1,5 +1,5 @@
 import { loadAgentTargets } from "./agents.ts";
-import type { CommandRunner, Herdr } from "./client/herdr.ts";
+import type { Herdr } from "./client/herdr.ts";
 import type { CurrentContext } from "./context.ts";
 import type { HerdrPickersConfig } from "./config/config.ts";
 import { dispatchAgent, dispatchNavigationTarget } from "./dispatch.ts";
@@ -8,6 +8,7 @@ import { loadNavigationTargets, type NavigationTarget } from "./navigation.ts";
 import type { PickerItem } from "./picker-row.ts";
 import { renderAgentRows, renderNavigationRows } from "./rows.ts";
 import type { PickerOptions } from "./terminal-picker.ts";
+import type { CommandRunner } from "./util/subprocess.ts";
 
 const AGENT_REFRESH_INTERVAL_MILLISECONDS = 1000;
 
