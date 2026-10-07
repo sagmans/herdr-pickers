@@ -49,8 +49,8 @@ describe("popup pane lifecycle", () => {
     const closeError = new Error("close failed");
     let closes = 0;
     try {
-      await withPopupClose(async beforeCleanup => {
-        await beforeCleanup();
+      await withPopupClose(async dismissSurface => {
+        await dismissSurface();
         throw pickerError;
       }, async () => { closes++; throw closeError; });
       throw new Error("expected failure");
@@ -63,8 +63,8 @@ describe("popup pane lifecycle", () => {
 
   test("early surface dismissal is not repeated after successful work", async () => {
     let closes = 0;
-    const result = await withPopupClose(async beforeCleanup => {
-      await beforeCleanup();
+    const result = await withPopupClose(async dismissSurface => {
+      await dismissSurface();
       return "selected";
     }, async () => { closes++; });
     expect(result).toBe("selected");

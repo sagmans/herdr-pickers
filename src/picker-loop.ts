@@ -18,13 +18,13 @@ interface LoopOptions {
   readonly env: Record<string, string | undefined>;
   readonly signal?: AbortSignal;
   readonly terminal?: TerminalAdapter;
-  readonly beforeCleanup?: () => Promise<void>;
+  /** Removes the popup or overlay; runs before terminal restore so no blank screen flashes. */
+  readonly dismissSurface?: () => Promise<void>;
   readonly createRuntime: (signal: AbortSignal) => LoopRuntime;
 }
 
 export async function runPickerLoop(session: RequestSession, owner: string, options: LoopOptions): Promise<PickerOutcome> {
-  // Dismissal runs before terminal restore so the popup never shows the blank primary screen.
-  return withPickerTerminal(options.terminal, terminal => loop(session, owner, options, terminal), options.beforeCleanup);
+  return withPickerTerminal(options.terminal, terminal => loop(session, owner, options, terminal), options.dismissSurface);
 }
 
 async function loop(session: RequestSession, owner: string, options: LoopOptions, terminal: PickerTerminal): Promise<PickerOutcome> {

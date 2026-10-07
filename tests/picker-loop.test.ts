@@ -223,7 +223,7 @@ test("replacement failure closes once and restores the shared terminal", async (
   let closed = 0;
   const run = runPickerLoop(session, OWNER, {
     env: {}, terminal,
-    beforeCleanup: async () => { closed++; },
+    dismissSurface: async () => { closed++; },
     createRuntime: signal => ({ herdr: new Herdr({ signal, runner: async argv => {
       if (argv.includes("agent")) throw OLD_FAILURE;
       return { stdout: WORKSPACES, stderr: "", exitCode: 0 };

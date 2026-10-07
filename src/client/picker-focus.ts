@@ -212,3 +212,66 @@ function dispose(socket: Socket, setupTimer: ReturnType<typeof setTimeout>): voi
   socket.removeAllListeners();
   socket.destroy();
 }
+
+const SOCKET_REQUIRED_MESSAGE = "HERDR_SOCKET_PATH is required to observe overlay picker focus.";
+
+/** Where a guard observes focus; a popup has no pane of its own to watch. */
+export interface PickerFocusTarget {
+  readonly socketPath: string | undefined;
+  readonly paneId: string | undefined;
+}
+
+/**
+ * One mode's focus contract: focus departure cancels the picker, and dispatch
+ * proceeds only after Herdr reconfirms the picker still holds focus.
+ */
+export interface PickerFocusGuard {
+  checkBeforeDispatch(): Promise<void>;
+  dispose(): Promise<void>;
+  /** Observer breakage, as opposed to departure, which is ordinary cancellation. */
+  readonly failure: { readonly error: unknown } | undefined;
+}
+
+/**
+ * Builds a fresh guard per mode because accepting a selection stops its
+ * observer. `onLost` aborts the picker; only losses while the mode is live count.
+ */
+export function createPickerFocusGuard(
+  target: PickerFocusTarget,
+  signal: AbortSignal,
+  onLost: (reason: unknown) => void,
+): PickerFocusGuard {
+  const { socketPath, paneId } = target;
+  let watch: Awaited<ReturnType<typeof watchPickerFocus>> | undefined;
+  let failure: { readonly error: unknown } | undefined;
+  const lose = (error: unknown): void => {
+    if (signal.aborted) return;
+    if (!(error instanceof PickerFocusDeparture)) failure = { error };
+    onLost(error);
+  };
+  const ready = paneId === undefined
+    ? undefined
+    : (socketPath === undefined
+      ? Promise.reject(new Error(SOCKET_REQUIRED_MESSAGE))
+      : watchPickerFocus(socketPath, paneId, signal)
+    ).then(watcher => {
+      watch = watcher;
+      watcher.signal.addEventListener("abort", () => lose(watcher.signal.reason), { once: true });
+      if (watcher.signal.aborted) lose(watcher.signal.reason);
+    }).catch(lose);
+  return {
+    get failure() { return failure; },
+    async checkBeforeDispatch() {
+      await ready;
+      signal.throwIfAborted();
+      await watch?.prepareDispatch();
+    },
+    async dispose() {
+      // Stop an established observer immediately; setup still in flight settles
+      // on the aborted mode signal and may yield a watcher that needs stopping too.
+      watch?.stop();
+      await ready;
+      watch?.stop();
+    },
+  };
+}

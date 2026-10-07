@@ -1,6 +1,6 @@
 import { Herdr } from "./client/herdr.ts";
 import { closePickerSurface } from "./client/popup.ts";
-import { PickerFocusDeparture, watchPickerFocus } from "./client/picker-focus.ts";
+import { createPickerFocusGuard, type PickerFocusGuard } from "./client/picker-focus.ts";
 import { PICKER_TOKEN_ENV, PickerSession } from "./picker-session.ts";
 import { loadConfig } from "./config/config.ts";
 import { runPickerLoop } from "./picker-loop.ts";
@@ -15,7 +15,6 @@ async function main(): Promise<void> {
   const session = new PickerSession(env);
   const lifecycle = new AbortController();
   let exitSignal: (typeof EXIT_SIGNALS)[number] | undefined;
-  let focusFailure: { error: unknown } | undefined;
   const handlers = EXIT_SIGNALS.map(signal => ({
     signal,
     handler: () => { exitSignal ??= signal; lifecycle.abort(); },
@@ -25,38 +24,29 @@ async function main(): Promise<void> {
     // A rejected child has no authority to close any existing surface.
     if (!token || !session.claim(token, env.HERDR_PANE_ID)) throw new Error("Picker reservation is missing or stale.");
     for (const { signal, handler } of handlers) process.on(signal, handler);
-    await withPopupClose(async beforeCleanup => {
+    await withPopupClose(async dismissSurface => {
       const config = loadConfig(env);
+      // Only the newest mode's guard can record a failure: older guards ignore
+      // losses once their mode is aborted, and a failure ends the loop.
+      let focusGuard: PickerFocusGuard | undefined;
       const outcome = await runPickerLoop(session, token, {
-        env, signal: lifecycle.signal, beforeCleanup,
+        env, signal: lifecycle.signal, dismissSurface,
         createRuntime: signal => {
-          let watch: Awaited<ReturnType<typeof watchPickerFocus>> | undefined;
-          const cancel = (error: unknown) => {
-            if (signal.aborted) return;
-            if (!(error instanceof PickerFocusDeparture)) focusFailure = { error };
-            lifecycle.abort(error);
-          };
-          // Every mode needs a fresh observer because acceptance stops its previous observer.
-          const focusReady = env.HERDR_PANE_ID
-            ? watchPickerFocus(env.HERDR_SOCKET_PATH!, env.HERDR_PANE_ID, signal).then(watcher => {
-              watch = watcher;
-              watcher.signal.addEventListener("abort", () => cancel(watcher.signal.reason), { once: true });
-              if (watcher.signal.aborted) cancel(watcher.signal.reason);
-            }).catch(cancel)
-            : undefined;
+          const guard = createPickerFocusGuard(
+            { socketPath: env.HERDR_SOCKET_PATH, paneId: env.HERDR_PANE_ID },
+            signal,
+            reason => lifecycle.abort(reason),
+          );
+          focusGuard = guard;
           return {
             herdr: new Herdr({ signal }), config,
-            beforeDispatch: async () => {
-              await focusReady;
-              signal.throwIfAborted();
-              await watch?.prepareDispatch();
-            },
-            dispose: async () => { watch?.stop(); await focusReady; watch?.stop(); },
+            beforeDispatch: () => guard.checkBeforeDispatch(),
+            dispose: () => guard.dispose(),
           };
         },
       });
       // Cancellation owns cleanup, but observer failures must still reach the exit boundary.
-      if (focusFailure) throw focusFailure.error;
+      if (focusGuard?.failure) throw focusGuard.failure.error;
       if (outcome === "no-agents") {
         console.log(dim(session.latestRequest()?.mode === "repo-agents" ? "No repository agents found." : "No agents found."));
       }
@@ -69,16 +59,16 @@ async function main(): Promise<void> {
   }
 }
 
-export async function withPopupClose<T>(work: (beforeCleanup: () => Promise<void>) => Promise<T>, close: () => Promise<void>): Promise<T> {
+export async function withPopupClose<T>(work: (dismissSurface: () => Promise<void>) => Promise<T>, close: () => Promise<void>): Promise<T> {
   let closing: Promise<void> | undefined;
   const closeOnce = () => closing ??= Promise.resolve().then(close);
-  const beforeCleanup = async (): Promise<void> => {
+  const dismissSurface = async (): Promise<void> => {
     // Report close errors outside terminal cleanup so the original picker error survives.
     try { await closeOnce(); } catch {}
   };
   let result: T;
   try {
-    result = await work(beforeCleanup);
+    result = await work(dismissSurface);
   } catch (error) {
     try {
       await closeOnce();
