@@ -1,3 +1,6 @@
+// Decodes raw terminal bytes into picker key and mouse events. Partial
+// escape sequences are kept as a remainder so chunk splits and mode
+// handoffs never leak stray control bytes into the query.
 import { DEFAULT_PICKER_KEYMAP, type PickerKeyAction, type PickerKeymap } from "./config/config.ts";
 import { ESCAPE_KEY_SEQUENCE, KEY_BACKSPACE, KEY_CTRL_C } from "./terminal-keys.ts";
 
@@ -15,6 +18,7 @@ const C1_CONTROL_MAX = 0x9f;
 const SINGLE_CHARACTER_LENGTH = 1;
 const MIN_CSI_SEQUENCE_LENGTH = 3;
 
+/** SGR mouse report; column and row are 1-based terminal cells. */
 export interface MouseEvent {
   readonly type: "mouse";
   readonly button: "left" | "wheel-up" | "wheel-down" | "other";
@@ -23,6 +27,7 @@ export interface MouseEvent {
   readonly released: boolean;
 }
 
+/** Terminal-independent input vocabulary consumed by the interaction reducer. */
 export type InputEvent =
   | MouseEvent
   | { readonly type: "up" }
@@ -34,11 +39,16 @@ export type InputEvent =
   | { readonly type: "backspace" }
   | { readonly type: "text"; readonly value: string };
 
+/** Events decoded so far plus an incomplete trailing sequence to retry with more input. */
 export interface ParsedInput {
   readonly events: readonly InputEvent[];
   readonly remainder: string;
 }
 
+/**
+ * Never emits events for unknown escape sequences. Events from the first
+ * `stalePrefixLength` characters are dropped as leftovers of a previous mode.
+ */
 export function parseInput(data: string, keymap: PickerKeymap = DEFAULT_PICKER_KEYMAP, stalePrefixLength = 0): ParsedInput {
   const events: InputEvent[] = [];
   let sequenceStart = 0;
@@ -119,6 +129,7 @@ export function parseInput(data: string, keymap: PickerKeymap = DEFAULT_PICKER_K
   return { events, remainder: "" };
 }
 
+/** Resolves a user-configurable key binding; undefined means the sequence is unbound. */
 export function mappedKeyEvent(sequence: string, keymap: PickerKeymap): InputEvent | undefined {
   const action = keymap.get(sequence);
   if (action === undefined) return undefined;

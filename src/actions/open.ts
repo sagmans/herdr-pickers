@@ -1,3 +1,6 @@
+// Action entrypoint for every picker mode. It records the request in the picker
+// session and spawns a picker pane only when no live picker can take it, so a
+// repeated action switches mode instead of stacking popups (see picker-session.ts).
 import { Herdr, HerdrCommandError, HerdrSpawnError } from "../client/herdr.ts";
 import { readPickerPaneIds } from "../client/types.ts";
 import {
@@ -10,6 +13,7 @@ import { formatErrorBlock } from "../util/errors.ts";
 
 const DELIVERY_FAILURE = "Picker request could not be delivered before the deadline. Reopen after the current picker closes.";
 
+/** Herdr argv for spawning the picker entrypoint; the token is the only state passed through the pane env. */
 export function buildPaneOpenArgs(options: {
   readonly pluginId: string;
   readonly placement?: PickerPlacement;
@@ -32,6 +36,10 @@ export function buildPaneOpenArgs(options: {
   ];
 }
 
+/**
+ * Resolves once a picker acknowledges this request or a newer request supersedes it.
+ * Throws a user-facing delivery failure when the deadline passes first.
+ */
 export async function openPicker(
   mode: PickerMode,
   env: Record<string, string | undefined> = process.env,

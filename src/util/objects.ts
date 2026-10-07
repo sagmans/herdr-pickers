@@ -1,3 +1,7 @@
+// Narrowing helpers for untrusted values: Herdr JSON, stored rows, and thrown
+// errors all arrive as `unknown` and must be checked before field access.
+
+/** Plain-object check; arrays are excluded because no Herdr envelope is an array. */
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }

@@ -1,3 +1,6 @@
+// User configuration boundary: locates, seeds, and validates the plugin's
+// config.toml. Invalid input fails fast with ConfigError rather than falling
+// back silently, so typos never change picker behavior unnoticed.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -5,13 +8,20 @@ import { join, resolve } from "node:path";
 import { CONTROL_CODE_MASK, KEY_DOWN, KEY_ENTER, KEY_UP } from "../terminal-keys.ts";
 import { hasErrorCode, isRecord } from "../util/objects.ts";
 
+/** Plugin id used to derive the default per-plugin config directory. */
 export const PLUGIN_ID = "herdr-pickers";
+/** File name inside the plugin config directory. */
 export const CONFIG_FILE_NAME = "config.toml";
 
+/** Supported picker surfaces; see the seeded config comments for their trade-offs. */
 export const PICKER_PLACEMENTS = ["popup", "overlay"] as const;
+/** Surface the picker opens in. */
 export type PickerPlacement = (typeof PICKER_PLACEMENTS)[number];
+/** Popup avoids overlay's full-pane zoom, which hides Kitty images underneath. */
 export const DEFAULT_PICKER_PLACEMENT: PickerPlacement = "popup";
+/** Rebindable actions; cancellation keys are fixed and deliberately excluded. */
 export type PickerKeyAction = "up" | "down" | "accept" | "reload";
+/** Raw terminal key sequence to action, as consumed by the input parser. */
 export type PickerKeymap = ReadonlyMap<string, PickerKeyAction>;
 
 const CONTROL_KEY_PATTERN = /^ctrl-([a-z])$/;
@@ -54,8 +64,10 @@ const DEFAULT_CONFIG = [
   "",
 ].join("\n");
 
+/** Built once at load; a bad default key name throws here instead of at input time. */
 export const DEFAULT_PICKER_KEYMAP: PickerKeymap = buildDefaultPickerKeymap();
 
+/** Validated config; project roots are home-expanded absolute paths. */
 export interface HerdrPickersConfig {
   readonly placement: PickerPlacement;
   readonly keymap: PickerKeymap;
@@ -64,6 +76,7 @@ export interface HerdrPickersConfig {
   };
 }
 
+/** Invalid user config; the message carries the config path so users can locate the fix. */
 export class ConfigError extends Error {
   constructor(message: string, readonly configPath: string) {
     super(`${message} (${configPath})`);
@@ -71,18 +84,25 @@ export class ConfigError extends Error {
   }
 }
 
+/** Seed content for first run: documents every option while leaving all of them at defaults. */
 export function defaultConfigToml(): string {
   return DEFAULT_CONFIG;
 }
 
+/** Herdr-provided HERDR_PLUGIN_CONFIG_DIR wins; the home path is the fallback outside Herdr. */
 export function resolvePluginConfigDir(env: Record<string, string | undefined> = process.env): string {
   return env.HERDR_PLUGIN_CONFIG_DIR ?? join(homedir(), ".config", "herdr", "plugins", "config", PLUGIN_ID);
 }
 
+/** Absolute config.toml path for the resolved plugin config directory. */
 export function resolveConfigPath(env: Record<string, string | undefined> = process.env): string {
   return join(resolvePluginConfigDir(env), CONFIG_FILE_NAME);
 }
 
+/**
+ * Creates the seed file when missing (exclusive create, so a concurrent writer wins),
+ * then parses it. Throws ConfigError on invalid content and rethrows other I/O errors.
+ */
 export function loadConfig(env: Record<string, string | undefined> = process.env): HerdrPickersConfig {
   const configPath = resolveConfigPath(env);
 
@@ -106,6 +126,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   return parseConfig(defaultConfigToml(), configPath);
 }
 
+/** Validates untrusted TOML into a typed config; throws ConfigError naming the offending key. */
 export function parseConfig(source: string, configPath: string): HerdrPickersConfig {
   let parsed: unknown;
   try {
@@ -126,6 +147,7 @@ export function parseConfig(source: string, configPath: string): HerdrPickersCon
   return { placement, keymap, projects: { roots } };
 }
 
+/** Only a leading `~` or `~/` expands; `~user` forms are left untouched. */
 export function expandHome(value: string): string {
   if (value === "~") return homedir();
   if (value.startsWith("~/")) return join(homedir(), value.slice(2));

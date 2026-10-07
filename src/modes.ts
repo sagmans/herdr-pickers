@@ -35,6 +35,7 @@ export interface AgentModeSpec extends ModePresentation {
   readonly repoScoped: boolean;
 }
 
+/** Mode table; keys are the public mode names accepted from actions and persisted requests. */
 export const PICKER_MODES = {
   all: {
     kind: "navigation", prompt: "all › ", noun: "targets", emptyMessage: "No navigation targets found.",
@@ -69,8 +70,11 @@ export const PICKER_MODES = {
 } as const satisfies Readonly<Record<string, NavigationModeSpec | AgentModeSpec>>;
 
 type ModeTable = typeof PICKER_MODES;
+/** Mode name unions derived from the table so a new entry is typed everywhere at once. */
 export type PickerMode = keyof ModeTable;
+/** Modes served by the reload-on-demand navigation catalog. */
 export type NavigationMode = { [M in PickerMode]: ModeTable[M]["kind"] extends "navigation" ? M : never }[PickerMode];
+/** Modes served by the polling agent catalog. */
 export type AgentMode = { [M in PickerMode]: ModeTable[M]["kind"] extends "agent" ? M : never }[PickerMode];
 
 const VALID_MODES = Object.keys(PICKER_MODES).join(", ");
@@ -81,6 +85,7 @@ export function parseMode(value: string | undefined): PickerMode {
   throw new Error(`Unknown herdr-pickers mode '${value ?? ""}'. Valid modes: ${VALID_MODES}`);
 }
 
+/** Narrows a mode so callers reach agent- or navigation-specific specs without casts. */
 export function isAgentMode(mode: PickerMode): mode is AgentMode {
   return PICKER_MODES[mode].kind === "agent";
 }

@@ -1,3 +1,6 @@
+// Keeps one picker pane serving successive requests. When a newer request
+// replaces the current mode, the loop restarts on the same leased terminal so
+// the popup never flashes; picker-session.ts supplies the request mailbox.
 import { runPicker, type PickerOutcome, type PickerRuntime } from "./picker.ts";
 import type { PickerItem } from "./picker-row.ts";
 import { PICKER_REQUEST_POLL_MS, type PickerSession } from "./picker-session.ts";
@@ -22,6 +25,10 @@ interface LoopOptions {
   readonly createRuntime: (signal: AbortSignal) => LoopRuntime;
 }
 
+/**
+ * Serves the newest request owned by `owner` until a mode finishes or the signal aborts.
+ * Throws when request ownership cannot be verified; superseded runs restart silently.
+ */
 export async function runPickerLoop(session: RequestSession, owner: string, options: LoopOptions): Promise<PickerOutcome> {
   return withPickerTerminal(options.terminal, terminal => loop(session, owner, options, terminal), options.dismissSurface);
 }

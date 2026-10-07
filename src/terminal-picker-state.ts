@@ -1,3 +1,5 @@
+// Pure interaction reducer between decoded input and picker view state.
+// Async work is returned as effects so terminal-picker.ts keeps all I/O.
 import type { PickerItem } from "./picker-row.ts";
 import type { InputEvent } from "./terminal-picker-input.ts";
 import {
@@ -41,6 +43,7 @@ export interface InteractionContext {
   readonly now: () => number;
 }
 
+/** Next state plus the single effect the runner must perform for this event. */
 export interface InteractionStep {
   readonly state: InteractionState;
   readonly effect: InteractionEffect;

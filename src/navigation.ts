@@ -1,3 +1,6 @@
+// Navigation catalog loader for project, workspace, and worktree modes. It
+// gathers Herdr, Git, and filesystem sources per reload; catalog.ts turns them
+// into targets and rows.ts renders them.
 import type { Herdr } from "./client/herdr.ts";
 import { readWorkspaces, workspaceRepoRoots, type WorkspaceRecord, type WorktreeRecord } from "./client/types.ts";
 import { loadConfig } from "./config/config.ts";
@@ -14,8 +17,10 @@ import type { CurrentContext } from "./context.ts";
 import { canonicalPathKey } from "./util/paths.ts";
 import type { CommandRunner } from "./util/subprocess.ts";
 
+/** Navigation-mode alias so callers stay decoupled from the catalog's union name. */
 export type NavigationTarget = PickerTarget;
 
+/** Injected sources so tests and the smoke control Herdr, Git, and project roots. */
 export interface NavigationRuntime {
   readonly signal?: AbortSignal | undefined;
   readonly herdr: Herdr;
@@ -35,6 +40,7 @@ interface NavigationSources {
   readonly worktrees: readonly WorktreeRecord[];
 }
 
+/** Fresh catalog per call; there is no cache, so reload always reflects current Herdr and Git state. */
 export async function loadNavigationTargets(
   mode: NavigationMode,
   runtime: NavigationRuntime,

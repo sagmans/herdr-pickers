@@ -1,3 +1,6 @@
+// Interactive picker loop: frames input, ranks rows, and redraws on a
+// terminal leased from picker-terminal.ts. It never owns terminal modes, so
+// cleanup stays with the lease owner on every exit path.
 import { DEFAULT_PICKER_KEYMAP, type PickerKeymap } from "./config/config.ts";
 import { rankRows } from "./fzf.ts";
 import {
@@ -25,6 +28,7 @@ const CURSOR_POSITION_SUFFIX = "H";
 const CSI_PREFIX = "\x1b[";
 const FIRST_TERMINAL_CELL = 1;
 
+/** Injectable interval clock so agent-catalog polling is testable without real time. */
 export interface PickerTimers {
   readonly setInterval: (callback: () => void, milliseconds: number) => unknown;
   readonly clearInterval: (handle: unknown) => void;
@@ -52,6 +56,7 @@ export interface PickerOptions extends PickerRows {
   readonly refreshIntervalMilliseconds?: number | undefined;
 }
 
+/** Mode options plus the borrowed terminal the picker draws on. */
 export interface TerminalPickerOptions extends PickerOptions {
   /** Borrowed from PickerTerminal, which alone restores the device afterwards. */
   readonly terminal: TerminalLease;

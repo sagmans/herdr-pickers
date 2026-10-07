@@ -19,6 +19,7 @@ export class AgentTargetError extends Error {
   }
 }
 
+/** Throws AgentTargetError when Herdr lists agents but none has a focusable target. */
 export async function loadAgentTargets(
   mode: AgentMode,
   herdr: Herdr,

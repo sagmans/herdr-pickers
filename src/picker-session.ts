@@ -1,3 +1,6 @@
+// Cross-process picker ownership for one Herdr session, kept in a private SQLite
+// file. Openers (actions/open.ts) reserve and post requests; the picker pane
+// (pane.ts) claims and acknowledges them, so at most one picker surface exists.
 import { Database } from "bun:sqlite";
 import { closeSync, constants, fstatSync, mkdirSync, openSync, realpathSync, lstatSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
@@ -9,6 +12,7 @@ import type { PickerPlacement } from "./config/config.ts";
 import { POPUP_SURFACE, type PickerSurface } from "./client/popup.ts";
 import { hasErrorCode } from "./util/objects.ts";
 
+/** Pane env var carrying the reservation token from opener to the spawned picker. */
 export const PICKER_TOKEN_ENV = "HERDR_PICKERS_SESSION_TOKEN";
 /** How often openers and pickers re-read the request mailbox; short enough to feel instant. */
 export const PICKER_REQUEST_POLL_MS = 25;
@@ -56,6 +60,7 @@ const RELEASE_UNSUBMITTED = "DELETE FROM owners WHERE session = ? AND token = ? 
 const CLAIM_OWNER = "UPDATE owners SET picker = ?, pane = ? WHERE session = ? AND token = ? AND picker IS NULL AND placement = ?";
 const UNCERTAIN_STARTUP = "Picker startup could not be verified yet. Retry after the pending picker starts or its reservation expires.";
 
+/** A reserved picker may still start; openers wait rather than risk a duplicate surface. */
 export class PickerStartupUncertainError extends Error {
   constructor() { super(UNCERTAIN_STARTUP); }
 }
@@ -69,6 +74,10 @@ interface Owner {
   readonly reserved_at: number | null;
 }
 
+/**
+ * Session-scoped handle to the ownership database, keyed by the Herdr socket identity.
+ * Throws at construction when the socket or storage file fails the privacy checks.
+ */
 export class PickerSession {
   private readonly database: Database;
   private readonly session: string;

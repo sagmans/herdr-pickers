@@ -1,3 +1,5 @@
+// Worktree discovery for navigation catalogs and agent scoping. Herdr is the
+// primary source; `git worktree list` is the fallback when Herdr rejects a project.
 import { Herdr, HerdrCommandError } from "../client/herdr.ts";
 import { readWorktrees, readWorktreeScope, type WorkspaceRecord, type WorktreeListResult, type WorktreeRecord } from "../client/types.ts";
 import { workspaceProvenanceRepoKey } from "../catalog.ts";
@@ -10,6 +12,7 @@ const MISSING_WORKTREE_SOURCE = "Cannot open repository worktrees without a sour
 const MISSING_SCOPE_SOURCE = "Cannot scope repository agents without a source workspace or cwd.";
 const MISSING_SOURCE_REPO_ROOT = "Herdr worktree list response did not include source.repo_root.";
 
+/** Union of every project's worktrees, deduplicated by path so shared repositories appear once. */
 export async function listWorktreesForProjects(
   projects: readonly string[],
   herdr: Herdr,
@@ -32,6 +35,7 @@ export async function listWorktreesForProjects(
   return results.sort((left, right) => left.path.localeCompare(right.path));
 }
 
+/** Worktrees of the source repository; throws when there is no source or Herdr omits its root. */
 export async function listWorktreesForContext(
   context: CurrentContext,
   herdr: Herdr,
@@ -96,6 +100,7 @@ function sourceWorktreeListArgs(context: CurrentContext): string[] | undefined {
   return lookup ? ["worktree", "list", ...lookup, "--json"] : undefined;
 }
 
+/** Falls back to git only on a Herdr command failure; other errors and aborts propagate. */
 export async function listWorktreesForProject(
   project: string,
   herdr: Herdr,
@@ -117,6 +122,7 @@ export async function listWorktreesForProject(
   }
 }
 
+/** Git porcelain fallback; a non-zero git exit means "no worktrees", not an error. */
 export async function listGitWorktrees(
   project: string,
   runner: CommandRunner,

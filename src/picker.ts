@@ -1,3 +1,6 @@
+// Runs one picker mode end to end: catalog load, rows, terminal interaction, and
+// dispatch. Agent modes poll for live state; navigation modes reload on demand.
+// The picker loop (picker-loop.ts) drives mode replacement around it.
 import { loadAgentTargets } from "./agents.ts";
 import type { Herdr } from "./client/herdr.ts";
 import type { CurrentContext } from "./context.ts";
@@ -15,6 +18,7 @@ const AGENT_REFRESH_INTERVAL_MILLISECONDS = 1000;
 /** Supplies the terminal for one mode; the picker loop binds it to the session-wide PickerTerminal. */
 export type PickerRunner = (options: PickerOptions) => Promise<PickerItem | undefined>;
 
+/** Dependencies for one mode run; injected so tests and the loop control Herdr, Git, and the terminal. */
 export interface PickerRuntime {
   readonly signal?: AbortSignal | undefined;
   readonly beforeDispatch?: (() => void | Promise<void>) | undefined;
@@ -28,8 +32,10 @@ export interface PickerRuntime {
   readonly config?: HerdrPickersConfig | undefined;
 }
 
+/** "no-agents" lets the pane print an empty-state message after the picker closes itself. */
 export type PickerOutcome = "dispatched" | "cancelled" | "no-agents";
 
+/** Failures after the run signal aborts are reported as cancellation, not errors. */
 export async function runPicker(mode: PickerMode, runtime: PickerRuntime): Promise<PickerOutcome> {
   if (runtime.signal?.aborted) return "cancelled";
   try {
@@ -40,6 +46,7 @@ export async function runPicker(mode: PickerMode, runtime: PickerRuntime): Promi
   }
 }
 
+/** Polling agent picker; an empty first load dismisses it with "no-agents" instead of an empty frame. */
 export async function runAgentPicker(mode: AgentMode, runtime: PickerRuntime): Promise<PickerOutcome> {
   if (runtime.signal?.aborted) return "cancelled";
   const loading = new AbortController();

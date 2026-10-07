@@ -1,3 +1,6 @@
+// Overlay focus observation over Herdr's native event socket. Overlay pickers
+// must cancel when focus leaves them and must reconfirm focus before dispatch;
+// popups need none of this. Wire messages are parsed in ./types.ts.
 import { createConnection, type Socket } from "node:net";
 
 import type { PickerSurface } from "./popup.ts";
@@ -23,6 +26,7 @@ const SETUP_FAILURE_MESSAGE = "Failed to establish picker focus observation";
 const WATCH_FAILURE_MESSAGE = "Picker focus observation failed";
 const FOCUS_DEPARTURE_MESSAGE = "Focus left the picker";
 
+/** Focus left the picker: ordinary cancellation, distinct from observer failure. */
 export class PickerFocusDeparture extends Error {
   constructor() { super(FOCUS_DEPARTURE_MESSAGE); }
 }
@@ -162,6 +166,10 @@ function finished(stage: FocusStage): boolean {
   return stage.kind === "stopped" || stage.kind === "failed";
 }
 
+/**
+ * Resolves once a snapshot confirms the pane holds focus; rejects if setup fails
+ * or times out. Afterwards the returned signal aborts on departure or breakage.
+ */
 export async function watchPickerFocus(
   socketPath: string,
   paneId: string,

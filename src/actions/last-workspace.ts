@@ -1,3 +1,6 @@
+// Previous-workspace action and event hooks. Herdr runs this file per toggle
+// action and per focus/close event; memory rules live in last-workspace/memory.ts
+// and locked, atomic persistence in last-workspace/store.ts.
 import { Herdr } from "../client/herdr.ts";
 import { readWorkspaces, type WorkspaceRecord } from "../client/types.ts";
 import {
@@ -18,12 +21,17 @@ const EVENT_JSON_ENV = "HERDR_PLUGIN_EVENT_JSON";
 const CONTEXT_JSON_ENV = "HERDR_PLUGIN_CONTEXT_JSON";
 const STATE_DIR_ENV = "HERDR_PLUGIN_STATE_DIR";
 
+/** Injected Herdr client, env, and state store so the hooks run against isolated state in tests and smoke. */
 export interface LastWorkspaceRuntime {
   readonly env: Record<string, string | undefined>;
   readonly herdr: Herdr;
   readonly store: StateStore;
 }
 
+/**
+ * Entry for one subcommand. Event subcommands without a usable workspace id are
+ * no-ops; only a failed focus after close is downgraded to a logged line.
+ */
 export async function runLastWorkspace(subcommand: Subcommand, runtime: LastWorkspaceRuntime): Promise<void> {
   switch (subcommand) {
     case "toggle":
@@ -124,6 +132,7 @@ function jsonStringField(raw: string | undefined, path: readonly string[]): stri
   return typeof current === "string" && current.trim().length > 0 ? current : undefined;
 }
 
+/** Validates the untrusted argv subcommand; throws with usage text on anything else. */
 export function parseSubcommand(value: string | undefined): Subcommand {
   switch (value) {
     case "toggle":

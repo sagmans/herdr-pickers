@@ -1,3 +1,6 @@
+// Durable previous-workspace state shared by concurrent hook and action
+// processes. Read-modify-write runs under a kernel-held SQLite lock and
+// writes are atomic renames, so racing events never corrupt or interleave.
 import { Database } from "bun:sqlite";
 import { closeSync, constants, fstatSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -24,16 +27,19 @@ const ACQUIRE_LOCK = "BEGIN IMMEDIATE";
 // No row is ever written, so rollback only releases the lock.
 const RELEASE_LOCK = "ROLLBACK";
 
+/** `now` is injectable so persisted timestamps are deterministic in tests. */
 export interface StateStoreOptions {
   readonly stateDir: string;
   readonly now?: () => number;
 }
 
+/** `malformed` forces a rewrite even when memory is otherwise unchanged. */
 export interface LoadedState {
   readonly memory: WorkspaceMemory;
   readonly malformed: boolean;
 }
 
+/** Single owner of state.json; use update() for any read-modify-write. */
 export class StateStore {
   private readonly stateDir: string;
   private readonly now: () => number;
@@ -133,6 +139,7 @@ function openLockDatabase(lockPath: string): Database {
   return database;
 }
 
+/** Lock-free view of the raw file for inspection (tests); any failure yields undefined. */
 export function readPersistedStateRaw(stateDir: string): PersistedState | undefined {
   try {
     return parsePersistedState(JSON.parse(readFileSync(join(stateDir, STATE_FILE_NAME), "utf-8")));

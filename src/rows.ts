@@ -1,3 +1,6 @@
+// Visible/searchable row rendering for every picker mode. Owns ordering,
+// grouping, and duplicate-name qualifiers; must never expose hidden ids or
+// paths, and sanitizes every untrusted string before it reaches a row.
 import { dirname, parse, sep } from "node:path";
 
 import { parseAgentStatus, statusColor, statusGlyph, type AgentState } from "./agent-status.ts";
@@ -44,6 +47,7 @@ interface NavigationQualifiers {
   readonly workspaces: ReadonlyMap<string, string>;
 }
 
+/** Agent rows grouped by repository; the first focused target becomes the initial cursor row. */
 export function renderAgentRows(targets: readonly AgentTarget[]): PickerRows {
   const ordered = orderAgents(targets);
   const qualifiers = repositoryQualifiers(ordered);
@@ -80,6 +84,7 @@ export function renderAgentRows(targets: readonly AgentTarget[]): PickerRows {
   return { items, focusedId };
 }
 
+/** Navigation rows shaped by the mode spec (grouping, kind badges); preselects the narrowest current target. */
 export function renderNavigationRows(
   mode: NavigationMode,
   targets: readonly PickerTarget[],

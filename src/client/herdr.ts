@@ -1,3 +1,6 @@
+// Herdr CLI boundary: every plugin call to Herdr goes through this argv-only
+// runner so failures surface as typed, sanitized errors and cancellation is
+// honored. JSON payloads it returns are parsed in ./types.ts.
 import { runArgv, type CommandResult, type CommandRunner } from "../util/subprocess.ts";
 import { boundedTerminalText } from "../util/terminal-text.ts";
 
@@ -21,6 +24,7 @@ function commandFamily(args: readonly string[]): string {
   return family ? boundedTerminalText(family, MAX_COMMAND_FAMILY_LENGTH) : UNKNOWN_COMMAND_FAMILY;
 }
 
+/** Herdr ran and exited non-zero, so the command may have taken partial effect. */
 export class HerdrCommandError extends Error {
   // Bounded sanitized stderr stays available because dispatch classifies
   // recoverable worktree failures from it.
@@ -33,6 +37,7 @@ export class HerdrCommandError extends Error {
   }
 }
 
+/** The Herdr process never started, so callers may treat the request as not delivered. */
 export class HerdrSpawnError extends Error {
   constructor(cause: unknown) {
     super("Herdr command could not be started.", { cause });
@@ -40,6 +45,7 @@ export class HerdrSpawnError extends Error {
   }
 }
 
+/** Herdr succeeded but stdout was not JSON; the message names only the command family. */
 export class HerdrJsonError extends Error {
   constructor(args: readonly string[]) {
     super(`herdr ${commandFamily(args)} returned invalid JSON`);
@@ -47,12 +53,17 @@ export class HerdrJsonError extends Error {
   }
 }
 
+/** Overrides for tests and cancellation; defaults target the launching Herdr binary. */
 export interface HerdrOptions {
   readonly bin?: string;
   readonly runner?: CommandRunner;
   readonly signal?: AbortSignal;
 }
 
+/**
+ * Herdr CLI client. Aborting `signal` rejects with the abort reason instead of
+ * a command error, so cancelled pickers do not report spurious failures.
+ */
 export class Herdr {
   private readonly bin: string;
   private readonly runner: CommandRunner;

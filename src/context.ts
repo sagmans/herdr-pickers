@@ -10,6 +10,7 @@
  */
 import { isRecord } from "./util/objects.ts";
 
+/** Every field is optional: actions may run without a workspace, pane, or cwd. */
 export interface CurrentContext {
   readonly workspaceId?: string | undefined;
   readonly tabId?: string | undefined;

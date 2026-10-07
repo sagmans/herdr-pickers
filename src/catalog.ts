@@ -1,3 +1,6 @@
+// Target normalization: turns parsed Herdr records and discovered paths into
+// picker targets with current-row marking and repository grouping keys.
+// Ids and paths here are hidden dispatch data; rows.ts decides what is visible.
 import { basename } from "node:path";
 
 import type { AgentRecord, WorkspaceRecord, WorktreeRecord } from "./client/types.ts";
@@ -11,6 +14,7 @@ const NO_PATH_DEPTH = -1;
 // searchable rows, so an unlabeled workspace with no path gets a neutral name.
 const UNNAMED_WORKSPACE_LABEL = "unnamed workspace";
 
+/** One selectable agent pane. `id`, `agentTarget`, and pane/workspace ids are dispatch data, never row text. */
 export interface AgentTarget {
   readonly kind: "agent";
   readonly id: string;
@@ -29,6 +33,7 @@ export interface AgentTarget {
   readonly paneId?: string | undefined;
 }
 
+/** Navigation target kinds; drives dispatch, kind badges, and preselect priority. */
 export type TargetKind = "project" | "workspace" | "worktree";
 
 interface NavigationTargetBase {
@@ -42,12 +47,14 @@ interface NavigationTargetBase {
   readonly boardLabel?: string | undefined;
 }
 
+/** Project repository path; may map to an already-open workspace so dispatch can focus instead of create. */
 export interface ProjectTarget extends NavigationTargetBase {
   readonly kind: "project";
   readonly path: string;
   readonly existingWorkspaceId?: string | undefined;
 }
 
+/** Open Herdr workspace; path/cwd only feed disambiguation qualifiers, never raw row text. */
 export interface WorkspaceTarget extends NavigationTargetBase {
   readonly kind: "workspace";
   readonly workspaceId: string;
@@ -56,6 +63,7 @@ export interface WorkspaceTarget extends NavigationTargetBase {
   readonly agentStatus?: string | undefined;
 }
 
+/** Git worktree checkout; `existingWorkspaceId` lets dispatch reuse an open workspace. */
 export interface WorktreeTarget extends NavigationTargetBase {
   readonly kind: "worktree";
   readonly path: string;
@@ -64,8 +72,10 @@ export interface WorktreeTarget extends NavigationTargetBase {
   readonly existingWorkspaceId?: string | undefined;
 }
 
+/** Union every navigation mode renders and dispatches. */
 export type PickerTarget = ProjectTarget | WorkspaceTarget | WorktreeTarget;
 
+/** Deduplicates agents by target and marks the one tied to the source pane/workspace as focused. */
 export function buildAgentTargets(
   agents: readonly AgentRecord[],
   workspaces: readonly WorkspaceRecord[] = [],
@@ -98,6 +108,7 @@ export function buildAgentTargets(
   });
 }
 
+/** Bare-repository roots are dropped because they have no checkout to navigate into. */
 export function buildWorkspaceTargets(
   workspaces: readonly WorkspaceRecord[],
   current: CurrentContext = {},
@@ -120,6 +131,7 @@ export function buildWorkspaceTargets(
     }));
 }
 
+/** Current marks the source workspace's project, else the deepest project enclosing the source cwd. */
 export function buildProjectTargets(
   projects: readonly string[],
   workspaces: readonly WorkspaceRecord[],
@@ -149,6 +161,7 @@ export function buildProjectTargets(
   });
 }
 
+/** Bare and prunable worktrees are dropped since they cannot host a workspace. */
 export function buildWorktreeTargets(
   worktrees: readonly WorktreeRecord[],
   workspaces: readonly WorkspaceRecord[],

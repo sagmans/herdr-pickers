@@ -1,3 +1,6 @@
+// Picker surface lifecycle: decides popup versus overlay from the Herdr env and
+// closes the surface exactly once. Shared by the pane entrypoint, the session
+// claim, and focus observation so they agree on placement.
 import { createConnection } from "node:net";
 
 const SOCKET_ENV = "HERDR_SOCKET_PATH";
@@ -17,15 +20,22 @@ export type PickerSurface =
   | { readonly placement: "overlay"; readonly paneId: string }
   | { readonly placement: "popup" };
 
+/** Shared popup value; a popup carries no pane id to target. */
 export const POPUP_SURFACE: PickerSurface = { placement: "popup" };
 
+/** Single inference point for placement; see PickerSurface for the HERDR_PANE_ID contract. */
 export function pickerSurfaceFromEnv(env: Record<string, string | undefined>): PickerSurface {
   const paneId = env[PANE_ID_ENV];
   return paneId ? { placement: "overlay", paneId } : POPUP_SURFACE;
 }
 
+/** Socket transport seam so close requests can be exercised without a live Herdr. */
 export type SocketWriter = (path: string, payload: string) => Promise<void>;
 
+/**
+ * Closes an overlay best effort within a short bound so exit is never blocked;
+ * popups are left to Herdr, which removes them when the child exits.
+ */
 export async function closePickerSurface(
   env: Record<string, string | undefined> = process.env,
   write: SocketWriter = writeSocket,
@@ -41,6 +51,7 @@ export async function closePickerSurface(
   // Native exit removes this popup; an unqualified close could dismiss its successor.
 }
 
+/** Asks Herdr to close one overlay pane by id; throws when no socket is available. */
 export async function closeOverlayPane(
   paneId: string,
   env: Record<string, string | undefined> = process.env,

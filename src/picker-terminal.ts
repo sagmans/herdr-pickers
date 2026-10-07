@@ -1,3 +1,6 @@
+// Terminal device ownership for the picker pane. It enters and restores raw,
+// mouse, wrap, and alternate-screen modes once per process and lends the device
+// to each mode run by terminal-picker.ts.
 import type { Viewport } from "./terminal-picker-view.ts";
 
 type Input = string | Uint8Array;
@@ -17,7 +20,9 @@ const LINE_WRAP_DISABLE = "\x1b[?7l";
 const LINE_WRAP_ENABLE = "\x1b[?7h";
 /** Shared with frame drawing so the restore sequence and every frame agree on cursor visibility. */
 export const CURSOR_SHOW = "\x1b[?25h";
+/** Entered lazily on first lease use, so a mode cancelled before drawing leaves the device untouched. */
 export const TERMINAL_START = `${ALTERNATE_SCREEN_ENTER}${LINE_WRAP_DISABLE}${MOUSE_TRACKING_ENABLE}${SGR_MOUSE_ENABLE}`;
+/** Undoes TERMINAL_START in reverse order and re-shows the cursor; written on every close path. */
 export const TERMINAL_STOP = `${SGR_MOUSE_DISABLE}${MOUSE_TRACKING_DISABLE}${LINE_WRAP_ENABLE}${CURSOR_SHOW}${ALTERNATE_SCREEN_EXIT}`;
 
 /** Raw device seam: production binds process stdio, tests bind a fake. */
@@ -147,6 +152,7 @@ export async function withPickerTerminal<T>(
   }
 }
 
+/** Production adapter over process stdio; raw mode throws when stdin is not a TTY. */
 export function systemTerminal(): TerminalAdapter {
   return {
     input: process.stdin,

@@ -1,3 +1,6 @@
+// Picker pane entrypoint that Herdr spawns from actions/open.ts. It claims the
+// reserved session token, runs the picker loop, and owns process-level cleanup:
+// signal handlers, surface close, and session release on every exit path.
 import { Herdr } from "./client/herdr.ts";
 import { closePickerSurface, pickerSurfaceFromEnv, withPopupClose } from "./client/popup.ts";
 import { createPickerFocusGuard, type PickerFocusGuard } from "./client/picker-focus.ts";

@@ -1,3 +1,6 @@
+// Compatibility boundary for Herdr JSON. All Herdr output is untrusted: fields
+// are validated here, version-specific key variants fall back to each other, and
+// callers receive only typed records. Display text is sanitized downstream.
 import { isRecord } from "../util/objects.ts";
 
 const MALFORMED_PICKER_PANES_MESSAGE = "Malformed picker pane list";
@@ -17,6 +20,7 @@ const STATUS_KEYS = ["agent_status", "status", "state"] as const;
 const AGENT_CWD_KEYS = ["cwd", "foreground_cwd"] as const;
 const AGENT_TARGET_KEYS = ["target", "pane_id", "terminal_id"] as const;
 
+/** Worktree origin Herdr recorded on a workspace; any field may be absent on older Herdr. */
 export interface WorktreeProvenance {
   readonly branch?: string | undefined;
   readonly path?: string | undefined;
@@ -27,6 +31,7 @@ export interface WorktreeProvenance {
   readonly isLinkedWorktree?: boolean | undefined;
 }
 
+/** One Herdr workspace; ids and cwd are hidden routing data, never row text. */
 export interface WorkspaceRecord {
   readonly workspaceId: string;
   readonly label?: string | undefined;
@@ -36,6 +41,7 @@ export interface WorkspaceRecord {
   readonly focused?: boolean | undefined;
 }
 
+/** One checkout from Herdr or the git porcelain fallback, normalized to one shape. */
 export interface WorktreeRecord {
   readonly path: string;
   readonly label?: string | undefined;
@@ -48,11 +54,13 @@ export interface WorktreeRecord {
   readonly openWorkspaceId?: string | undefined;
 }
 
+/** Worktrees plus the repository root Herdr resolved the lookup against. */
 export interface WorktreeListResult {
   readonly sourceRepoRoot?: string | undefined;
   readonly worktrees: readonly WorktreeRecord[];
 }
 
+/** One agent with a target Herdr can still resolve for focus. */
 export interface AgentRecord {
   readonly target: string;
   readonly label: string;
@@ -64,12 +72,14 @@ export interface AgentRecord {
   readonly focused?: boolean | undefined;
 }
 
+/** Skip count and observed keys let callers explain when no agent had a usable target. */
 export interface AgentListResult {
   readonly agents: readonly AgentRecord[];
   readonly skippedWithoutTarget: number;
   readonly observedKeys: readonly string[];
 }
 
+/** Validated focus-socket messages that drive the overlay focus observer. */
 export type PickerFocusLifecycleMessage =
   | { readonly kind: "subscription-started" }
   | {
@@ -83,6 +93,7 @@ export type PickerFocusLifecycleMessage =
   | { readonly kind: "tab-focused"; readonly tabId: string; readonly workspaceId: string }
   | { readonly kind: "workspace-focused"; readonly workspaceId: string };
 
+/** Parses one subscription line; anything unexpected, including errors, throws one generic message. */
 export function parsePickerFocusLifecycleMessage(raw: string, subscribeRequestId: string): PickerFocusLifecycleMessage {
   let value: unknown;
   try {
@@ -107,6 +118,7 @@ export function parsePickerFocusLifecycleMessage(raw: string, subscribeRequestId
   }
 }
 
+/** Focus snapshot for `paneId`; throws if the pane is absent or the response is malformed. */
 export function parsePickerSnapshotResponse(raw: string, paneId: string): PickerFocusLifecycleMessage {
   try {
     const envelope = expectRecord(JSON.parse(raw));
@@ -118,6 +130,7 @@ export function parsePickerSnapshotResponse(raw: string, paneId: string): Picker
   }
 }
 
+/** Strict: a malformed pane list throws rather than reading as "no picker open". */
 export function readPickerPaneIds(envelope: unknown): string[] {
   const record = expectRecord(envelope);
   const panes = getResult(record).panes;
@@ -125,12 +138,14 @@ export function readPickerPaneIds(envelope: unknown): string[] {
   return panes.map(pane => expectString(expectRecord(pane).pane_id));
 }
 
+/** Lenient: rows without a workspace id are dropped instead of failing the catalog. */
 export function readWorkspaces(envelope: unknown): WorkspaceRecord[] {
   const result = getResult(envelope);
   const rows = getArray(result.workspaces);
   return rows.flatMap(readWorkspace);
 }
 
+/** Repositories Herdr already tracks; the default project set when no roots are configured. */
 export function workspaceRepoRoots(workspaces: readonly WorkspaceRecord[]): string[] {
   const roots = new Set<string>();
   for (const workspace of workspaces) {
@@ -140,6 +155,7 @@ export function workspaceRepoRoots(workspaces: readonly WorkspaceRecord[]): stri
   return [...roots].sort((left, right) => left.localeCompare(right));
 }
 
+/** Lenient: rows without a path are dropped; a missing source root is left to callers. */
 export function readWorktrees(envelope: unknown): WorktreeListResult {
   const result = getResult(envelope);
   const source = optionalRecord(result.source);
@@ -157,6 +173,7 @@ export function readWorktreeScope(envelope: unknown): string | undefined {
   return optionalString(source?.repo_root);
 }
 
+/** Rows without any agent identity are ignored; identified rows without a stable target are counted. */
 export function readAgentList(envelope: unknown): AgentListResult {
   const result = getResult(envelope);
   const rows = getArray(result.agents).flatMap((value) => {

@@ -1,6 +1,9 @@
+// Filesystem project discovery under user-configured roots. Only consulted when
+// roots are set; otherwise navigation stays limited to repositories Herdr tracks.
 import { readdirSync, realpathSync, statSync } from "node:fs";
 import { join } from "node:path";
 
+/** Each root and its direct children that are Git repositories, as real paths; unreadable entries are skipped. */
 export function listProjects(roots: readonly string[]): string[] {
   const projects = new Set<string>();
 
@@ -40,6 +43,7 @@ function hasGitCheckoutMetadata(path: string): boolean {
   }
 }
 
+/** Bare repositories have no checkout, so callers must not offer them as workspace targets. */
 export function isBareRepository(path: string): boolean {
   if (hasGitCheckoutMetadata(path)) return false;
   try {

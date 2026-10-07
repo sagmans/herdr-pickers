@@ -18,6 +18,7 @@ export interface OutputLimit {
   readonly error: () => Error;
 }
 
+/** Per-call policy; every field is optional so plain callers get the shared contract alone. */
 export interface RunArgvOptions {
   readonly signal?: AbortSignal | undefined;
   readonly env?: Record<string, string | undefined> | undefined;
