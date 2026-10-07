@@ -1,4 +1,4 @@
-import { Herdr, HerdrSpawnError } from "../client/herdr.ts";
+import { Herdr, HerdrCommandError, HerdrSpawnError } from "../client/herdr.ts";
 import { readPickerPaneIds } from "../client/types.ts";
 import { PICKER_TOKEN_ENV, PickerSession, PickerStartupUncertainError } from "../picker-session.ts";
 import { PICKER_REQUEST_POLL_MS, PICKER_REQUEST_TIMEOUT_MS } from "../picker-request.ts";
@@ -78,7 +78,9 @@ export async function openPicker(
             try {
               await client.run(buildPaneOpenArgs({ pluginId, mode, env, placement: config.placement, token }));
             } catch (error) {
-              if (error instanceof HerdrSpawnError) session.releaseUnsubmitted(token);
+              // A spawn failure or an explicit Herdr refusal proves no child holds this
+              // token; transport loss and aborts stay reserved until the grace period ends.
+              if (error instanceof HerdrSpawnError || error instanceof HerdrCommandError) session.releaseUnsubmitted(token);
               throw error;
             }
           }

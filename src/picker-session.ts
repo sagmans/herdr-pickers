@@ -14,11 +14,18 @@ const PRIVATE_DIRECTORY_MODE = 0o700;
 const PRIVATE_FILE_MODE = 0o600;
 const FILE_PERMISSION_MASK = 0o777;
 const PROBE_SIGNAL = 0;
+// A dead opener's unclaimed reservation stays authoritative for this long so a
+// slow-starting child can still claim it. It is well beyond the opener's
+// PICKER_REQUEST_TIMEOUT_MS delivery deadline; afterwards the token-guarded claim makes any
+// late child exit without UI, so reclaiming cannot create a duplicate surface.
+const UNCLAIMED_RESERVATION_GRACE_MS = 10_000;
+const RESERVED_AT_COLUMN = "reserved_at";
 const SCHEMA = `
   PRAGMA busy_timeout = 2000;
   CREATE TABLE IF NOT EXISTS owners (
     session TEXT PRIMARY KEY, token TEXT NOT NULL, opener INTEGER NOT NULL,
-    picker INTEGER, placement TEXT NOT NULL CHECK (placement IN ('popup', 'overlay')), pane TEXT
+    picker INTEGER, placement TEXT NOT NULL CHECK (placement IN ('popup', 'overlay')), pane TEXT,
+    reserved_at INTEGER
   );
   CREATE TABLE IF NOT EXISTS requests (
     session TEXT PRIMARY KEY, token TEXT NOT NULL, mode TEXT NOT NULL,
@@ -31,11 +38,13 @@ const WRITE_REQUEST = `INSERT INTO requests (session, token, mode, context) VALU
   ON CONFLICT(session) DO UPDATE SET token=excluded.token, mode=excluded.mode, context=excluded.context, acknowledged=NULL`;
 const ACK_REQUEST = `UPDATE requests SET acknowledged=? WHERE session=? AND token=?
   AND EXISTS (SELECT 1 FROM owners WHERE session=? AND token=? AND picker=?)`;
-const INSERT_OWNER = "INSERT INTO owners (session, token, opener, placement) VALUES (?, ?, ?, ?)";
+const INSERT_OWNER = "INSERT INTO owners (session, token, opener, placement, reserved_at) VALUES (?, ?, ?, ?, ?)";
+const OWNER_COLUMNS = "PRAGMA table_info(owners)";
+const ADD_RESERVED_AT = `ALTER TABLE owners ADD COLUMN ${RESERVED_AT_COLUMN} INTEGER`;
 const DELETE_OWNER = "DELETE FROM owners WHERE session = ? AND token = ?";
 const RELEASE_UNSUBMITTED = "DELETE FROM owners WHERE session = ? AND token = ? AND opener = ? AND picker IS NULL";
 const CLAIM_OWNER = "UPDATE owners SET picker = ?, pane = ? WHERE session = ? AND token = ? AND picker IS NULL AND placement = ?";
-const UNCERTAIN_STARTUP = "Picker startup could not be verified. Restart this Herdr session before opening another picker.";
+const UNCERTAIN_STARTUP = "Picker startup could not be verified yet. Retry after the pending picker starts or its reservation expires.";
 
 export class PickerStartupUncertainError extends Error {
   constructor() { super(UNCERTAIN_STARTUP); }
@@ -47,6 +56,7 @@ interface Owner {
   readonly picker: number | null;
   readonly placement: PickerPlacement;
   readonly pane: string | null;
+  readonly reserved_at: number | null;
 }
 
 export class PickerSession {
@@ -75,6 +85,7 @@ export class PickerSession {
     this.database = new Database(path);
     try {
       this.database.exec(SCHEMA);
+      this.migrate();
     } catch (error) {
       this.database.close();
       throw error;
@@ -85,9 +96,11 @@ export class PickerSession {
     const observed = this.read();
     if (observed) {
       if (ownerAlive(observed)) return undefined;
-      // An opener can die after submitting a request but before the child claims it.
-      if (observed.picker === null) throw new PickerStartupUncertainError();
-      if (observed.placement === "overlay") {
+      // An opener can die after submitting a request but before the child claims it;
+      // only a reservation past its grace period is treated as abandoned.
+      if (observed.picker === null) {
+        if (!reservationExpired(observed)) throw new PickerStartupUncertainError();
+      } else if (observed.placement === "overlay") {
         if (!observed.pane) throw new PickerStartupUncertainError();
         if (await paneExists(observed.pane)) return undefined;
       }
@@ -101,7 +114,7 @@ export class PickerSession {
         this.database.query(DELETE_OWNER).run(this.session, current.token);
       }
       const token = crypto.randomUUID();
-      this.database.query(INSERT_OWNER).run(this.session, token, process.pid, placement);
+      this.database.query(INSERT_OWNER).run(this.session, token, process.pid, placement, Date.now());
       return token;
     }).immediate();
   }
@@ -141,6 +154,20 @@ export class PickerSession {
     this.database.close();
   }
 
+  // Databases created before reservation timestamps keep their table because
+  // CREATE TABLE IF NOT EXISTS never alters it; concurrent openers serialize here.
+  // The unlocked probe keeps every later open free of a write lock.
+  private migrate(): void {
+    if (this.hasReservedAt()) return;
+    this.database.transaction(() => {
+      if (!this.hasReservedAt()) this.database.exec(ADD_RESERVED_AT);
+    }).immediate();
+  }
+
+  private hasReservedAt(): boolean {
+    return this.database.query<{ name: string }, []>(OWNER_COLUMNS).all().some(column => column.name === RESERVED_AT_COLUMN);
+  }
+
   private read(): Owner | null {
     return this.database.query<Owner, [string]>(READ_OWNER).get(this.session);
   }
@@ -149,6 +176,11 @@ export class PickerSession {
 function ownerAlive(owner: Owner): boolean {
   // ponytail: PID reuse fails closed; add process birth identities if restart recovery becomes frequent.
   return processAlive(owner.opener) || (owner.picker !== null && processAlive(owner.picker));
+}
+
+function reservationExpired(owner: Owner): boolean {
+  // Legacy rows have no timestamp; callers reach this only after the opener is proven dead.
+  return owner.reserved_at === null || Date.now() - owner.reserved_at > UNCLAIMED_RESERVATION_GRACE_MS;
 }
 
 function processAlive(pid: number): boolean {
