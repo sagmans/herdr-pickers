@@ -2,8 +2,6 @@ import { decodeContext, encodeContext, type CurrentContext } from "./context.ts"
 import { parseMode, type PickerMode } from "./modes.ts";
 import { isRecord } from "./util/objects.ts";
 
-export const PICKER_REQUEST_POLL_MS = 25;
-export const PICKER_REQUEST_TIMEOUT_MS = 3_000;
 const INVALID_REQUEST = "Invalid picker replacement request";
 
 export interface PickerRequest {

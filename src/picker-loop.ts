@@ -1,7 +1,6 @@
 import { runPicker, type PickerOutcome, type PickerRuntime } from "./picker.ts";
-import { PICKER_REQUEST_POLL_MS } from "./picker-request.ts";
 import type { PickerItem } from "./picker-row.ts";
-import type { PickerSession } from "./picker-session.ts";
+import { PICKER_REQUEST_POLL_MS, type PickerSession } from "./picker-session.ts";
 import { withPickerTerminal, type PickerTerminal, type TerminalAdapter } from "./picker-terminal.ts";
 import { runTerminalPicker, type TerminalPickerOptions } from "./terminal-picker.ts";
 

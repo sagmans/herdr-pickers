@@ -9,6 +9,10 @@ import type { PickerPlacement } from "./config/config.ts";
 import { hasErrorCode } from "./util/objects.ts";
 
 export const PICKER_TOKEN_ENV = "HERDR_PICKERS_SESSION_TOKEN";
+/** How often openers and pickers re-read the request mailbox; short enough to feel instant. */
+export const PICKER_REQUEST_POLL_MS = 25;
+/** How long an opener waits for a picker to take its request before reporting failure. */
+export const PICKER_REQUEST_TIMEOUT_MS = 3_000;
 const DATABASE_NAME = "picker-sessions.sqlite";
 const PRIVATE_DIRECTORY_MODE = 0o700;
 const PRIVATE_FILE_MODE = 0o600;
