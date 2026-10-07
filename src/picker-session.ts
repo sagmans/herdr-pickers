@@ -14,7 +14,8 @@ export const PICKER_TOKEN_ENV = "HERDR_PICKERS_SESSION_TOKEN";
 export const PICKER_REQUEST_POLL_MS = 25;
 /** How long an opener waits for a picker to take its request before reporting failure. */
 export const PICKER_REQUEST_TIMEOUT_MS = 3_000;
-const DATABASE_NAME = "picker-sessions.sqlite";
+/** Exported so the real-Herdr smoke can locate the database the plugin owns. */
+export const DATABASE_NAME = "picker-sessions.sqlite";
 const PRIVATE_DIRECTORY_MODE = 0o700;
 const PRIVATE_FILE_MODE = 0o600;
 const FILE_PERMISSION_MASK = 0o777;
@@ -41,7 +42,8 @@ const SCHEMA = `
   );
 `;
 const READ_OWNER = "SELECT * FROM owners WHERE session = ?";
-const READ_REQUEST = "SELECT * FROM requests WHERE session = ?";
+/** Exported so the smoke observes requests through the same query the plugin reads. */
+export const READ_REQUEST = "SELECT * FROM requests WHERE session = ?";
 const WRITE_REQUEST = `INSERT INTO requests (session, token, mode, context) VALUES (?, ?, ?, ?)
   ON CONFLICT(session) DO UPDATE SET token=excluded.token, mode=excluded.mode, context=excluded.context, acknowledged=NULL`;
 const ACK_REQUEST = `UPDATE requests SET acknowledged=? WHERE session=? AND token=?

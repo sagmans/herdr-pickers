@@ -6,7 +6,18 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { runPickerLifecycleSmoke, type CliResult, type SmokeSession } from "./smoke-picker-lifecycle.ts";
+import { runPickerLifecycleSmoke } from "./smoke-picker-lifecycle.ts";
+import {
+  CONFIG_FILE_NAME,
+  KEY_CTRL_C,
+  KEY_ENTER,
+  KEY_ESCAPE,
+  PICKER_PANE_LABEL,
+  PLUGIN_ID,
+  WORKSPACES_PICKER_PROMPT,
+  type CliResult,
+  type SmokeSession,
+} from "./smoke-support.ts";
 import {
   POLL_BACKOFF_FACTOR,
   POLL_INTERVAL_MAX_MS,
@@ -16,10 +27,16 @@ import {
 } from "./smoke-timing.ts";
 
 const PLUGIN_ROOT = join(import.meta.dir, "..");
-const PLUGIN_ID = "herdr-pickers";
-const CONFIG_FILE_NAME = "config.toml";
+// Resolved from PATH on purpose: mise pins the Herdr version the smoke targets.
+const HERDR_COMMAND = "herdr";
+const GIT_COMMAND = "git";
+const PYTHON_COMMAND = "python3";
+const PTY_BRIDGE_SCRIPT = "smoke-pty.py";
+const CLIENT_TERM = "xterm-256color";
 const XDG_CONFIG_DIR = "x";
 const XDG_STATE_DIR = "s";
+const XDG_DATA_DIR = "d";
+const XDG_CACHE_DIR = "c";
 const HERDR_CONFIG_DIR = "herdr";
 // Herdr spreads plugin state below the state home; the smoke looks the file up
 // instead of assuming the layout so a Herdr change fails loudly.
@@ -29,13 +46,15 @@ const PLUGIN_STATE_CURRENT_KEY = "current_workspace_id";
 const PLUGIN_STATE_PREVIOUS_KEY = "last_workspace_id";
 const HERDR_ONBOARDING_COMPLETE = "onboarding = false\n";
 const SMOKE_CONFIG = '[keymap]\nup = ["up", "ctrl-k"]\ndown = ["down", "ctrl-j"]\n';
-const KEY_CTRL_C = "\u0003";
 const KEY_CTRL_J = "\u000a";
-const KEY_ENTER = "\r";
-const KEY_ESCAPE = "\u001b";
+const KEY_CTRL_R = "\u0012";
 const KEY_INPUT_SETTLE_MS = 100;
+// Fixed settles cover popup paths whose state the probe cannot observe directly.
+const QUERY_SETTLE_MS = 400;
+const CANCEL_SETTLE_MS = 600;
+const ESCAPE_SETTLE_MS = 800;
+const RELOAD_REDRAW_MS = 1_000;
 const CLIENT_EXIT_GRACE_MS = 1_000;
-const PICKER_PANE_LABEL = "Herdr Picker";
 const SMOKE_QUERY = "smoke-";
 const FIRST_WORKSPACE_ID = "w1";
 const FIRST_WORKSPACE_LABEL = "smoke-one";
@@ -49,11 +68,18 @@ const SESSION_NAME = `s-${SESSION_SUFFIX}`;
 const SECOND_SESSION_NAME = `t-${SESSION_SUFFIX}`;
 const SECOND_SESSION_CHECK_PREFIX = "second ";
 const SECOND_SESSION_WORKSPACE_LABEL = "smoke-second-session";
+const FIXTURE_REPO_DIR = "sample-repo";
+const FIXTURE_WORKTREE_DIR = "sample-repo-wt";
+// OSC title escape plus a bidi isolate: the label the sanitizer must neutralize.
+const ADVERSARIAL_WORKSPACE_LABEL = "evil\u001B]0;pwn\u0007two\u2066";
+const ADVERSARIAL_RENDER_FRAGMENTS = ["\u001b]0;pwn", "\u0007two\u001b"] as const;
+const OVERLAY_CONFIG_PREFIX = 'placement = "overlay"\n\n';
+const PLUGIN_COMMAND_PENDING_STATUSES: ReadonlySet<string> = new Set(["running", "queued"]);
+const PLUGIN_COMMAND_SUCCEEDED = "succeeded";
 const ACTION_IDS = [
   "all", "projects", "workspaces", "repo-workspaces", "worktrees",
   "repo-worktrees", "agents", "repo-agents", "last-workspace",
 ] as const;
-const WORKSPACES_PICKER_PROMPT = "workspaces ›";
 // A terminal escape sequence in the client stream proves a real TUI frame was
 // painted; the raw PTY file exists as soon as the bridge starts.
 const CLIENT_PAINT_MARKER = "\u001b[";
@@ -116,8 +142,8 @@ function isolatedEnv(): Record<string, string> {
   // XDG_CONFIG_HOME leaked plugin state into the host ~/.local/state.
   env.XDG_CONFIG_HOME = join(root, XDG_CONFIG_DIR);
   env.XDG_STATE_HOME = join(root, XDG_STATE_DIR);
-  env.XDG_DATA_HOME = join(root, "d");
-  env.XDG_CACHE_HOME = join(root, "c");
+  env.XDG_DATA_HOME = join(root, XDG_DATA_DIR);
+  env.XDG_CACHE_HOME = join(root, XDG_CACHE_DIR);
   return env;
 }
 
@@ -125,7 +151,7 @@ const cli = (args: readonly string[]): CliResult => cliFor(SESSION_NAME, args);
 
 function cliFor(sessionName: string, args: readonly string[]): CliResult {
   try {
-    const stdout = execFileSync("herdr", [...args], {
+    const stdout = execFileSync(HERDR_COMMAND, [...args], {
       env: { ...isolatedEnv(), HERDR_SESSION: sessionName },
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
@@ -138,7 +164,7 @@ function cliFor(sessionName: string, args: readonly string[]): CliResult {
 }
 
 async function cliAsyncFor(sessionName: string, args: readonly string[]): Promise<CliResult> {
-  const proc = Bun.spawn(["herdr", ...args], {
+  const proc = Bun.spawn([HERDR_COMMAND, ...args], {
     env: { ...isolatedEnv(), HERDR_SESSION: sessionName },
     stdin: "ignore",
     stdout: "pipe",
@@ -235,7 +261,9 @@ function finish(code: number): never {
   process.exit(code);
 }
 
-const git = (cwd: string, ...args: string[]): void => execFileSync("git", args, { cwd, stdio: "ignore" });
+const git = (cwd: string, ...args: string[]): void => {
+  execFileSync(GIT_COMMAND, args, { cwd, stdio: "ignore" });
+};
 
 function listPanes(): Array<{ pane_id: string; label?: string; focused?: boolean }> | undefined {
   const result = cli(["pane", "list"]);
@@ -324,8 +352,8 @@ async function waitForPickerPrompt(label: string, rawOutputPath: string): Promis
 }
 
 interface LastWorkspaceState {
-  readonly current?: string;
-  readonly previous?: string;
+  readonly current?: string | undefined;
+  readonly previous?: string | undefined;
 }
 
 let pluginStatePath: string | undefined;
@@ -448,7 +476,7 @@ async function runOverlayMouseSmoke(repo: string): Promise<void> {
   }
   check("overlay wheel fixtures create", failures.length === 0, failures.join("; "));
 
-  const opened = cli(["plugin", "action", "invoke", `${PLUGIN_ID}.workspaces`]);
+  const opened = invokeAction("workspaces");
   check("overlay mouse picker opens", opened.code === 0, opened.stderr.trim());
   const paneId = await waitForOverlayPicker();
   const initialFrame = await waitForSettledFrame("overlay mouse picker settles", paneId);
@@ -524,16 +552,41 @@ async function runOverlayMouseSmoke(repo: string): Promise<void> {
 
   // Reopening after the mouse traffic proves the pane still accepts input and
   // that the picker restored the terminal state it enabled for mouse tracking.
-  const reopened = cli(["plugin", "action", "invoke", `${PLUGIN_ID}.workspaces`]);
+  const reopened = invokeAction("workspaces");
   check("overlay picker reopens after mouse input", reopened.code === 0, reopened.stderr.trim());
   const reopenedPaneId = await waitForOverlayPicker();
   sendInput(attach, KEY_ESCAPE);
   await waitForPaneRemoval("overlay escape still closes after mouse input", reopenedPaneId);
 }
 
-async function main(): Promise<void> {
-  console.error(`smoke root: ${root}`);
-  mkdirSync(fixtureRoot, { recursive: true });
+function invokeAction(action: string): CliResult {
+  return cli(["plugin", "action", "invoke", `${PLUGIN_ID}.${action}`]);
+}
+
+function spawnServer(sessionName: string, logPath: string): Bun.Subprocess<"ignore", number, number> {
+  const logFd = openSync(logPath, "a");
+  return Bun.spawn([HERDR_COMMAND, "--session", sessionName, "server"], {
+    env: { ...isolatedEnv(), HERDR_SESSION: sessionName },
+    stdin: "ignore",
+    stdout: logFd,
+    stderr: logFd,
+  });
+}
+
+// A real PTY is required because popup input routes through the attached client.
+function spawnClient(sessionName: string, rawOutputPath: string): Bun.Subprocess<"pipe", number, "ignore"> {
+  const rawOutput = openSync(rawOutputPath, "a");
+  return Bun.spawn([
+    PYTHON_COMMAND, join(import.meta.dir, PTY_BRIDGE_SCRIPT), HERDR_COMMAND, "--session", sessionName,
+  ], {
+    env: { ...isolatedEnv(), HERDR_SESSION: sessionName, TERM: CLIENT_TERM },
+    stdin: "pipe",
+    stdout: rawOutput,
+    stderr: "ignore",
+  });
+}
+
+async function startPrimaryServer(): Promise<void> {
   // herdr 0.9.x renders setup in each client, and a fresh config still shows
   // first-run onboarding that captures input before plugin popups. Real
   // installations have completed it, so the isolated runtime must match.
@@ -541,35 +594,35 @@ async function main(): Promise<void> {
   mkdirSync(herdrConfigDir, { recursive: true });
   writeFileSync(join(herdrConfigDir, CONFIG_FILE_NAME), HERDR_ONBOARDING_COMPLETE, "utf8");
 
-  const logFd = openSync(serverLog, "a");
-  server = Bun.spawn(["herdr", "--session", SESSION_NAME, "server"], {
-    env: { ...isolatedEnv(), HERDR_SESSION: SESSION_NAME },
-    stdin: "ignore",
-    stdout: logFd,
-    stderr: logFd,
-  });
-
+  server = spawnServer(SESSION_NAME, serverLog);
   // No Herdr mutation is allowed until its session socket proves isolation.
   await verifySessionIsolation(SESSION_NAME, "");
+}
 
-  const repo = join(fixtureRoot, "sample-repo");
+function createFixtureRepository(): string {
+  const repo = join(fixtureRoot, FIXTURE_REPO_DIR);
   mkdirSync(repo, { recursive: true });
   git(repo, "init", "-q", "-b", FIXTURE_DEFAULT_BRANCH);
   // Reusing signed history avoids weakening Git policy; CI's shallow checkout must remain fetchable.
   git(repo, "fetch", "-q", "--no-tags", "--update-shallow", PLUGIN_ROOT, "HEAD");
   git(repo, "checkout", "-q", "-B", FIXTURE_DEFAULT_BRANCH, "FETCH_HEAD");
-  git(repo, "worktree", "add", "-q", join(fixtureRoot, "sample-repo-wt"), "-b", FIXTURE_WORKTREE_BRANCH);
+  git(repo, "worktree", "add", "-q", join(fixtureRoot, FIXTURE_WORKTREE_DIR), "-b", FIXTURE_WORKTREE_BRANCH);
+  return repo;
+}
 
-  // Herdr focuses the first workspace because it is alone at creation time;
-  // eviltwo carries an adversarial label, and smoke-two is the dispatch target.
+// Herdr focuses the first workspace because it is alone at creation time; the
+// second carries an adversarial label, and the third is the dispatch target.
+function createFixtureWorkspaces(repo: string): void {
   const created = cli(["workspace", "create", "--cwd", repo, "--label", FIRST_WORKSPACE_LABEL, "--no-focus"]);
   check("workspace create succeeds", created.code === 0, created.stderr.trim());
-  const adversarialLabel = "evil\u001B]0;pwn\u0007two\u2066";
-  const createdTwo = cli(["workspace", "create", "--cwd", join(fixtureRoot, "sample-repo-wt"), "--label", adversarialLabel, "--no-focus"]);
+  const createdTwo = cli(["workspace", "create", "--cwd", join(fixtureRoot, FIXTURE_WORKTREE_DIR), "--label", ADVERSARIAL_WORKSPACE_LABEL, "--no-focus"]);
   check("adversarial workspace create succeeds", createdTwo.code === 0, createdTwo.stderr.trim());
   const createdThree = cli(["workspace", "create", "--cwd", repo, "--label", DISPATCH_TARGET_WORKSPACE_LABEL, "--no-focus"]);
   check("dispatch-target workspace create succeeds", createdThree.code === 0, createdThree.stderr.trim());
+}
 
+/** Links the checkout into the isolated registry and returns its isolated config directory. */
+function linkPlugin(): string {
   const linked = cli(["plugin", "link", PLUGIN_ROOT, "--enabled"]);
   check("plugin links", linked.code === 0, linked.stderr.trim());
   const configDirResult = cli(["plugin", "config-dir", PLUGIN_ID]);
@@ -579,7 +632,7 @@ async function main(): Promise<void> {
   mkdirSync(pluginConfigDir, { recursive: true });
   writeFileSync(join(pluginConfigDir, CONFIG_FILE_NAME), SMOKE_CONFIG, "utf8");
 
-  const actions = cli(["plugin", "action", "list", "--plugin", "herdr-pickers"]);
+  const actions = cli(["plugin", "action", "list", "--plugin", PLUGIN_ID]);
   let registered: string[] = [];
   try {
     const parsed = JSON.parse(actions.stdout) as { result?: { actions?: Array<{ action_id?: string }> } };
@@ -587,33 +640,28 @@ async function main(): Promise<void> {
   } catch { /* handled by check */ }
   check("all nine actions register", JSON.stringify(registered) === JSON.stringify([...ACTION_IDS].sort()),
     `registered: ${registered.join(", ")}`);
+  return pluginConfigDir;
+}
 
-  // A real PTY is required because popup input routes through the attached client.
-  const clientRaw = openSync(clientRawPath, "a");
-  attach = Bun.spawn([
-    "python3", join(import.meta.dir, "smoke-pty.py"), "herdr", "--session", SESSION_NAME,
-  ], {
-    env: { ...isolatedEnv(), HERDR_SESSION: SESSION_NAME, TERM: "xterm-256color" },
-    stdin: "pipe",
-    stdout: clientRaw,
-    stderr: "ignore",
-  });
-  await waitForClientPaint("primary client paints its first frame", clientRawPath);
-  // Focus history is what last-workspace toggles through: seed one
-  // transition (w1 -> w2) so the later picker dispatch (-> w3) records w2
-  // as the previous workspace.
+// Focus history is what last-workspace toggles through: seed one transition
+// (w1 -> w2) so the later picker dispatch (-> w3) records w2 as the previous
+// workspace.
+async function seedFocusHistory(): Promise<void> {
   const seeded = cli(["workspace", "focus", SEEDED_WORKSPACE_ID]);
   check("focus transition seeds last-workspace memory", seeded.code === 0, seeded.stderr.trim());
   await waitForLastWorkspaceState("last-workspace memory records the seed focus", SEEDED_WORKSPACE_ID);
+}
 
-  const opened = cli(["plugin", "action", "invoke", "herdr-pickers.workspaces"]);
+/** Returns the workspace focused before dispatch, which the toggle must restore. */
+async function runConfiguredKeymapCase(): Promise<string | undefined> {
+  const opened = invokeAction("workspaces");
   check("workspaces action exits cleanly", opened.code === 0, opened.stderr.trim());
   const before = focusedWorkspaceId();
   // Keys route to the focused shell pane until the popup paints, so wait for
   // its prompt instead of guessing how long the render takes.
   await waitForPickerPrompt("configured ctrl-j picker renders", clientRawPath);
   sendInput(attach, SMOKE_QUERY);
-  await Bun.sleep(400);
+  await Bun.sleep(QUERY_SETTLE_MS);
   sendInput(attach, KEY_CTRL_J);
   await Bun.sleep(KEY_INPUT_SETTLE_MS);
   // CR keeps acceptance distinct from Ctrl-J's indistinguishable LF byte.
@@ -627,109 +675,97 @@ async function main(): Promise<void> {
     configuredSelection === DISPATCH_TARGET_WORKSPACE_ID,
     configuredSelection,
   );
+  return before;
+}
 
+async function runLastWorkspaceToggleCase(before: string | undefined): Promise<void> {
   // The toggle restores whatever the event process recorded last, so the
   // dispatched transition must be persisted before the action reads it.
   await waitForLastWorkspaceState("last-workspace memory records the dispatched focus", DISPATCH_TARGET_WORKSPACE_ID, before);
-  const toggled = cli(["plugin", "action", "invoke", "herdr-pickers.last-workspace"]);
+  const toggled = invokeAction("last-workspace");
   check("last-workspace action exits cleanly", toggled.code === 0, toggled.stderr.trim());
   await poll("last-workspace restores the previous focus", () => {
     const focused = focusedWorkspaceId();
     return focused === before ? focused : undefined;
   });
+}
 
+async function runPopupCancelAndReloadCases(): Promise<void> {
   const bytesBeforeProjects = clientBytes();
-  const projects = cli(["plugin", "action", "invoke", "herdr-pickers.projects"]);
+  const projects = invokeAction("projects");
   check("projects action exits cleanly", projects.code === 0, projects.stderr.trim());
   await poll("projects picker renders", () => clientBytes() > bytesBeforeProjects ? "rendered" : undefined);
   sendInput(attach, KEY_CTRL_C);
-  await Bun.sleep(600);
+  await Bun.sleep(CANCEL_SETTLE_MS);
 
-  const reloadReopened = cli(["plugin", "action", "invoke", "herdr-pickers.workspaces"]);
+  const reloadReopened = invokeAction("workspaces");
   check("reload picker exits cleanly", reloadReopened.code === 0, reloadReopened.stderr.trim());
   const bytesBeforeReload = clientBytes();
-  sendInput(attach, "\u0012");
-  await Bun.sleep(1000);
+  sendInput(attach, KEY_CTRL_R);
+  await Bun.sleep(RELOAD_REDRAW_MS);
   check("ctrl-r redraws the picker", clientBytes() > bytesBeforeReload,
     "client output did not grow after ctrl-r");
   sendInput(attach, KEY_ESCAPE);
-  await Bun.sleep(600);
+  await Bun.sleep(CANCEL_SETTLE_MS);
+}
 
-  // The adversarial workspace label must never reach the client as a
-  // live escape sequence: the sanitizer strips control bytes, so the rendered
-  // text may still show inert "]0;pwn" characters, but ESC-prefixed OSC must
-  // be absent or the terminal would execute it.
+// The adversarial workspace label must never reach the client as a live escape
+// sequence: the sanitizer strips control bytes, so the rendered text may still
+// show inert "]0;pwn" characters, but ESC-prefixed OSC must be absent or the
+// terminal would execute it.
+function checkAdversarialLabelSanitized(): void {
   const rendered = readClientOutput(clientRawPath);
   check("adversarial label is sanitized in render",
-    !rendered.includes("\u001b]0;pwn") && !rendered.includes("\u0007two\u001b"),
+    ADVERSARIAL_RENDER_FRAGMENTS.every((fragment) => !rendered.includes(fragment)),
     "raw OSC payload from the adversarial label reached the client");
+}
 
-  const reopened = cli(["plugin", "action", "invoke", "herdr-pickers.workspaces"]);
+async function runPopupEscapeCase(): Promise<void> {
+  const reopened = invokeAction("workspaces");
   check("reopen picker exits cleanly", reopened.code === 0, reopened.stderr.trim());
   const stableFocus = focusedWorkspaceId();
   sendInput(attach, KEY_ESCAPE);
-  await Bun.sleep(800);
+  await Bun.sleep(ESCAPE_SETTLE_MS);
   const afterEscape = focusedWorkspaceId();
   check("escape closes without dispatching", afterEscape === stableFocus,
     "focus moved from " + String(stableFocus) + " to " + String(afterEscape));
+}
 
-  writeFileSync(
-    join(pluginConfigDir, CONFIG_FILE_NAME),
-    `placement = "overlay"\n\n${SMOKE_CONFIG}`,
-    "utf8",
+async function runOverlayCancelCase(openLabel: string, name: string, key: string): Promise<void> {
+  const opened = invokeAction("workspaces");
+  check(openLabel, opened.code === 0, opened.stderr.trim());
+  const paneId = await waitForOverlayPicker();
+  const focusBefore = focusedWorkspaceId();
+  sendInput(attach, key);
+  await waitForPaneRemoval(`overlay ${name} removes the picker pane`, paneId);
+  const focusAfter = focusedWorkspaceId();
+  check(
+    `overlay ${name} closes without dispatching`,
+    focusAfter === focusBefore,
+    "focus moved from " + String(focusBefore) + " to " + String(focusAfter),
   );
+}
+
+async function runOverlayCancelCases(pluginConfigDir: string): Promise<void> {
+  writeFileSync(join(pluginConfigDir, CONFIG_FILE_NAME), `${OVERLAY_CONFIG_PREFIX}${SMOKE_CONFIG}`, "utf8");
   check("no overlay picker exists before opening", listPanes()?.every((pane) => pane.label !== PICKER_PANE_LABEL) === true);
-  const overlayOpened = cli(["plugin", "action", "invoke", "herdr-pickers.workspaces"]);
-  check("overlay workspaces action exits cleanly", overlayOpened.code === 0, overlayOpened.stderr.trim());
-  const overlayPaneId = await waitForOverlayPicker();
-  const overlayFocus = focusedWorkspaceId();
-  sendInput(attach, KEY_CTRL_C);
-  await waitForPaneRemoval("overlay ctrl-c removes the picker pane", overlayPaneId);
-  const afterOverlay = focusedWorkspaceId();
-  check(
-    "overlay ctrl-c closes without dispatching",
-    afterOverlay === overlayFocus,
-    "focus moved from " + String(overlayFocus) + " to " + String(afterOverlay),
-  );
+  await runOverlayCancelCase("overlay workspaces action exits cleanly", "ctrl-c", KEY_CTRL_C);
+  await runOverlayCancelCase("overlay escape action exits cleanly", "escape", KEY_ESCAPE);
+}
 
-  const overlayEscapeOpened = cli(["plugin", "action", "invoke", "herdr-pickers.workspaces"]);
-  check("overlay escape action exits cleanly", overlayEscapeOpened.code === 0, overlayEscapeOpened.stderr.trim());
-  const overlayEscapePaneId = await waitForOverlayPicker();
-  const overlayEscapeFocus = focusedWorkspaceId();
-  sendInput(attach, KEY_ESCAPE);
-  await waitForPaneRemoval("overlay escape removes the picker pane", overlayEscapePaneId);
-  const afterOverlayEscape = focusedWorkspaceId();
-  check(
-    "overlay escape closes without dispatching",
-    afterOverlayEscape === overlayEscapeFocus,
-    "focus moved from " + String(overlayEscapeFocus) + " to " + String(afterOverlayEscape),
-  );
-
-  await runOverlayMouseSmoke(repo);
-
-  const secondLogFd = openSync(secondServerLog, "a");
-  secondServer = Bun.spawn(["herdr", "--session", SECOND_SESSION_NAME, "server"], {
-    env: { ...isolatedEnv(), HERDR_SESSION: SECOND_SESSION_NAME },
-    stdin: "ignore",
-    stdout: secondLogFd,
-    stderr: secondLogFd,
-  });
+async function startSecondSession(repo: string): Promise<void> {
+  secondServer = spawnServer(SECOND_SESSION_NAME, secondServerLog);
+  // The second session gets the same isolation gate before any mutation.
   await verifySessionIsolation(SECOND_SESSION_NAME, SECOND_SESSION_CHECK_PREFIX);
   const secondWorkspace = cliFor(SECOND_SESSION_NAME, [
     "workspace", "create", "--cwd", repo, "--label", SECOND_SESSION_WORKSPACE_LABEL, "--no-focus",
   ]);
   check("second-session workspace creates", secondWorkspace.code === 0, secondWorkspace.stderr.trim());
-  const secondClientRaw = openSync(secondClientRawPath, "a");
-  secondAttach = Bun.spawn([
-    "python3", join(import.meta.dir, "smoke-pty.py"), "herdr", "--session", SECOND_SESSION_NAME,
-  ], {
-    env: { ...isolatedEnv(), HERDR_SESSION: SECOND_SESSION_NAME, TERM: "xterm-256color" },
-    stdin: "pipe",
-    stdout: secondClientRaw,
-    stderr: "ignore",
-  });
+  secondAttach = spawnClient(SECOND_SESSION_NAME, secondClientRawPath);
   await waitForClientPaint("secondary client paints its first frame", secondClientRawPath);
+}
 
+async function runLifecycleCases(repo: string, pluginConfigDir: string): Promise<void> {
   const primarySession: SmokeSession = {
     label: "primary session",
     rawOutputPath: clientRawPath,
@@ -758,7 +794,9 @@ async function main(): Promise<void> {
     check,
     poll,
   });
+}
 
+async function checkPluginCommandsSucceeded(): Promise<void> {
   for (const [label, sessionName] of [["primary", SESSION_NAME], ["secondary", SECOND_SESSION_NAME]] as const) {
     let pluginEntries: Array<Record<string, unknown> & { status?: string }> = [];
     // Focus events can outlive picker teardown; running hooks are not failed commands.
@@ -768,12 +806,33 @@ async function main(): Promise<void> {
         const parsed = JSON.parse(logs.stdout) as { result?: { logs?: Array<Record<string, unknown> & { status?: string }> } };
         pluginEntries = parsed.result?.logs ?? [];
       } catch { pluginEntries = [{ error: "invalid plugin log response" }]; }
-      return pluginEntries.some(entry => entry.status === "running" || entry.status === "queued") ? undefined : "settled";
+      return pluginEntries.some(entry => entry.status !== undefined && PLUGIN_COMMAND_PENDING_STATUSES.has(entry.status)) ? undefined : "settled";
     });
-    const failedEntries = pluginEntries.filter((entry) => entry.status !== "succeeded");
+    const failedEntries = pluginEntries.filter((entry) => entry.status !== PLUGIN_COMMAND_SUCCEEDED);
     check(`every ${label} plugin command succeeded`, failedEntries.length === 0, JSON.stringify(failedEntries));
   }
+}
 
+async function main(): Promise<void> {
+  console.error(`smoke root: ${root}`);
+  mkdirSync(fixtureRoot, { recursive: true });
+  await startPrimaryServer();
+  const repo = createFixtureRepository();
+  createFixtureWorkspaces(repo);
+  const pluginConfigDir = linkPlugin();
+  attach = spawnClient(SESSION_NAME, clientRawPath);
+  await waitForClientPaint("primary client paints its first frame", clientRawPath);
+  await seedFocusHistory();
+  const before = await runConfiguredKeymapCase();
+  await runLastWorkspaceToggleCase(before);
+  await runPopupCancelAndReloadCases();
+  checkAdversarialLabelSanitized();
+  await runPopupEscapeCase();
+  await runOverlayCancelCases(pluginConfigDir);
+  await runOverlayMouseSmoke(repo);
+  await startSecondSession(repo);
+  await runLifecycleCases(repo, pluginConfigDir);
+  await checkPluginCommandsSucceeded();
   console.error("smoke passed");
   finish(0);
 }
