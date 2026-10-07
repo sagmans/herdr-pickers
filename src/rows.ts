@@ -6,6 +6,8 @@ import { navigationModeSpec, type NavigationMode, type NavigationModeSpec } from
 import { PICKER_PALETTE } from "./palette.ts";
 import type { PickerGroup, PickerItem, PickerRows } from "./picker-row.ts";
 import { bold, dim, trueColor } from "./style.ts";
+// Herdr metadata is untrusted: every field rendered into a row passes through
+// sanitizeTerminalText so hidden escapes and tabs never reach visible fields.
 import { sanitizeTerminalText } from "./util/terminal-text.ts";
 
 const UNKNOWN_REPO = "unknown repo";
@@ -51,7 +53,7 @@ export function renderAgentRows(targets: readonly AgentTarget[]): PickerRows {
   let group: PickerGroup | undefined;
 
   for (const target of ordered) {
-    const repoKey = target.repoKey ?? UNKNOWN_REPO_KEY;
+    const repoKey = repositoryKey(target);
     if (repoKey !== previousRepoKey) {
       const label = repoLabel(target, qualifiers);
       group = {
@@ -65,7 +67,7 @@ export function renderAgentRows(targets: readonly AgentTarget[]): PickerRows {
     const display = renderTargetLine(target, state, false);
     items.push({
       id: target.id,
-      searchText: [group?.label, target.worktree ? sanitize(target.worktree) : undefined, sanitize(target.agentLabel)].filter(Boolean).join(SEARCH_FIELD_SEPARATOR),
+      searchText: [group?.label, target.worktree ? sanitizeTerminalText(target.worktree) : undefined, sanitizeTerminalText(target.agentLabel)].filter(Boolean).join(SEARCH_FIELD_SEPARATOR),
       display,
       selectedDisplay: renderTargetLine(target, state, true),
       selectionColor: statusColor(state),
@@ -91,7 +93,7 @@ export function renderNavigationRows(
   const items = ordered.map((target): PickerItem => {
     const group = spec.grouped ? navigationGroup(target, qualifiers.repositories) : undefined;
     const identity = navigationIdentity(spec, target, qualifiers);
-    const detail = target.detail ? sanitize(target.detail) : undefined;
+    const detail = target.detail ? sanitizeTerminalText(target.detail) : undefined;
     const badge = spec.kindBadges ? target.kind : undefined;
     const marker = target.current ? currentMarker() : "";
     return {
@@ -121,8 +123,8 @@ function renderGroup(label: string, unknown: boolean): string {
 
 function renderTargetLine(target: AgentTarget, state: AgentState, selected: boolean): string {
   const glyph = trueColor(statusColor(state), statusGlyph(state));
-  const worktree = target.worktree ? sanitize(target.worktree) : undefined;
-  const label = sanitize(target.agentLabel);
+  const worktree = target.worktree ? sanitizeTerminalText(target.worktree) : undefined;
+  const label = sanitizeTerminalText(target.agentLabel);
   const relation = worktree ? worktree + RELATION_SEPARATOR : "";
   const identity = selected
     ? bold(trueColor(statusColor(state), relation + label))
@@ -176,13 +178,13 @@ function navigationIdentity(
   const qualifier = !spec.grouped
     ? qualifiers.repositories.get(repositoryKey(target))
     : qualifiers.workspaces.get(target.id);
-  return sanitize(qualifier ? `${label}${GROUP_QUALIFIER_SEPARATOR}${qualifier}` : label);
+  return sanitizeTerminalText(qualifier ? `${label}${GROUP_QUALIFIER_SEPARATOR}${qualifier}` : label);
 }
 
 function repoLabel(target: RepositoryTarget, qualifiers: ReadonlyMap<string, string>): string {
   const label = target.repo ?? UNKNOWN_REPO;
-  const qualifier = qualifiers.get(target.repoKey ?? UNKNOWN_REPO_KEY);
-  return sanitize(qualifier ? `${label}${GROUP_QUALIFIER_SEPARATOR}${qualifier}` : label);
+  const qualifier = qualifiers.get(repositoryKey(target));
+  return sanitizeTerminalText(qualifier ? `${label}${GROUP_QUALIFIER_SEPARATOR}${qualifier}` : label);
 }
 
 // Duplicate repository names gain the shortest unique parent path suffix so
@@ -192,7 +194,7 @@ function repositoryQualifiers(targets: readonly RepositoryTarget[]): ReadonlyMap
   for (const target of targets) {
     const label = target.repo ?? UNKNOWN_REPO;
     const keys = keysByLabel.get(label) ?? new Set<string>();
-    keys.add(target.repoKey ?? UNKNOWN_REPO_KEY);
+    keys.add(repositoryKey(target));
     keysByLabel.set(label, keys);
   }
 
@@ -250,7 +252,7 @@ function orderAgents(targets: readonly AgentTarget[]): AgentTarget[] {
     if (byRepo !== 0) return byRepo;
     const byAgent = left.agentLabel.localeCompare(right.agentLabel);
     if (byAgent !== 0) return byAgent;
-    const byLabel = agentDisplayLabel(left).localeCompare(agentDisplayLabel(right));
+    const byLabel = sanitizeTerminalText(left.boardLabel).localeCompare(sanitizeTerminalText(right.boardLabel));
     return byLabel !== 0 ? byLabel : left.id.localeCompare(right.id);
   });
 }
@@ -274,7 +276,7 @@ function workspaceQualifiers(targets: readonly PickerTarget[]): ReadonlyMap<stri
   const groups = new Map<string, Extract<PickerTarget, { readonly kind: "workspace" }>[]>();
   for (const target of targets) {
     if (target.kind !== "workspace") continue;
-    const signature = [repositoryKey(target), navigationDisplayLabel(target), sanitize(target.detail ?? "")].join("\0");
+    const signature = [repositoryKey(target), navigationDisplayLabel(target), sanitizeTerminalText(target.detail ?? "")].join("\0");
     const group = groups.get(signature) ?? [];
     group.push(target);
     groups.set(signature, group);
@@ -294,12 +296,8 @@ function workspaceQualifiers(targets: readonly PickerTarget[]): ReadonlyMap<stri
   return result;
 }
 
-function agentDisplayLabel(target: AgentTarget): string {
-  return sanitize(target.boardLabel ?? target.label);
-}
-
 function navigationDisplayLabel(target: PickerTarget): string {
-  return sanitize(target.boardLabel ?? target.label);
+  return sanitizeTerminalText(target.boardLabel ?? target.label);
 }
 
 function repositoryKey(target: RepositoryTarget): string {
@@ -308,12 +306,5 @@ function repositoryKey(target: RepositoryTarget): string {
 
 function compareRepositories(left: RepositoryTarget, right: RepositoryTarget): number {
   const byLabel = (left.repo ?? UNKNOWN_REPO).localeCompare(right.repo ?? UNKNOWN_REPO);
-  return byLabel !== 0 ? byLabel : (left.repoKey ?? UNKNOWN_REPO_KEY).localeCompare(right.repoKey ?? UNKNOWN_REPO_KEY);
-}
-
-// Strip ANSI sequences, bidi controls, and control codes from metadata
-// rendered into rows so hidden escapes and tabs can never leak into the
-// visible fields.
-function sanitize(value: string): string {
-  return sanitizeTerminalText(value);
+  return byLabel !== 0 ? byLabel : repositoryKey(left).localeCompare(repositoryKey(right));
 }

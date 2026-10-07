@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { parseConfig } from "../src/config/config.ts";
 import type { PickerGroup, PickerItem } from "../src/picker-row.ts";
-import type { PickerState } from "../src/terminal-picker.ts";
+import type { PickerState } from "../src/terminal-picker-view.ts";
 import {
   FakeTerminal,
   FakeTimers,

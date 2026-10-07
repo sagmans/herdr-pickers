@@ -4,8 +4,8 @@ import {
   runTerminalPicker,
   type PickerOptions,
   type PickerTimers,
-  type Viewport,
 } from "../src/terminal-picker.ts";
+import type { Viewport } from "../src/terminal-picker-view.ts";
 
 export const VIEWPORT: Viewport = { columns: 24, rows: 6 };
 export const TALL_VIEWPORT: Viewport = { columns: 24, rows: 8 };

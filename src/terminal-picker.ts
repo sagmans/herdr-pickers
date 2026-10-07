@@ -16,11 +16,6 @@ import {
   type Viewport,
 } from "./terminal-picker-view.ts";
 
-export { parseInput } from "./terminal-picker-input.ts";
-export type { InputEvent, MouseEvent, ParsedInput } from "./terminal-picker-input.ts";
-export { mouseAction, renderFrame } from "./terminal-picker-view.ts";
-export type { PickerAction, PickerState, Viewport } from "./terminal-picker-view.ts";
-
 const ESCAPE_SEQUENCE_TIMEOUT_MILLISECONDS = 25;
 const LOADING_MESSAGE = "Loading…";
 const CURSOR_HIDE = "\x1b[?25l";
