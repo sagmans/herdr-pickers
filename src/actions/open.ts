@@ -63,8 +63,11 @@ export async function openPicker(
     try {
       await client.run(buildPaneOpenArgs({ pluginId, placement: config.placement, token }));
     } catch (error) {
-      // A spawn failure or an explicit Herdr refusal proves no child holds this
-      // token; transport loss and aborts stay reserved until the grace period ends.
+      // A non-zero Herdr exit may still have spawned a child, but releasing is
+      // safe: the release only removes an unclaimed reservation, so a child
+      // that already claimed keeps it, and a later child fails its
+      // token-guarded claim and exits before it shows a picker. Transport loss
+      // and aborts stay reserved until the grace period ends.
       if (error instanceof HerdrSpawnError || error instanceof HerdrCommandError) session.releaseUnsubmitted(token);
       throw error;
     }
