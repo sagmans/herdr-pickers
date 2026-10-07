@@ -3,7 +3,7 @@ import type { Herdr } from "./client/herdr.ts";
 import { readWorkspaces, workspaceRepoRoots, type WorkspaceRecord, type WorktreeRecord } from "./client/types.ts";
 import { loadConfig } from "./config/config.ts";
 import { listProjects } from "./discovery/projects.ts";
-import { listWorktreesForContext, listWorktreesForProjects } from "./discovery/worktrees.ts";
+import { listWorktreesForContext, listWorktreesForProjects, sourceRepositoryKey } from "./discovery/worktrees.ts";
 import {
   buildProjectTargets,
   buildWorkspaceTargets,
@@ -67,14 +67,12 @@ async function loadNavigationSources(
   // Every navigation catalog marks or filters rows against open workspaces.
   const workspaces = readWorkspaces(await runtime.herdr.json(["workspace", "list"]));
   const current = runtime.context ?? {};
-  const workspaceScopeKey = spec.repoScoped ? sourceWorkspaceRepoKey(workspaces, current) : undefined;
   // Repo workspace loading keeps the scoped call even with provenance so
   // filtering remains aligned with Herdr's open-worktree view.
   const scoped = spec.repoScoped
     ? await listWorktreesForContext(current, runtime.herdr, runtime.signal)
     : undefined;
-  const repositoryScopeKey = workspaceScopeKey
-    ?? (scoped?.sourceRepoRoot ? canonicalPathKey(scoped.sourceRepoRoot) : undefined);
+  const repositoryScopeKey = scoped ? sourceRepositoryKey(workspaces, current, scoped.sourceRepoRoot) : undefined;
   // Unscoped worktree catalogs are discovered per project, so they need the project list too.
   const catalogWorktrees = spec.targetKinds.includes("worktree") && !spec.repoScoped;
   const projects = spec.targetKinds.includes("project") || catalogWorktrees ? resolveProjects(runtime, workspaces) : [];
@@ -96,14 +94,4 @@ function resolveProjects(
   const configured = runtime.projectRoots ?? loadConfig(runtime.env).projects.roots;
   const widened = configured.length > 0 ? [...tracked, ...listProjects(configured)] : tracked;
   return [...new Set(widened)].sort((left, right) => left.localeCompare(right));
-}
-
-function sourceWorkspaceRepoKey(
-  workspaces: readonly WorkspaceRecord[],
-  current: CurrentContext,
-): string | undefined {
-  if (!current.workspaceId) return undefined;
-  const source = workspaces.find((workspace) => workspace.workspaceId === current.workspaceId);
-  const repoRoot = source?.worktree?.repoRoot;
-  return repoRoot ? canonicalPathKey(repoRoot) : source?.worktree?.repoKey;
 }

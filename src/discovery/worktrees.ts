@@ -1,8 +1,13 @@
 import { Herdr, HerdrCommandError, type CommandRunner } from "../client/herdr.ts";
-import { readWorktrees, type WorktreeListResult, type WorktreeRecord } from "../client/types.ts";
+import { readWorktrees, readWorktreeScope, type WorkspaceRecord, type WorktreeListResult, type WorktreeRecord } from "../client/types.ts";
+import { workspaceProvenanceRepoKey } from "../catalog.ts";
 import type { CurrentContext } from "../context.ts";
+import { canonicalPathKey } from "../util/paths.ts";
 
 const GIT_COMMAND = "git";
+const MISSING_WORKTREE_SOURCE = "Cannot open repository worktrees without a source workspace or cwd.";
+const MISSING_SCOPE_SOURCE = "Cannot scope repository agents without a source workspace or cwd.";
+const MISSING_SOURCE_REPO_ROOT = "Herdr worktree list response did not include source.repo_root.";
 
 export async function listWorktreesForProjects(
   projects: readonly string[],
@@ -32,11 +37,11 @@ export async function listWorktreesForContext(
   signal?: AbortSignal,
 ): Promise<WorktreeListResult> {
   signal?.throwIfAborted();
-  const lookup = context.workspaceId ? ["--workspace", context.workspaceId] : context.cwd ? ["--cwd", context.cwd] : [];
-  if (lookup.length === 0) throw new Error("Cannot open repository worktrees without a source workspace or cwd.");
-  const result = readWorktrees(await herdr.json(["worktree", "list", ...lookup, "--json"]));
+  const args = sourceWorktreeListArgs(context);
+  if (!args) throw new Error(MISSING_WORKTREE_SOURCE);
+  const result = readWorktrees(await herdr.json(args));
   signal?.throwIfAborted();
-  if (!result.sourceRepoRoot) throw new Error("Herdr worktree list response did not include source.repo_root.");
+  if (!result.sourceRepoRoot) throw new Error(MISSING_SOURCE_REPO_ROOT);
   return {
     ...result,
     worktrees: result.worktrees.map((worktree) => ({
@@ -44,6 +49,50 @@ export async function listWorktreesForContext(
       repoRoot: worktree.repoRoot ?? result.sourceRepoRoot,
     })),
   };
+}
+
+/**
+ * Repository key that repo-scoped modes filter by. Recorded workspace
+ * provenance wins; Herdr's worktree-list source root is the authority when
+ * older records omit it.
+ */
+export function sourceRepositoryKey(
+  workspaces: readonly WorkspaceRecord[],
+  context: CurrentContext,
+  listedRepoRoot?: string,
+): string | undefined {
+  const source = context.workspaceId
+    ? workspaces.find((workspace) => workspace.workspaceId === context.workspaceId)
+    : undefined;
+  const recorded = source ? workspaceProvenanceRepoKey(source) : undefined;
+  return recorded ?? (listedRepoRoot ? canonicalPathKey(listedRepoRoot) : undefined);
+}
+
+/**
+ * Resolves the scope without a catalog of its own, so the live agent refresh
+ * only asks Herdr when provenance is missing and only parses the source root.
+ */
+export async function resolveSourceRepositoryKey(
+  workspaces: readonly WorkspaceRecord[],
+  context: CurrentContext,
+  herdr: Herdr,
+): Promise<string | undefined> {
+  const recorded = sourceRepositoryKey(workspaces, context);
+  if (recorded) return recorded;
+  const args = sourceWorktreeListArgs(context);
+  if (!args) throw new Error(MISSING_SCOPE_SOURCE);
+  return sourceRepositoryKey(workspaces, context, readWorktreeScope(await herdr.json(args)));
+}
+
+// The source workspace is the precise lookup; cwd is the fallback when the
+// picker was opened without one.
+function sourceWorktreeListArgs(context: CurrentContext): string[] | undefined {
+  const lookup = context.workspaceId
+    ? ["--workspace", context.workspaceId]
+    : context.cwd
+      ? ["--cwd", context.cwd]
+      : undefined;
+  return lookup ? ["worktree", "list", ...lookup, "--json"] : undefined;
 }
 
 export async function listWorktreesForProject(

@@ -244,10 +244,19 @@ function workspaceRepoName(workspace: WorkspaceRecord): string | undefined {
   return workspace.worktree?.repoName ?? (workspace.worktree?.repoRoot ? basename(workspace.worktree.repoRoot) : undefined);
 }
 
-function workspaceRepoKey(workspace: WorkspaceRecord): string | undefined {
+/**
+ * Repository identity Herdr recorded for a workspace. Rows and repository
+ * scope must agree on it, otherwise scoped modes would filter out their own
+ * source repository.
+ */
+export function workspaceProvenanceRepoKey(workspace: WorkspaceRecord): string | undefined {
   if (workspace.worktree?.repoRoot) return canonicalPathKey(workspace.worktree.repoRoot);
-  if (workspace.worktree?.repoKey) return workspace.worktree.repoKey;
-  return workspace.cwd ? canonicalPathKey(workspace.cwd) : undefined;
+  return workspace.worktree?.repoKey;
+}
+
+// A bare cwd still groups rows, but it is never treated as recorded provenance.
+function workspaceRepoKey(workspace: WorkspaceRecord): string | undefined {
+  return workspaceProvenanceRepoKey(workspace) ?? (workspace.cwd ? canonicalPathKey(workspace.cwd) : undefined);
 }
 
 function shouldExcludeAgent(agent: AgentRecord, current: CurrentContext, includeFocused: boolean): boolean {

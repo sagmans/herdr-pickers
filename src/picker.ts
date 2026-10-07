@@ -1,6 +1,5 @@
-import { Herdr, type CommandRunner } from "./client/herdr.ts";
-import { readAgentList, readWorkspaces, readWorktreeScope, type WorkspaceRecord } from "./client/types.ts";
-import { buildAgentTargets, type AgentTarget } from "./catalog.ts";
+import { loadAgentTargets } from "./agents.ts";
+import type { CommandRunner, Herdr } from "./client/herdr.ts";
 import type { CurrentContext } from "./context.ts";
 import type { HerdrPickersConfig } from "./config/config.ts";
 import { dispatchAgent, dispatchNavigationTarget } from "./dispatch.ts";
@@ -9,16 +8,8 @@ import { loadNavigationTargets, type NavigationTarget } from "./navigation.ts";
 import type { PickerItem } from "./picker-row.ts";
 import { renderAgentRows, renderNavigationRows } from "./rows.ts";
 import { runTerminalPicker, type TerminalPickerOptions } from "./terminal-picker.ts";
-import { canonicalPathKey } from "./util/paths.ts";
 
 const AGENT_REFRESH_INTERVAL_MILLISECONDS = 1000;
-
-export class AgentTargetError extends Error {
-  constructor(readonly observedKeys: readonly string[]) {
-    super(`Herdr returned agents without a stable focus target. Expected one of: target, terminal_id, pane_id, unique name, or unique label. Observed keys: ${observedKeys.join(", ") || "none"}`);
-    this.name = "AgentTargetError";
-  }
-}
 
 export type PickerRunner = (options: TerminalPickerOptions) => Promise<PickerItem | undefined>;
 
@@ -37,30 +28,6 @@ export interface PickerRuntime {
 }
 
 export type PickerOutcome = "dispatched" | "cancelled" | "no-agents";
-
-export async function loadAgentTargets(
-  mode: AgentMode,
-  herdr: Herdr,
-  current: CurrentContext = {},
-): Promise<AgentTarget[]> {
-  // Both Herdr round-trips start before either is awaited so the 1s agent
-  // refresh pays one call latency instead of two.
-  const [workspaceEnvelope, agentEnvelope] = await Promise.all([
-    herdr.json(["workspace", "list"]),
-    herdr.json(["agent", "list"]),
-  ]);
-  const workspaces = readWorkspaces(workspaceEnvelope);
-  const agentList = readAgentList(agentEnvelope);
-  if (agentList.agents.length === 0 && agentList.skippedWithoutTarget > 0) {
-    throw new AgentTargetError(agentList.observedKeys);
-  }
-  const targets = buildAgentTargets(agentList.agents, workspaces, current, { includeFocused: true });
-  if (agentModeSpec(mode).repoScoped) {
-    const scopeKey = await repositoryScopeKey(workspaces, current, herdr);
-    return scopeKey ? targets.filter((target) => target.repoKey === scopeKey) : [];
-  }
-  return targets;
-}
 
 export async function runPicker(mode: PickerMode, runtime: PickerRuntime): Promise<PickerOutcome> {
   if (runtime.signal?.aborted) return "cancelled";
@@ -165,28 +132,4 @@ function navigationRuntime(runtime: PickerRuntime) {
     projectRoots: runtime.config?.projects.roots,
     signal: runtime.signal,
   };
-}
-
-// Repository scope prefers explicit workspace provenance; the worktree list is
-// the authoritative fallback when older Herdr records omit it.
-async function repositoryScopeKey(
-  workspaces: readonly WorkspaceRecord[],
-  current: CurrentContext,
-  herdr: Herdr,
-): Promise<string | undefined> {
-  const source = current.workspaceId
-    ? workspaces.find((workspace) => workspace.workspaceId === current.workspaceId)
-    : undefined;
-  const repoRoot = source?.worktree?.repoRoot;
-  if (repoRoot) return canonicalPathKey(repoRoot);
-  const repoKey = source?.worktree?.repoKey;
-  if (repoKey) return repoKey;
-  const lookup = current.workspaceId
-    ? ["--workspace", current.workspaceId]
-    : current.cwd
-      ? ["--cwd", current.cwd]
-      : [];
-  if (lookup.length === 0) throw new Error("Cannot scope repository agents without a source workspace or cwd.");
-  const sourceRoot = readWorktreeScope(await herdr.json(["worktree", "list", ...lookup, "--json"]));
-  return sourceRoot ? canonicalPathKey(sourceRoot) : undefined;
 }

@@ -4,7 +4,8 @@ import { buildPaneOpenArgs } from "../src/actions/open.ts";
 import { Herdr, type CommandRunner } from "../src/client/herdr.ts";
 import { parseConfig } from "../src/config/config.ts";
 import { parseMode } from "../src/modes.ts";
-import { AgentTargetError, loadAgentTargets, runAgentPicker, runPicker, type PickerRunner } from "../src/picker.ts";
+import { AgentTargetError, loadAgentTargets } from "../src/agents.ts";
+import { runAgentPicker, runPicker, type PickerRunner } from "../src/picker.ts";
 import type { TerminalPickerOptions } from "../src/terminal-picker.ts";
 
 type PickerCall = TerminalPickerOptions;
