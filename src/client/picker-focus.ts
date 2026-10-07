@@ -33,12 +33,137 @@ export class PickerFocusDeparture extends Error {
 
 type FocusEvent = Exclude<PickerFocusLifecycleMessage,
   { readonly kind: "subscription-started" } | { readonly kind: "snapshot" }>;
-type Stage = "connecting" | "subscription" | "snapshot" | "active" | "stopped" | "failed";
 
 interface FocusOwner {
   readonly paneId: string;
   readonly tabId: string;
   readonly workspaceId: string;
+}
+
+/** A caller waiting for focus to be reconfirmed before it dispatches. */
+interface PendingDispatch {
+  resolve(): void;
+  reject(error: Error): void;
+}
+
+/**
+ * Observer lifecycle. `owner` is known once the first snapshot confirms focus;
+ * `stale` marks a verifying snapshot that focus events may already have outdated.
+ */
+type FocusStage =
+  | { readonly kind: "connecting" }
+  | { readonly kind: "subscribing" }
+  | {
+    readonly kind: "verifying";
+    readonly owner: FocusOwner | undefined;
+    readonly stale: boolean;
+    readonly dispatch: PendingDispatch | undefined;
+  }
+  | { readonly kind: "watching"; readonly owner: FocusOwner }
+  | { readonly kind: "stopped" }
+  | { readonly kind: "failed" };
+
+/** Side effects the driver performs after a transition. */
+type FocusEffect =
+  | { readonly kind: "none" }
+  | { readonly kind: "terminate" }
+  | { readonly kind: "depart" }
+  | { readonly kind: "request-snapshot" }
+  | { readonly kind: "established"; readonly reverify: boolean }
+  | { readonly kind: "confirm-dispatch"; readonly dispatch: PendingDispatch };
+
+interface FocusStep {
+  readonly stage: FocusStage;
+  readonly effect: FocusEffect;
+}
+
+const NO_EFFECT: FocusEffect = { kind: "none" };
+const TERMINATE: FocusEffect = { kind: "terminate" };
+
+/** Pure protocol transition for one Herdr message; the driver owns sockets and timers. */
+function advanceFocus(stage: FocusStage, message: PickerFocusLifecycleMessage, paneId: string): FocusStep {
+  switch (message.kind) {
+    case "subscription-started":
+      if (stage.kind !== "subscribing") return { stage, effect: TERMINATE };
+      return { stage: verifying(undefined, undefined), effect: { kind: "request-snapshot" } };
+    case "snapshot": {
+      if (stage.kind !== "verifying" || message.paneId !== paneId) return { stage, effect: TERMINATE };
+      if (!message.globallyFocused) return { stage, effect: { kind: "depart" } };
+      const owner = { paneId: message.paneId, tabId: message.tabId, workspaceId: message.workspaceId };
+      // Focus moved while this snapshot was in flight; only a fresh one can confirm it.
+      if (stage.stale) return { stage: verifying(owner, stage.dispatch), effect: { kind: "established", reverify: true } };
+      if (stage.dispatch) return { stage: { kind: "stopped" }, effect: { kind: "confirm-dispatch", dispatch: stage.dispatch } };
+      return { stage: { kind: "watching", owner }, effect: { kind: "established", reverify: false } };
+    }
+    case "pane-focused":
+    case "tab-focused":
+    case "workspace-focused":
+      return advanceOnFocusEvent(stage, message);
+    default: {
+      const exhaustive: never = message;
+      return exhaustive;
+    }
+  }
+}
+
+function advanceOnFocusEvent(stage: FocusStage, event: FocusEvent): FocusStep {
+  switch (stage.kind) {
+    case "verifying":
+      return !stage.owner || focusDeparted(event, stage.owner)
+        ? { stage: { ...stage, stale: true }, effect: NO_EFFECT }
+        : { stage, effect: NO_EFFECT };
+    case "watching":
+      // Herdr replays old focus events, so only current focus can prove departure.
+      return focusDeparted(event, stage.owner)
+        ? { stage: verifying(stage.owner, undefined), effect: { kind: "request-snapshot" } }
+        : { stage, effect: NO_EFFECT };
+    case "connecting":
+    case "subscribing":
+      return { stage, effect: TERMINATE };
+    case "stopped":
+    case "failed":
+      return { stage, effect: NO_EFFECT };
+    default: {
+      const exhaustive: never = stage;
+      return exhaustive;
+    }
+  }
+}
+
+/** Dispatch confirmation: watching starts a fresh snapshot; an in-flight one is marked stale. */
+function advanceOnDispatch(stage: FocusStage, dispatch: PendingDispatch): FocusStep | undefined {
+  switch (stage.kind) {
+    case "watching":
+      return { stage: verifying(stage.owner, dispatch), effect: { kind: "request-snapshot" } };
+    case "verifying":
+      return stage.owner && !stage.dispatch ? { stage: { ...stage, stale: true, dispatch }, effect: NO_EFFECT } : undefined;
+    case "connecting":
+    case "subscribing":
+    case "stopped":
+    case "failed":
+      return undefined;
+    default: {
+      const exhaustive: never = stage;
+      return exhaustive;
+    }
+  }
+}
+
+function verifying(owner: FocusOwner | undefined, dispatch: PendingDispatch | undefined): FocusStage {
+  return { kind: "verifying", owner, stale: false, dispatch };
+}
+
+/** True once a snapshot has confirmed focus, i.e. setup has resolved. */
+function established(stage: FocusStage): boolean {
+  return (stage.kind === "verifying" && stage.owner !== undefined) || stage.kind === "watching";
+}
+
+function pendingDispatch(stage: FocusStage): PendingDispatch | undefined {
+  return stage.kind === "verifying" ? stage.dispatch : undefined;
+}
+
+function finished(stage: FocusStage): boolean {
+  return stage.kind === "stopped" || stage.kind === "failed";
 }
 
 export async function watchPickerFocus(
@@ -53,52 +178,49 @@ export async function watchPickerFocus(
   socket.unref();
 
   return await new Promise((resolve, reject) => {
-    let stage: Stage = "connecting";
+    let stage: FocusStage = { kind: "connecting" };
     const buffers = new Map<Socket, Buffer>();
+    // Bounds each setup step or snapshot; restarted for every snapshot request.
+    let stepTimer = setTimeout(() => terminate(), SETUP_TIMEOUT_MS);
+    // Bounds the whole dispatch confirmation so replayed events cannot extend it forever.
     let dispatchTimer: ReturnType<typeof setTimeout> | undefined;
-    let owner: FocusOwner | undefined;
-    let dispatch: { resolve(): void; reject(error: Error): void } | undefined;
-    let ready = false;
-    let dirty = false;
-    let setupTimer = setTimeout(() => terminate(), SETUP_TIMEOUT_MS);
 
     const watcher = {
       signal: controller.signal,
       prepareDispatch(): Promise<void> {
-        if (!ready || stage === "stopped" || stage === "failed" || dispatch) return Promise.reject(new Error(WATCH_FAILURE_MESSAGE));
-        return new Promise((resolve, reject) => {
-          dispatch = { resolve, reject };
+        return new Promise((resolveDispatch, rejectDispatch) => {
+          const step = established(stage) ? advanceOnDispatch(stage, { resolve: resolveDispatch, reject: rejectDispatch }) : undefined;
+          if (!step) return rejectDispatch(new Error(WATCH_FAILURE_MESSAGE));
           dispatchTimer = setTimeout(terminate, SETUP_TIMEOUT_MS);
-          if (stage === "snapshot") dirty = true;
-          else requestSnapshot();
+          apply(step);
         });
       },
       stop() {
-        if (!ready || stage === "stopped" || stage === "failed") return;
-        stage = "stopped";
+        if (!established(stage)) return;
+        const dispatch = pendingDispatch(stage);
+        stage = { kind: "stopped" };
         dispatch?.reject(new Error(WATCH_FAILURE_MESSAGE));
-        dispatch = undefined;
         cleanup();
       },
     };
 
     function terminate(): void {
-      finish(new Error(ready ? WATCH_FAILURE_MESSAGE : SETUP_FAILURE_MESSAGE));
+      finish(new Error(established(stage) ? WATCH_FAILURE_MESSAGE : SETUP_FAILURE_MESSAGE));
     }
 
     function finish(error: Error): void {
-      if (stage === "stopped" || stage === "failed") return;
-      const wasActive = ready;
-      stage = "failed";
+      if (finished(stage)) return;
+      const wasEstablished = established(stage);
+      const dispatch = pendingDispatch(stage);
+      stage = { kind: "failed" };
       controller.abort(error);
       dispatch?.reject(error);
-      dispatch = undefined;
       cleanup();
-      if (!wasActive) reject(error);
+      if (!wasEstablished) reject(error);
     }
 
     function cleanup(): void {
-      dispose(socket, setupTimer);
+      dispose(socket, stepTimer);
       clearTimeout(dispatchTimer);
       signal?.removeEventListener("abort", terminate);
       snapshots.abort();
@@ -110,49 +232,47 @@ export async function watchPickerFocus(
     }
 
     function requestSnapshot(): void {
-      stage = "snapshot";
-      dirty = false;
-      clearTimeout(setupTimer);
-      setupTimer = setTimeout(terminate, SETUP_TIMEOUT_MS);
+      clearTimeout(stepTimer);
+      stepTimer = setTimeout(terminate, SETUP_TIMEOUT_MS);
       void readPickerSnapshot(socketPath, paneId, snapshots.signal)
-        .then(message => { if (stage === "snapshot") handleMessage(message); })
+        .then(message => { if (stage.kind === "verifying") handleMessage(message); })
         .catch(terminate);
     }
 
-    function handleMessage(message: PickerFocusLifecycleMessage): void {
-      if (message.kind === "subscription-started") {
-        if (stage !== "subscription") return terminate();
-        requestSnapshot();
-        return;
-      }
-
-      if (message.kind === "snapshot") {
-        if (stage !== "snapshot" || message.paneId !== paneId) return terminate();
-        if (!message.globallyFocused) return finish(new PickerFocusDeparture());
-        const resolvedOwner = { paneId: message.paneId, tabId: message.tabId, workspaceId: message.workspaceId };
-        owner = resolvedOwner;
-        stage = "active";
-        clearTimeout(setupTimer);
-        ready = true;
-        resolve(watcher);
-        if (dirty) requestSnapshot();
-        else if (dispatch) {
-          const accepted = dispatch;
-          dispatch = undefined;
-          watcher.stop();
-          accepted.resolve();
+    function apply(step: FocusStep): void {
+      const { effect } = step;
+      switch (effect.kind) {
+        case "none":
+          stage = step.stage;
+          return;
+        case "terminate":
+          return terminate();
+        case "depart":
+          return finish(new PickerFocusDeparture());
+        case "request-snapshot":
+          stage = step.stage;
+          return requestSnapshot();
+        case "established":
+          stage = step.stage;
+          clearTimeout(stepTimer);
+          resolve(watcher);
+          if (effect.reverify) requestSnapshot();
+          return;
+        case "confirm-dispatch":
+          // Stop before resolving so no late event can abort an accepted dispatch.
+          stage = step.stage;
+          cleanup();
+          effect.dispatch.resolve();
+          return;
+        default: {
+          const exhaustive: never = effect;
+          return exhaustive;
         }
-        return;
       }
+    }
 
-      if (stage === "snapshot") {
-        if (!owner || focusDeparted(message, owner)) dirty = true;
-        return;
-      }
-
-      if (stage !== "active" || !owner) return terminate();
-      // Herdr replays old focus events, so only current focus can prove departure.
-      if (focusDeparted(message, owner)) requestSnapshot();
+    function handleMessage(message: PickerFocusLifecycleMessage): void {
+      apply(advanceFocus(stage, message, paneId));
     }
 
     function handleData(connection: Socket, chunk: Buffer): void {
@@ -168,7 +288,7 @@ export async function watchPickerFocus(
         } catch {
           terminate();
         }
-        if (stage === "stopped" || stage === "failed") return;
+        if (finished(stage)) return;
         newline = buffer.indexOf(NEWLINE_BYTE);
       }
       if (buffer.length > budget) return terminate();
@@ -177,8 +297,8 @@ export async function watchPickerFocus(
 
     signal?.addEventListener("abort", terminate, { once: true });
     socket.once("connect", () => {
-      if (stage !== "connecting") return;
-      stage = "subscription";
+      if (stage.kind !== "connecting") return;
+      stage = { kind: "subscribing" };
       writeRequest(socket, {
         id: REQUEST_IDS.subscribe,
         method: REQUEST_METHODS.subscribe,
@@ -207,8 +327,8 @@ function focusDeparted(event: FocusEvent, owner: FocusOwner): boolean {
   }
 }
 
-function dispose(socket: Socket, setupTimer: ReturnType<typeof setTimeout>): void {
-  clearTimeout(setupTimer);
+function dispose(socket: Socket, stepTimer: ReturnType<typeof setTimeout>): void {
+  clearTimeout(stepTimer);
   socket.removeAllListeners();
   socket.destroy();
 }
