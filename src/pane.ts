@@ -1,14 +1,13 @@
 import { Herdr } from "./client/herdr.ts";
-import { closePickerSurface } from "./client/popup.ts";
+import { closePickerSurface, withPopupClose } from "./client/popup.ts";
 import { createPickerFocusGuard, type PickerFocusGuard } from "./client/picker-focus.ts";
 import { PICKER_TOKEN_ENV, PickerSession } from "./picker-session.ts";
 import { loadConfig } from "./config/config.ts";
 import { runPickerLoop } from "./picker-loop.ts";
 import { color, dim } from "./style.ts";
-import { boundedTerminalBlock } from "./util/terminal-text.ts";
+import { formatErrorBlock } from "./util/errors.ts";
 
 const EXIT_SIGNALS = ["SIGHUP", "SIGINT", "SIGTERM"] as const;
-const COMBINED_FAILURE_MESSAGE = "Picker failed and its popup could not be closed.";
 
 async function main(): Promise<void> {
   const env = process.env;
@@ -59,46 +58,13 @@ async function main(): Promise<void> {
   }
 }
 
-export async function withPopupClose<T>(work: (dismissSurface: () => Promise<void>) => Promise<T>, close: () => Promise<void>): Promise<T> {
-  let closing: Promise<void> | undefined;
-  const closeOnce = () => closing ??= Promise.resolve().then(close);
-  const dismissSurface = async (): Promise<void> => {
-    // Report close errors outside terminal cleanup so the original picker error survives.
-    try { await closeOnce(); } catch {}
-  };
-  let result: T;
-  try {
-    result = await work(dismissSurface);
-  } catch (error) {
-    try {
-      await closeOnce();
-    } catch (closeError) {
-      throw new AggregateError([error, closeError], COMBINED_FAILURE_MESSAGE);
-    }
-    throw error;
-  }
-  await closeOnce();
-  return result;
-}
-
-export function formatPaneError(error: unknown): string {
-  const rendered = error instanceof AggregateError
-    ? [error.message, ...error.errors.map(formatPaneError)].join("\n")
-    : error instanceof Error
-      ? error.message
-      : String(error);
-  // Popup output is user-facing: every line is sanitized and the whole
-  // aggregate stays bounded so failures cannot flood the terminal.
-  return boundedTerminalBlock(rendered);
-}
-
 if (import.meta.main) {
   try {
     await main();
     // Overlay close can leave stdin handles; this process is the picker pane.
     process.exit(0);
   } catch (error) {
-    console.error(color("red", formatPaneError(error)));
+    console.error(color("red", formatErrorBlock(error)));
     process.exit(1);
   }
 }

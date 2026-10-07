@@ -10,7 +10,7 @@ import {
 } from "../last-workspace/memory.ts";
 import { StateStore } from "../last-workspace/store.ts";
 import { isRecord } from "../util/objects.ts";
-import { boundedTerminalText } from "../util/terminal-text.ts";
+import { formatEventFailure } from "../util/errors.ts";
 
 type Subcommand = "toggle" | "focused" | "closed";
 
@@ -133,12 +133,6 @@ export function parseSubcommand(value: string | undefined): Subcommand {
     default:
       throw new Error(`Unknown last-workspace subcommand '${value ?? ""}'. Usage: last-workspace <toggle|focused|closed>`);
   }
-}
-
-// One bounded, sanitized, stack-free line for event-hook failures.
-export function formatEventFailure(reason: string, error: unknown): string {
-  const message = error instanceof Error ? error.message.split("\n")[0] : String(error);
-  return boundedTerminalText(`${reason}: ${message}`);
 }
 
 if (import.meta.main) {

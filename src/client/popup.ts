@@ -6,6 +6,7 @@ const OVERLAY_CLOSE_REQUEST_ID = "herdr-pickers:overlay-close";
 const OVERLAY_CLOSE_METHOD = "plugin.pane.close";
 const OVERLAY_CLOSE_TIMEOUT_MS = 100;
 const NEWLINE_BYTE = 0x0a;
+const COMBINED_FAILURE_MESSAGE = "Picker failed and its popup could not be closed.";
 
 export type SocketWriter = (path: string, payload: string) => Promise<void>;
 
@@ -37,6 +38,32 @@ export async function closeOverlayPane(
     params: { pane_id: paneId },
   })}\n`;
   await write(path, payload);
+}
+
+/**
+ * Guarantees exactly one surface close around picker work. Work may dismiss
+ * early (before terminal restore); a close failure never masks a picker error.
+ */
+export async function withPopupClose<T>(work: (dismissSurface: () => Promise<void>) => Promise<T>, close: () => Promise<void>): Promise<T> {
+  let closing: Promise<void> | undefined;
+  const closeOnce = () => closing ??= Promise.resolve().then(close);
+  const dismissSurface = async (): Promise<void> => {
+    // Report close errors outside terminal cleanup so the original picker error survives.
+    try { await closeOnce(); } catch {}
+  };
+  let result: T;
+  try {
+    result = await work(dismissSurface);
+  } catch (error) {
+    try {
+      await closeOnce();
+    } catch (closeError) {
+      throw new AggregateError([error, closeError], COMBINED_FAILURE_MESSAGE);
+    }
+    throw error;
+  }
+  await closeOnce();
+  return result;
 }
 
 function delay(ms: number): Promise<void> {

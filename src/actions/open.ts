@@ -6,7 +6,7 @@ import {
 import { currentContextFromEnv } from "../context.ts";
 import { loadConfig, type PickerPlacement } from "../config/config.ts";
 import { parseMode, type PickerMode } from "../modes.ts";
-import { formatPaneError } from "../pane.ts";
+import { formatErrorBlock } from "../util/errors.ts";
 
 const MODE_ENV = "HERDR_PICKERS_MODE";
 const DELIVERY_FAILURE = "Picker request could not be delivered before the deadline. Reopen after the current picker closes.";
@@ -111,7 +111,7 @@ function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
 
 if (import.meta.main) {
   Promise.resolve().then(() => openPicker(parseMode(process.argv[2]))).catch((error: unknown) => {
-    console.error(formatPaneError(error));
+    console.error(formatErrorBlock(error));
     process.exit(1);
   });
 }
