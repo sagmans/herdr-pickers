@@ -4,6 +4,9 @@ import type { AgentRecord, WorkspaceRecord, WorktreeRecord } from "./client/type
 import { isBareRepository } from "./discovery/projects.ts";
 import { canonicalPathKey, isPathWithin } from "./util/paths.ts";
 
+// Below any real path length, so a list with no enclosing path marks nothing current.
+const NO_PATH_DEPTH = -1;
+
 export interface AgentTarget {
   readonly kind: "agent";
   readonly id: string;
@@ -156,15 +159,21 @@ export function buildProjectTargets(
   current: CurrentContext = {},
 ): ProjectTarget[] {
   const workspaceByPath = indexWorkspacesByPath(workspaces);
-  return uniqueSorted(projects).flatMap((path): ProjectTarget[] => {
-    const workspace = workspaceByPath.get(canonicalPathKey(path));
+  const paths = uniqueSorted(projects);
+  const matched = paths.map((path) => workspaceByPath.get(canonicalPathKey(path)));
+  const currentFlags = mostSpecificCurrent(paths.map((path, index) => ({
+    identity: isCurrentWorkspace(matched[index], current),
+    path,
+  })), current.cwd);
+  return paths.flatMap((path, index): ProjectTarget[] => {
+    const workspace = matched[index];
     const label = basename(path);
     return [{
       kind: "project",
       id: `project:${path}`,
       path,
       existingWorkspaceId: workspace?.workspaceId,
-      current: isCurrentWorkspace(workspace, current) || isCurrentPath(path, current),
+      current: currentFlags[index] === true,
       repo: label,
       repoKey: canonicalPathKey(path),
       boardLabel: label,
@@ -179,9 +188,16 @@ export function buildWorktreeTargets(
   current: CurrentContext = {},
 ): WorktreeTarget[] {
   const workspaceByPath = indexWorkspacesByPath(workspaces);
-  return uniqueBy(worktrees.filter((worktree) => !worktree.isBare && !worktree.isPrunable), (worktree) => worktree.path)
-    .flatMap((worktree): WorktreeTarget[] => {
-      const workspace = workspaceByPath.get(canonicalPathKey(worktree.path));
+  const visible = uniqueBy(worktrees.filter((worktree) => !worktree.isBare && !worktree.isPrunable), (worktree) => worktree.path);
+  const matched = visible.map((worktree) => workspaceByPath.get(canonicalPathKey(worktree.path)));
+  const currentFlags = mostSpecificCurrent(visible.map((worktree, index) => ({
+    identity: (!!current.workspaceId && worktree.openWorkspaceId === current.workspaceId)
+      || isCurrentWorkspace(matched[index], current),
+    path: worktree.path,
+  })), current.cwd);
+  return visible
+    .flatMap((worktree, index): WorktreeTarget[] => {
+      const workspace = matched[index];
       return [{
         kind: "worktree",
         id: `worktree:${worktree.path}`,
@@ -189,8 +205,7 @@ export function buildWorktreeTargets(
         repoRoot: worktree.repoRoot,
         branch: worktree.branch,
         existingWorkspaceId: worktree.openWorkspaceId ?? workspace?.workspaceId,
-        current: (!!current.workspaceId && worktree.openWorkspaceId === current.workspaceId)
-          || isCurrentPath(worktree.path, current, workspace),
+        current: currentFlags[index] === true,
         repo: worktree.repoRoot ? basename(worktree.repoRoot) : undefined,
         repoKey: canonicalPathKey(worktree.repoRoot ?? worktree.path),
         boardLabel: worktreeBoardLabel(worktree),
@@ -334,9 +349,22 @@ function isCurrentWorkspace(workspace: WorkspaceRecord | undefined, current: Cur
   return workspace?.focused === true;
 }
 
-function isCurrentPath(path: string, current: CurrentContext, workspace: WorkspaceRecord | undefined = undefined): boolean {
-  return isCurrentWorkspace(workspace, current)
-    || (!!current.cwd && isPathWithin(path, current.cwd));
+interface CurrentCandidate {
+  readonly identity: boolean;
+  readonly path: string;
+}
+
+// Ancestry alone would also mark every checkout that encloses a nested one
+// (a repo root around its .worktrees/* children), so the source workspace wins
+// outright and cwd ancestry only picks the deepest enclosing path. A repo row
+// still stays current from any subdirectory when nothing deeper matches.
+function mostSpecificCurrent(candidates: readonly CurrentCandidate[], cwd: string | undefined): boolean[] {
+  if (candidates.some((candidate) => candidate.identity)) return candidates.map((candidate) => candidate.identity);
+  if (!cwd) return candidates.map(() => false);
+  const enclosing = candidates.map((candidate) => isPathWithin(candidate.path, cwd) ? canonicalPathKey(candidate.path) : undefined);
+  // Every enclosing key is an ancestor of the same cwd, so the longest is the deepest.
+  const deepest = Math.max(NO_PATH_DEPTH, ...enclosing.map((key) => key?.length ?? NO_PATH_DEPTH));
+  return enclosing.map((key) => key !== undefined && key.length === deepest);
 }
 
 function checkoutKind(linked: boolean | undefined): string | undefined {

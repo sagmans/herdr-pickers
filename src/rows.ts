@@ -21,6 +21,14 @@ const KIND_PRIORITY: Readonly<Record<TargetKind, number>> = {
   workspace: 1,
   worktree: 2,
 };
+// All mode can mark a project, its open workspace, and its checkout current at
+// once; the cursor starts on the narrowest one so Enter returns to the source
+// workspace instead of the repository's main checkout.
+const PRESELECT_PRIORITY: Readonly<Record<TargetKind, number>> = {
+  workspace: 0,
+  worktree: 1,
+  project: 2,
+};
 
 interface RepositoryTarget {
   readonly repo?: string | undefined;
@@ -92,7 +100,15 @@ export function renderNavigationRows(
       selectedDisplay: renderNavigationTarget(mode, target, identity, detail, true, marker),
     };
   });
-  return { items, focusedId: ordered.find((target) => target.current)?.id };
+  return { items, focusedId: preselectedTarget(ordered)?.id };
+}
+
+function preselectedTarget(ordered: readonly PickerTarget[]): PickerTarget | undefined {
+  // Ties keep display order so a single-kind list still preselects its first current row.
+  return ordered
+    .filter((target) => target.current)
+    .reduce<PickerTarget | undefined>((best, target) =>
+      best === undefined || PRESELECT_PRIORITY[target.kind] < PRESELECT_PRIORITY[best.kind] ? target : best, undefined);
 }
 
 function renderGroup(label: string, unknown: boolean): string {
