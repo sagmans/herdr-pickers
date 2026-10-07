@@ -1,6 +1,27 @@
+# Dependabot keeps pinned workflow actions and dev tooling current. Updates are
+# grouped into one weekly PR per ecosystem to keep review effort low, and the
+# cooldown only proposes releases that have been public for a week, which
+# matches bunfig.toml's minimumReleaseAge supply-chain guard.
 version: 2
 updates:
-  - package-ecosystem: "github-actions"
-    directory: "/"
+  - package-ecosystem: github-actions
+    directory: /
     schedule:
-      interval: "weekly"
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  # Only devDependencies exist; the plugin ships no runtime npm dependency.
+  - package-ecosystem: bun
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      dev-dependencies:
+        dependency-type: development
+        patterns: ["*"]
