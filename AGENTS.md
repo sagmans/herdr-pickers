@@ -15,7 +15,7 @@ Use [README.md](README.md) for user-facing behavior and [SECURITY.md](SECURITY.m
 - `src/catalog.ts`, `src/rows.ts`, and `src/terminal-picker.ts`: target normalization, visible/searchable rows, and terminal interaction.
 - `src/dispatch.ts`: selection dispatch for navigation and agent targets.
 - `src/last-workspace/`: locked, atomic previous-workspace state.
-- `tests/`: Bun tests mirroring source behavior; `scripts/smoke.ts` is the isolated real-Herdr PTY test.
+- `tests/`: Bun tests mirroring source modules, plus cross-module scenario suites (`picker-*`, `subprocess-cancellation`); `scripts/smoke.ts` is the isolated real-Herdr PTY test, with shared smoke values in `scripts/smoke-support.ts`.
 
 ## Commands
 
