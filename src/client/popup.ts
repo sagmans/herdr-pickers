@@ -1,6 +1,6 @@
 // Picker surface lifecycle: decides popup versus overlay from the Herdr env and
-// closes the surface exactly once. Shared by the pane entrypoint, the session
-// claim, and focus observation so they agree on placement.
+// closes an inferred surface. Shared by the pane entrypoint, the session claim,
+// and focus observation so they agree on placement and close exactly once.
 import { createConnection } from "node:net";
 
 const SOCKET_ENV = "HERDR_SOCKET_PATH";
@@ -9,7 +9,6 @@ const OVERLAY_CLOSE_REQUEST_ID = "herdr-pickers:overlay-close";
 const OVERLAY_CLOSE_METHOD = "plugin.pane.close";
 const OVERLAY_CLOSE_TIMEOUT_MS = 100;
 const NEWLINE_BYTE = 0x0a;
-const COMBINED_FAILURE_MESSAGE = "Picker failed and its popup could not be closed.";
 
 /**
  * Where a picker child draws. Herdr gives a plugin pane child HERDR_PANE_ID only
@@ -37,60 +36,32 @@ export type SocketWriter = (path: string, payload: string) => Promise<void>;
  * popups are left to Herdr, which removes them when the child exits.
  */
 export async function closePickerSurface(
-  env: Record<string, string | undefined> = process.env,
+  surface: PickerSurface,
+  socketPath: string | undefined,
   write: SocketWriter = writeSocket,
 ): Promise<void> {
-  const surface = pickerSurfaceFromEnv(env);
   if (surface.placement === "overlay") {
     await Promise.race([
-      closeOverlayPane(surface.paneId, env, write),
+      closeOverlayPane(surface.paneId, socketPath, write),
       delay(OVERLAY_CLOSE_TIMEOUT_MS),
     ]);
-    return;
   }
-  // Native exit removes this popup; an unqualified close could dismiss its successor.
+  // Native exit removes a popup; an unqualified close could dismiss its successor.
 }
 
 /** Asks Herdr to close one overlay pane by id; throws when no socket is available. */
 export async function closeOverlayPane(
   paneId: string,
-  env: Record<string, string | undefined> = process.env,
+  socketPath: string | undefined,
   write: SocketWriter = writeSocket,
 ): Promise<void> {
-  const path = env[SOCKET_ENV];
-  if (!path) throw new Error(`${SOCKET_ENV} is required to close the picker overlay.`);
+  if (!socketPath) throw new Error(`${SOCKET_ENV} is required to close the picker overlay.`);
   const payload = `${JSON.stringify({
     id: OVERLAY_CLOSE_REQUEST_ID,
     method: OVERLAY_CLOSE_METHOD,
     params: { pane_id: paneId },
   })}\n`;
-  await write(path, payload);
-}
-
-/**
- * Guarantees exactly one surface close around picker work. Work may dismiss
- * early (before terminal restore); a close failure never masks a picker error.
- */
-export async function withPopupClose<T>(work: (dismissSurface: () => Promise<void>) => Promise<T>, close: () => Promise<void>): Promise<T> {
-  let closing: Promise<void> | undefined;
-  const closeOnce = () => closing ??= Promise.resolve().then(close);
-  const dismissSurface = async (): Promise<void> => {
-    // Report close errors outside terminal cleanup so the original picker error survives.
-    try { await closeOnce(); } catch {}
-  };
-  let result: T;
-  try {
-    result = await work(dismissSurface);
-  } catch (error) {
-    try {
-      await closeOnce();
-    } catch (closeError) {
-      throw new AggregateError([error, closeError], COMBINED_FAILURE_MESSAGE);
-    }
-    throw error;
-  }
-  await closeOnce();
-  return result;
+  await write(socketPath, payload);
 }
 
 function delay(ms: number): Promise<void> {

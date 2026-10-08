@@ -1,5 +1,7 @@
-import { withPickerTerminal, type TerminalAdapter } from "../src/picker-terminal.ts";
+import { POPUP_SURFACE } from "../src/client/popup.ts";
 import type { PickerItem } from "../src/picker-row.ts";
+import { withPickerSurface } from "../src/picker-surface.ts";
+import type { TerminalAdapter } from "../src/picker-terminal.ts";
 import {
   runTerminalPicker,
   type PickerOptions,
@@ -100,12 +102,12 @@ export class FakeTimers implements PickerTimers {
 }
 
 /**
- * Runs one picker on a raw adapter through the production terminal owner, so
+ * Runs one picker on a raw adapter through the production surface owner, so
  * tests observe the same start, restore, and dismissal ordering as the pane.
  */
 export function runAdapterPicker(
   options: PickerOptions & { readonly terminal: TerminalAdapter; readonly dismiss?: () => Promise<void> },
 ): Promise<PickerItem | undefined> {
   const { terminal, dismiss, ...picker } = options;
-  return withPickerTerminal(terminal, owner => runTerminalPicker({ ...picker, terminal: owner.lease(picker.signal) }), dismiss);
+  return withPickerSurface(POPUP_SURFACE, undefined, terminal, owner => runTerminalPicker({ ...picker, terminal: owner.lease(picker.signal) }), dismiss);
 }

@@ -2,11 +2,12 @@
 // reserved session token, runs the picker loop, and owns process-level cleanup:
 // signal handlers, surface close, and session release on every exit path.
 import { Herdr } from "./client/herdr.ts";
-import { closePickerSurface, pickerSurfaceFromEnv, withPopupClose } from "./client/popup.ts";
+import { pickerSurfaceFromEnv } from "./client/popup.ts";
 import { createPickerFocusGuard, type PickerFocusGuard } from "./client/picker-focus.ts";
 import { PICKER_TOKEN_ENV, PickerSession } from "./picker-session.ts";
 import { loadConfig } from "./config/config.ts";
 import { runPickerLoop } from "./picker-loop.ts";
+import { withPickerSurface } from "./picker-surface.ts";
 import { color, dim } from "./style.ts";
 import { formatErrorBlock } from "./util/errors.ts";
 
@@ -27,13 +28,13 @@ async function main(): Promise<void> {
     // A rejected child has no authority to close any existing surface.
     if (!token || !session.claim(token, surface)) throw new Error("Picker reservation is missing or stale.");
     for (const { signal, handler } of handlers) process.on(signal, handler);
-    await withPopupClose(async dismissSurface => {
-      const config = loadConfig(env);
+    const config = loadConfig(env);
+    await withPickerSurface(surface, env.HERDR_SOCKET_PATH, undefined, async terminal => {
       // Only the newest mode's guard can record a failure: older guards ignore
       // losses once their mode is aborted, and a failure ends the loop.
       let focusGuard: PickerFocusGuard | undefined;
-      const outcome = await runPickerLoop(session, token, {
-        signal: lifecycle.signal, dismissSurface,
+      const outcome = await runPickerLoop(session, token, terminal, {
+        signal: lifecycle.signal,
         createRuntime: signal => {
           const guard = createPickerFocusGuard(
             { socketPath: env.HERDR_SOCKET_PATH, surface },
@@ -53,7 +54,7 @@ async function main(): Promise<void> {
       if (outcome === "no-agents") {
         console.log(dim(session.latestRequest()?.mode === "repo-agents" ? "No repository agents found." : "No agents found."));
       }
-    }, () => closePickerSurface(env));
+    });
   } finally {
     lifecycle.abort();
     for (const { signal, handler } of handlers) process.off(signal, handler);

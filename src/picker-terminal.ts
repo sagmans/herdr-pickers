@@ -135,23 +135,6 @@ export class PickerTerminal {
   }
 }
 
-/**
- * Runs work on one terminal lifetime. Dismissal precedes restoration because
- * restoring first would expose the blank primary screen inside the popup.
- */
-export async function withPickerTerminal<T>(
-  adapter: TerminalAdapter | undefined,
-  work: (terminal: PickerTerminal) => Promise<T>,
-  dismiss?: () => Promise<void>,
-): Promise<T> {
-  const terminal = new PickerTerminal(adapter);
-  try {
-    return await work(terminal);
-  } finally {
-    try { await dismiss?.(); } finally { terminal.close(); }
-  }
-}
-
 /** Production adapter over process stdio; raw mode throws when stdin is not a TTY. */
 export function systemTerminal(): TerminalAdapter {
   return {

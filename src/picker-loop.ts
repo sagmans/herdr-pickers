@@ -4,7 +4,7 @@
 import { runPicker, type PickerOutcome, type PickerRuntime } from "./picker.ts";
 import type { PickerItem } from "./picker-row.ts";
 import { PICKER_REQUEST_POLL_MS, type PickerSession } from "./picker-session.ts";
-import { withPickerTerminal, type PickerTerminal, type TerminalAdapter } from "./picker-terminal.ts";
+import type { PickerTerminal } from "./picker-terminal.ts";
 import { runTerminalPicker, type TerminalPickerOptions } from "./terminal-picker.ts";
 
 const REPLACED = "Picker request superseded";
@@ -18,9 +18,6 @@ export interface LoopRuntime extends Omit<PickerRuntime, "pickerRunner" | "signa
 }
 interface LoopOptions {
   readonly signal?: AbortSignal;
-  readonly terminal?: TerminalAdapter;
-  /** Removes the popup or overlay; runs before terminal restore so no blank screen flashes. */
-  readonly dismissSurface?: () => Promise<void>;
   readonly createRuntime: (signal: AbortSignal) => LoopRuntime;
 }
 
@@ -28,8 +25,13 @@ interface LoopOptions {
  * Serves the newest request owned by `owner` until a mode finishes or the signal aborts.
  * Throws when request ownership cannot be verified; superseded runs restart silently.
  */
-export async function runPickerLoop(session: RequestSession, owner: string, options: LoopOptions): Promise<PickerOutcome> {
-  return withPickerTerminal(options.terminal, terminal => loop(session, owner, options, terminal), options.dismissSurface);
+export async function runPickerLoop(
+  session: RequestSession,
+  owner: string,
+  terminal: PickerTerminal,
+  options: LoopOptions,
+): Promise<PickerOutcome> {
+  return loop(session, owner, options, terminal);
 }
 
 async function loop(session: RequestSession, owner: string, options: LoopOptions, terminal: PickerTerminal): Promise<PickerOutcome> {
