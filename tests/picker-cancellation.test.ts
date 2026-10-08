@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 
 import { Herdr } from "../src/client/herdr.ts";
+import { DEFAULT_PICKER_KEYMAP, type HerdrPickersConfig } from "../src/config/config.ts";
 import { type CommandRunner } from "../src/util/subprocess.ts";
 import type { PickerMode } from "../src/modes.ts";
 import { runPicker } from "../src/picker.ts";
@@ -20,6 +21,8 @@ const MODES: PickerMode[] = ["workspaces", "agents"];
 const RELOAD_KEY = "\x12";
 const REFRESH_INTERVAL_MS = 1000;
 const LOAD_PHASES = [true, false] as const;
+const CONFIG: HerdrPickersConfig = { placement: "popup", keymap: DEFAULT_PICKER_KEYMAP, projects: { roots: [] } };
+const SIGNAL = new AbortController().signal;
 
 test("pre-aborted terminal never enters raw mode", async () => {
   const controller = new AbortController();
@@ -103,7 +106,7 @@ for (const mode of MODES) {
       return { stdout: argv.includes("workspace") ? WORKSPACES : AGENTS, stderr: "", exitCode: 0 };
     };
     const outcome = await runPicker(mode, {
-      herdr: new Herdr({ runner }), env: {}, signal: controller.signal,
+      herdr: new Herdr({ runner }), signal: controller.signal, context: {}, config: CONFIG,
       pickerRunner: async options => {
         const rows = options.loadOnStart ? await options.reload!() : options;
         controller.abort();
@@ -124,7 +127,7 @@ for (const mode of MODES) {
       return { stdout: argv.includes("workspace") ? WORKSPACES : AGENTS, stderr: "", exitCode: 0 };
     };
     const outcome = await runPicker(mode, {
-      herdr: new Herdr({ runner }), env: {}, signal: controller.signal,
+      herdr: new Herdr({ runner }), signal: controller.signal, context: {}, config: CONFIG,
       beforeDispatch: async () => { await Promise.resolve(); controller.abort(); },
       pickerRunner: async options => {
         const selection = (options.loadOnStart ? await options.reload!() : options).items[0];
@@ -143,7 +146,8 @@ for (const mode of MODES) {
       return { stdout: argv.includes("workspace") ? WORKSPACES : AGENTS, stderr: "", exitCode: 0 };
     };
     const outcome = await runPicker(mode, {
-      herdr: new Herdr({ runner }), env: {}, beforeDispatch: () => { order.push("stop"); },
+      herdr: new Herdr({ runner }), signal: SIGNAL, context: {}, config: CONFIG,
+      beforeDispatch: () => { order.push("stop"); },
       pickerRunner: async options => {
         const selection = (options.loadOnStart ? await options.reload!() : options).items[0];
         if (selection) await options.onAccept?.(selection);

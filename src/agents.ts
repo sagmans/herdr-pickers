@@ -23,7 +23,7 @@ export class AgentTargetError extends Error {
 export async function loadAgentTargets(
   mode: AgentMode,
   herdr: Herdr,
-  current: CurrentContext = {},
+  current: CurrentContext,
 ): Promise<AgentTarget[]> {
   // Both Herdr round-trips start before either is awaited so the 1s agent
   // refresh pays one call latency instead of two.

@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { Herdr } from "../src/client/herdr.ts";
+import { DEFAULT_PICKER_KEYMAP, type HerdrPickersConfig } from "../src/config/config.ts";
 import { runPickerLoop } from "../src/picker-loop.ts";
 import { runTerminalPicker } from "../src/terminal-picker.ts";
 import type { PickerRequest } from "../src/picker-request.ts";
@@ -19,6 +20,7 @@ const QUERY = "old-query";
 const RELOAD = "\u0012";
 const CLOSE = "\u0003";
 const OLD_FAILURE = new Error("obsolete operation failed");
+const CONFIG: HerdrPickersConfig = { placement: "popup", keymap: DEFAULT_PICKER_KEYMAP, projects: { roots: [] } };
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (error: unknown) => void;
@@ -55,8 +57,8 @@ test("replacement interrupts discovery and reuses the surface without stale outp
   let loads = 0;
   const dispatched: string[][] = [];
   const run = runPickerLoop(session, OWNER, {
-    env: {}, terminal,
-    createRuntime: signal => ({ herdr: new Herdr({ signal, runner: async argv => {
+    terminal,
+    createRuntime: signal => ({ config: CONFIG, herdr: new Herdr({ signal, runner: async argv => {
       if (argv.includes("focus")) { dispatched.push([...argv]); return { stdout: OK, stderr: "", exitCode: 0 }; }
       const stdout = ++loads === 1 ? await firstLoad.promise : argv.includes("agent") ? AGENTS : WORKSPACES;
       return { stdout, stderr: "", exitCode: 0 };
@@ -89,10 +91,11 @@ for (const operation of ["ranking", "refresh"] as const) {
     let blocked = false;
     let loads = 0;
     const run = runPickerLoop(session, OWNER, {
-      env: {}, terminal,
+      terminal,
       createRuntime: signal => {
         signals.push(signal);
         return {
+          config: CONFIG,
           herdr: new Herdr({ signal, runner: async argv => {
             if (operation === "refresh" && signals.length === 1 && ++loads > 1) {
               blocked = true;
@@ -131,8 +134,8 @@ test("an obsolete error before the mailbox tick does not close the surface", asy
   const terminal = new FakeTerminal([input.promise], VIEWPORT, true);
   let loads = 0;
   const run = runPickerLoop(session, OWNER, {
-    env: {}, terminal,
-    createRuntime: signal => ({ herdr: new Herdr({ signal, runner: async argv => ({
+    terminal,
+    createRuntime: signal => ({ config: CONFIG, herdr: new Herdr({ signal, runner: async argv => ({
       stdout: ++loads === 1 ? await obsolete.promise : argv.includes("agent") ? AGENTS : WORKSPACES,
       stderr: "", exitCode: 0,
     }) }) }),
@@ -155,8 +158,8 @@ test("requests after dispatch submission remain unacknowledged for a successor",
   const terminal = new FakeTerminal([input.promise], VIEWPORT, true);
   let submitted = false;
   const run = runPickerLoop(session, OWNER, {
-    env: {}, terminal,
-    createRuntime: signal => ({ herdr: new Herdr({ signal, runner: async argv => {
+    terminal,
+    createRuntime: signal => ({ config: CONFIG, herdr: new Herdr({ signal, runner: async argv => {
       if (argv.includes("focus")) { submitted = true; await submission.promise; }
       return { stdout: WORKSPACES, stderr: "", exitCode: 0 };
     } }) }),
@@ -181,8 +184,8 @@ test("Ctrl-C cancels agent replacement while discovery never resolves", async ()
   let loading = false;
   let settled = false;
   const run = runPickerLoop(session, OWNER, {
-    env: {}, terminal, signal: lifecycle.signal,
-    createRuntime: signal => ({ herdr: new Herdr({ signal, runner: async argv => {
+    terminal, signal: lifecycle.signal,
+    createRuntime: signal => ({ config: CONFIG, herdr: new Herdr({ signal, runner: async argv => {
       if (argv.includes("agent")) { loading = true; await load.promise; }
       return { stdout: WORKSPACES, stderr: "", exitCode: 0 };
     } }) }),
@@ -207,8 +210,8 @@ test("an empty initial agent load dismisses the shared terminal", async () => {
   session.replace();
   const terminal = new FakeTerminal([], VIEWPORT, true);
   const outcome = await runPickerLoop(session, OWNER, {
-    env: {}, terminal,
-    createRuntime: signal => ({ herdr: new Herdr({ signal, runner: async argv => ({
+    terminal,
+    createRuntime: signal => ({ config: CONFIG, herdr: new Herdr({ signal, runner: async argv => ({
       stdout: argv.includes("agent") ? JSON.stringify({ result: { agents: [] } }) : WORKSPACES,
       stderr: "", exitCode: 0,
     }) }) }),
@@ -222,9 +225,9 @@ test("replacement failure closes once and restores the shared terminal", async (
   const terminal = new FakeTerminal([], VIEWPORT, true);
   let closed = 0;
   const run = runPickerLoop(session, OWNER, {
-    env: {}, terminal,
+    terminal,
     dismissSurface: async () => { closed++; },
-    createRuntime: signal => ({ herdr: new Herdr({ signal, runner: async argv => {
+    createRuntime: signal => ({ config: CONFIG, herdr: new Herdr({ signal, runner: async argv => {
       if (argv.includes("agent")) throw OLD_FAILURE;
       return { stdout: WORKSPACES, stderr: "", exitCode: 0 };
     } }) }),
@@ -244,8 +247,8 @@ test("repeating a mode resets the query and terminal cancellation still closes",
   const newInput = deferred<string>();
   const terminal = new FakeTerminal([oldInput.promise, newInput.promise], VIEWPORT, true);
   const run = runPickerLoop(session, OWNER, {
-    env: {}, terminal,
-    createRuntime: signal => ({ herdr: new Herdr({ signal, runner: async () => ({ stdout: WORKSPACES, stderr: "", exitCode: 0 }) }) }),
+    terminal,
+    createRuntime: signal => ({ config: CONFIG, herdr: new Herdr({ signal, runner: async () => ({ stdout: WORKSPACES, stderr: "", exitCode: 0 }) }) }),
   });
   await until(() => terminal.writes.some(write => write.includes("one")));
   oldInput.resolve(QUERY);
@@ -267,8 +270,9 @@ test("replacement during focus confirmation cannot dispatch an old selection", a
   let confirming = false;
   const dispatched: string[][] = [];
   const run = runPickerLoop(session, OWNER, {
-    env: {}, terminal,
+    terminal,
     createRuntime: signal => ({
+      config: CONFIG,
       herdr: new Herdr({ signal, runner: async argv => {
         if (argv.includes("focus")) dispatched.push([...argv]);
         return { stdout: argv.includes("agent") ? AGENTS : WORKSPACES, stderr: "", exitCode: 0 };

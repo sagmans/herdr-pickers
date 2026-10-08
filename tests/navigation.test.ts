@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
@@ -9,8 +9,8 @@ import { loadNavigationTargets } from "../src/navigation.ts";
 const REPO_WORKTREES_PREFIX = "herdr-pickers-repo-worktrees-";
 const REPO_WORKSPACES_PREFIX = "herdr-pickers-repo-workspaces-";
 const TRACKED_REPOS_PREFIX = "herdr-pickers-tracked-repos-";
-const CONFIG_PREFIX = "herdr-pickers-config-";
 const SOURCE_PREFIX = "herdr-pickers-source-";
+const SIGNAL = new AbortController().signal;
 
 function herdrWith(handler: (args: readonly string[]) => string, commands: string[][] = []): Herdr {
   return new Herdr({ runner: async (argv) => {
@@ -41,6 +41,8 @@ describe("navigation modes", () => {
     const targets = await loadNavigationTargets("repo-worktrees", {
       herdr,
       context: { workspaceId: "current" },
+      projectRoots: [],
+      signal: SIGNAL,
     });
 
     expect(targets.map((target) => target.kind === "worktree" ? [target.branch, target.existingWorkspaceId, target.current] : [])).toEqual([
@@ -70,6 +72,8 @@ describe("navigation modes", () => {
     const targets = await loadNavigationTargets("repo-workspaces", {
       herdr,
       context: { workspaceId: "current" },
+      projectRoots: [],
+      signal: SIGNAL,
     });
 
     expect(targets.map((target) => target.kind === "workspace" ? target.workspaceId : "")).toEqual(["current", "main", "other"]);
@@ -82,17 +86,15 @@ describe("navigation modes", () => {
     const api = join(root, "api");
     const apiAlias = join(root, "api-alias");
     const unopened = join(root, "unopened");
-    const configDir = mkdtempSync(join(tmpdir(), CONFIG_PREFIX));
     mkdirSync(join(api, ".git"), { recursive: true });
     mkdirSync(join(unopened, ".git"), { recursive: true });
     symlinkSync(api, apiAlias);
-    writeFileSync(join(configDir, "config.toml"), "[projects]\nroots = []\n", "utf-8");
     const herdr = herdrWith(() => JSON.stringify({ result: { workspaces: [
       { workspace_id: "w1", cwd: api, worktree: { repo_root: api, repo_name: "api", is_linked_worktree: false } },
       { workspace_id: "w2", cwd: apiAlias, worktree: { repo_root: apiAlias, repo_name: "api", is_linked_worktree: false } },
     ] } }));
 
-    const targets = await loadNavigationTargets("projects", { herdr, env: { HERDR_PLUGIN_CONFIG_DIR: configDir } });
+    const targets = await loadNavigationTargets("projects", { herdr, context: {}, projectRoots: [], signal: SIGNAL });
 
     expect(targets.map((target) => target.label)).toEqual(["api"]);
     expect(targets[0]?.kind === "project" ? targets[0].existingWorkspaceId : undefined).toBe("w1");
@@ -102,15 +104,13 @@ describe("navigation modes", () => {
     const root = mkdtempSync(join(tmpdir(), TRACKED_REPOS_PREFIX));
     const api = join(root, "api");
     const unopened = join(root, "unopened");
-    const configDir = mkdtempSync(join(tmpdir(), CONFIG_PREFIX));
     mkdirSync(join(api, ".git"), { recursive: true });
     mkdirSync(join(unopened, ".git"), { recursive: true });
-    writeFileSync(join(configDir, "config.toml"), `[projects]\nroots = ["${root}"]\n`, "utf-8");
     const herdr = herdrWith(() => JSON.stringify({ result: { workspaces: [
       { workspace_id: "w1", cwd: api, worktree: { repo_root: api, repo_name: "api", is_linked_worktree: false } },
     ] } }));
 
-    const targets = await loadNavigationTargets("projects", { herdr, env: { HERDR_PLUGIN_CONFIG_DIR: configDir } });
+    const targets = await loadNavigationTargets("projects", { herdr, context: {}, projectRoots: [root], signal: SIGNAL });
 
     expect(targets.map((target) => target.label).sort()).toEqual(["api", "unopened"]);
   });
@@ -119,10 +119,8 @@ describe("navigation modes", () => {
     const root = mkdtempSync(join(tmpdir(), SOURCE_PREFIX));
     const project = join(root, "api");
     const feature = join(root, "feature");
-    const configDir = mkdtempSync(join(tmpdir(), CONFIG_PREFIX));
     mkdirSync(join(project, ".git"), { recursive: true });
     mkdirSync(join(feature, ".git"), { recursive: true });
-    writeFileSync(join(configDir, "config.toml"), `[projects]\nroots = ["${root}"]\n`, "utf-8");
     const herdr = herdrWith((args) => args[0] === "workspace"
       ? JSON.stringify({ result: { workspaces: [
         { workspace_id: "w1", label: "api", cwd: project },
@@ -135,8 +133,9 @@ describe("navigation modes", () => {
 
     const targets = await loadNavigationTargets("all", {
       herdr,
-      env: { HERDR_PLUGIN_CONFIG_DIR: configDir },
       context: { workspaceId: "w1", paneId: "w1:p1" },
+      projectRoots: [root],
+      signal: SIGNAL,
     });
 
     expect(targets.map((target) => [target.id, target.current]).sort()).toEqual([

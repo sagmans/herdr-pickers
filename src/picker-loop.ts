@@ -11,13 +11,12 @@ const REPLACED = "Picker request superseded";
 const OWNER_LOST = "Picker request ownership could not be verified";
 
 type RequestSession = Pick<PickerSession, "latestRequest" | "acknowledge">;
-/** Per-mode runtime; the loop supplies the terminal, so overrides receive a leased one. */
-export interface LoopRuntime extends Omit<PickerRuntime, "pickerRunner"> {
+/** Per-mode runtime; the loop supplies the terminal, signal, and request context. */
+export interface LoopRuntime extends Omit<PickerRuntime, "pickerRunner" | "signal" | "context"> {
   readonly pickerRunner?: ((options: TerminalPickerOptions) => Promise<PickerItem | undefined>) | undefined;
   readonly dispose?: () => void | Promise<void>;
 }
 interface LoopOptions {
-  readonly env: Record<string, string | undefined>;
   readonly signal?: AbortSignal;
   readonly terminal?: TerminalAdapter;
   /** Removes the popup or overlay; runs before terminal restore so no blank screen flashes. */
@@ -59,7 +58,6 @@ async function loop(session: RequestSession, owner: string, options: LoopOptions
       const confirmFocus = runtime.beforeDispatch;
       outcome = await runPicker(request.mode, {
         ...runtime,
-        env: options.env,
         context: request.context,
         signal,
         pickerRunner: picker => runner({ ...picker, terminal: terminal.lease(picker.signal ?? signal) }),

@@ -20,16 +20,14 @@ export type PickerRunner = (options: PickerOptions) => Promise<PickerItem | unde
 
 /** Dependencies for one mode run; injected so tests and the loop control Herdr, Git, and the terminal. */
 export interface PickerRuntime {
-  readonly signal?: AbortSignal | undefined;
+  readonly signal: AbortSignal;
   readonly beforeDispatch?: (() => void | Promise<void>) | undefined;
   readonly herdr: Herdr;
-  /** Surface the picker was opened from; absent means no source to mark or scope by. */
-  readonly context?: CurrentContext | undefined;
-  /** Only locates plugin configuration; source context never travels through it. */
-  readonly env?: Record<string, string | undefined> | undefined;
+  /** Surface the picker was opened from; an empty context marks no source. */
+  readonly context: CurrentContext;
   readonly gitRunner?: CommandRunner | undefined;
   readonly pickerRunner: PickerRunner;
-  readonly config?: HerdrPickersConfig | undefined;
+  readonly config: HerdrPickersConfig;
 }
 
 /** "no-agents" lets the pane print an empty-state message after the picker closes itself. */
@@ -37,20 +35,20 @@ export type PickerOutcome = "dispatched" | "cancelled" | "no-agents";
 
 /** Failures after the run signal aborts are reported as cancellation, not errors. */
 export async function runPicker(mode: PickerMode, runtime: PickerRuntime): Promise<PickerOutcome> {
-  if (runtime.signal?.aborted) return "cancelled";
+  if (runtime.signal.aborted) return "cancelled";
   try {
     return await (isAgentMode(mode) ? runAgentPicker(mode, runtime) : runNavigationPicker(mode, runtime));
   } catch (error) {
-    if (runtime.signal?.aborted) return "cancelled";
+    if (runtime.signal.aborted) return "cancelled";
     throw error;
   }
 }
 
 /** Polling agent picker; an empty first load dismisses it with "no-agents" instead of an empty frame. */
 export async function runAgentPicker(mode: AgentMode, runtime: PickerRuntime): Promise<PickerOutcome> {
-  if (runtime.signal?.aborted) return "cancelled";
+  if (runtime.signal.aborted) return "cancelled";
   const loading = new AbortController();
-  const signal = runtime.signal ? AbortSignal.any([runtime.signal, loading.signal]) : loading.signal;
+  const signal = AbortSignal.any([runtime.signal, loading.signal]);
   let initialLoad = true;
   let noAgents = false;
   const presentation = agentModeSpec(mode);
@@ -65,7 +63,7 @@ export async function runAgentPicker(mode: AgentMode, runtime: PickerRuntime): P
       emptyMessage: presentation.emptyMessage,
       items: [],
       loadOnStart: true,
-      keymap: runtime.config?.keymap,
+      keymap: runtime.config.keymap,
       reload: async () => {
         signal.throwIfAborted();
         const targets = await loadAgentTargets(mode, runtime.herdr, runtime.context);
@@ -80,9 +78,9 @@ export async function runAgentPicker(mode: AgentMode, runtime: PickerRuntime): P
       },
       refreshIntervalMilliseconds: AGENT_REFRESH_INTERVAL_MILLISECONDS,
       onAccept: async selection => {
-        if (runtime.signal?.aborted) return;
+        if (runtime.signal.aborted) return;
         await runtime.beforeDispatch?.();
-        if (runtime.signal?.aborted) return;
+        if (runtime.signal.aborted) return;
         await dispatchAgent(selection.target, runtime.herdr);
         dispatched = true;
       },
@@ -100,9 +98,15 @@ async function runNavigationPicker(mode: NavigationMode, runtime: PickerRuntime)
   const picker = runtime.pickerRunner;
   const presentation = navigationModeSpec(mode);
   const loadRows = async () => {
-    runtime.signal?.throwIfAborted();
-    const loaded = await loadNavigationTargets(mode, navigationRuntime(runtime));
-    runtime.signal?.throwIfAborted();
+    runtime.signal.throwIfAborted();
+    const loaded = await loadNavigationTargets(mode, {
+      herdr: runtime.herdr,
+      context: runtime.context,
+      gitRunner: runtime.gitRunner,
+      projectRoots: runtime.config.projects.roots,
+      signal: runtime.signal,
+    });
+    runtime.signal.throwIfAborted();
     targets = loaded;
     return renderNavigationRows(mode, targets);
   };
@@ -114,28 +118,17 @@ async function runNavigationPicker(mode: NavigationMode, runtime: PickerRuntime)
     emptyMessage: presentation.emptyMessage,
     items: [],
     loadOnStart: true,
-    keymap: runtime.config?.keymap,
+    keymap: runtime.config.keymap,
     reload: loadRows,
     onAccept: async selection => {
-      if (runtime.signal?.aborted) return;
+      if (runtime.signal.aborted) return;
       const target = targets.find((candidate) => candidate.id === selection.target);
       if (!target) throw new Error(`Selected navigation target '${selection.target}' is no longer available.`);
       await runtime.beforeDispatch?.();
-      if (runtime.signal?.aborted) return;
+      if (runtime.signal.aborted) return;
       await dispatchNavigationTarget(target, runtime.herdr);
       dispatched = true;
     },
   });
   return dispatched ? "dispatched" : "cancelled";
-}
-
-function navigationRuntime(runtime: PickerRuntime) {
-  return {
-    herdr: runtime.herdr,
-    context: runtime.context,
-    env: runtime.env,
-    gitRunner: runtime.gitRunner,
-    projectRoots: runtime.config?.projects.roots,
-    signal: runtime.signal,
-  };
 }

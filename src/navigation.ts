@@ -3,7 +3,6 @@
 // into targets and rows.ts renders them.
 import type { Herdr } from "./client/herdr.ts";
 import { readWorkspaces, workspaceRepoRoots, type WorkspaceRecord, type WorktreeRecord } from "./client/types.ts";
-import { loadConfig } from "./config/config.ts";
 import { listProjects } from "./discovery/projects.ts";
 import { listWorktreesForContext, listWorktreesForProjects, sourceRepositoryKey } from "./discovery/worktrees.ts";
 import {
@@ -22,14 +21,13 @@ export type NavigationTarget = PickerTarget;
 
 /** Injected sources so tests and the smoke control Herdr, Git, and project roots. */
 export interface NavigationRuntime {
-  readonly signal?: AbortSignal | undefined;
+  readonly signal: AbortSignal;
   readonly herdr: Herdr;
   readonly gitRunner?: CommandRunner | undefined;
-  /** Surface the picker was opened from; absent means no source to mark or scope by. */
-  readonly context?: CurrentContext | undefined;
-  /** Only locates plugin configuration when explicit project roots are absent. */
-  readonly env?: Record<string, string | undefined> | undefined;
-  readonly projectRoots?: readonly string[] | undefined;
+  /** Surface the picker was opened from; an empty context marks no source. */
+  readonly context: CurrentContext;
+  /** Configured discovery roots; empty mirrors only repositories Herdr already tracks. */
+  readonly projectRoots: readonly string[];
 }
 
 interface NavigationSources {
@@ -72,7 +70,7 @@ async function loadNavigationSources(
 ): Promise<NavigationSources> {
   // Every navigation catalog marks or filters rows against open workspaces.
   const workspaces = readWorkspaces(await runtime.herdr.json(["workspace", "list"]));
-  const current = runtime.context ?? {};
+  const current = runtime.context;
   // Repo workspace loading keeps the scoped call even with provenance so
   // filtering remains aligned with Herdr's open-worktree view.
   const scoped = spec.repoScoped
@@ -81,7 +79,7 @@ async function loadNavigationSources(
   const repositoryScopeKey = scoped ? sourceRepositoryKey(workspaces, current, scoped.sourceRepoRoot) : undefined;
   // Unscoped worktree catalogs are discovered per project, so they need the project list too.
   const catalogWorktrees = spec.targetKinds.includes("worktree") && !spec.repoScoped;
-  const projects = spec.targetKinds.includes("project") || catalogWorktrees ? resolveProjects(runtime, workspaces) : [];
+  const projects = spec.targetKinds.includes("project") || catalogWorktrees ? resolveProjects(runtime.projectRoots, workspaces) : [];
   const worktrees = spec.repoScoped
     ? scoped?.worktrees ?? []
     : catalogWorktrees
@@ -90,14 +88,13 @@ async function loadNavigationSources(
   return { workspaces, current, repositoryScopeKey, projects, worktrees };
 }
 
-// Empty config intentionally mirrors Herdr; explicit roots are the only opt-in
+// Empty roots intentionally mirror Herdr; explicit roots are the only opt-in
 // to filesystem-wide discovery beyond repositories already represented there.
 function resolveProjects(
-  runtime: NavigationRuntime,
+  configured: readonly string[],
   workspaces: readonly WorkspaceRecord[],
 ): string[] {
   const tracked = workspaceRepoRoots(workspaces).map(canonicalPathKey);
-  const configured = runtime.projectRoots ?? loadConfig(runtime.env).projects.roots;
   const widened = configured.length > 0 ? [...tracked, ...listProjects(configured)] : tracked;
   return [...new Set(widened)].sort((left, right) => left.localeCompare(right));
 }

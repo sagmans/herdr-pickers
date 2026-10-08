@@ -33,7 +33,7 @@ async function main(): Promise<void> {
       // losses once their mode is aborted, and a failure ends the loop.
       let focusGuard: PickerFocusGuard | undefined;
       const outcome = await runPickerLoop(session, token, {
-        env, signal: lifecycle.signal, dismissSurface,
+        signal: lifecycle.signal, dismissSurface,
         createRuntime: signal => {
           const guard = createPickerFocusGuard(
             { socketPath: env.HERDR_SOCKET_PATH, surface },

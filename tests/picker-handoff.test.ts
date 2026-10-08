@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 
 import { Herdr } from "../src/client/herdr.ts";
+import { DEFAULT_PICKER_KEYMAP, type HerdrPickersConfig } from "../src/config/config.ts";
 import type { PickerMode } from "../src/modes.ts";
 import { runPicker } from "../src/picker.ts";
 import { FakeTerminal, FakeTimers, VIEWPORT, runAdapterPicker } from "./terminal-picker-test-support.ts";
@@ -17,6 +18,8 @@ const DEADLINE_MS = 100;
 const TIMED_OUT = "timed-out";
 const ITEM = { id: "one", target: "one", display: "one", searchText: "one" };
 const OPTIONS = { prompt: "test> ", noun: "targets", items: [ITEM] };
+const CONFIG: HerdrPickersConfig = { placement: "popup", keymap: DEFAULT_PICKER_KEYMAP, projects: { roots: [] } };
+const SIGNAL = new AbortController().signal;
 
 for (const mode of MODES) {
   test(`${mode} preserves the selected frame through focus confirmation and dispatch`, async () => {
@@ -31,7 +34,7 @@ for (const mode of MODES) {
       return { stdout: argv.includes("workspace") ? WORKSPACES : AGENTS, stderr: "", exitCode: 0 };
     }});
     const result = await runPicker(mode, {
-      herdr, env: {},
+      herdr, signal: SIGNAL, context: {}, config: CONFIG,
       beforeDispatch: async () => { expect(terminal.writes.join("")).not.toContain(STOP_SCREEN); },
       pickerRunner: async options => {
         const rows = options.loadOnStart ? await options.reload!() : options;

@@ -38,6 +38,7 @@ const WORKSPACES = '{"result":{"workspaces":[{"workspace_id":"w1","focused":true
 const NO_AGENTS_MESSAGE = "No agents found.";
 const CONFIG_PATH = "/example/config.toml";
 const KEYMAP_CONFIG = parseConfig('[keymap]\ndown = ["ctrl-j"]\n', CONFIG_PATH);
+const SIGNAL = new AbortController().signal;
 
 describe("modes", () => {
   test("parses all eight picker modes and rejects unknown modes", () => {
@@ -109,7 +110,7 @@ describe("picker flow", () => {
     }, commands);
     const picker = fakePicker("t2");
 
-    const outcome = await runAgentPicker("agents", { herdr, env: {}, pickerRunner: picker.runner, config: KEYMAP_CONFIG });
+    const outcome = await runAgentPicker("agents", { herdr, signal: SIGNAL, context: {}, pickerRunner: picker.runner, config: KEYMAP_CONFIG });
 
     expect(outcome).toBe("dispatched");
     expect(commands).toContainEqual(["agent", "focus", "t2"]);
@@ -126,7 +127,7 @@ describe("picker flow", () => {
     }, commands);
     const picker = fakePicker(undefined);
 
-    const outcome = await runAgentPicker("agents", { herdr, env: {}, pickerRunner: picker.runner });
+    const outcome = await runAgentPicker("agents", { herdr, signal: SIGNAL, context: {}, config: KEYMAP_CONFIG, pickerRunner: picker.runner });
 
     expect(outcome).toBe("cancelled");
     expect(picker.calls[0]?.items.map((item) => item.target)).toEqual(["t2", "t1"]);
@@ -142,7 +143,7 @@ describe("picker flow", () => {
     }, commands);
     const picker = fakePicker(undefined);
 
-    const outcome = await runAgentPicker("agents", { herdr, env: {}, pickerRunner: picker.runner });
+    const outcome = await runAgentPicker("agents", { herdr, signal: SIGNAL, context: {}, config: KEYMAP_CONFIG, pickerRunner: picker.runner });
 
     expect(outcome).toBe("cancelled");
     expect(commands.flat().join(" ")).not.toContain("agent focus");
@@ -155,7 +156,7 @@ describe("picker flow", () => {
       "agent list": () => ({ stdout: '{"result":{"agents":[]}}', stderr: "", exitCode: 0 }),
     });
 
-    const outcome = await runAgentPicker("agents", { herdr, env: {}, pickerRunner: picker.runner });
+    const outcome = await runAgentPicker("agents", { herdr, signal: SIGNAL, context: {}, config: KEYMAP_CONFIG, pickerRunner: picker.runner });
 
     expect(outcome).toBe("no-agents");
     expect(picker.calls).toHaveLength(1);
@@ -183,7 +184,7 @@ describe("picker flow", () => {
       return undefined;
     };
 
-    await runAgentPicker("agents", { herdr, env: {}, pickerRunner: runner });
+    await runAgentPicker("agents", { herdr, signal: SIGNAL, context: {}, config: KEYMAP_CONFIG, pickerRunner: runner });
 
     expect(agentReads).toBe(2);
   });
@@ -222,7 +223,7 @@ describe("navigation picker flow", () => {
       return selection;
     };
 
-    const outcome = await runPicker("workspaces", { herdr, env: {}, pickerRunner: runner, config: KEYMAP_CONFIG });
+    const outcome = await runPicker("workspaces", { herdr, signal: SIGNAL, context: {}, pickerRunner: runner, config: KEYMAP_CONFIG });
 
     expect(outcome).toBe("dispatched");
     expect(commands).toContainEqual(["workspace", "focus", "w2"]);
@@ -241,7 +242,7 @@ describe("navigation picker flow", () => {
       return undefined;
     };
 
-    const outcome = await runPicker("workspaces", { herdr, env: {}, pickerRunner: runner });
+    const outcome = await runPicker("workspaces", { herdr, signal: SIGNAL, context: {}, config: KEYMAP_CONFIG, pickerRunner: runner });
 
     expect(outcome).toBe("cancelled");
     expect(reloads).toBe(1);
@@ -272,7 +273,7 @@ describe("navigation picker flow", () => {
       return selection;
     };
 
-    const outcome = await runPicker("workspaces", { herdr, env: {}, pickerRunner: runner });
+    const outcome = await runPicker("workspaces", { herdr, signal: SIGNAL, context: {}, config: KEYMAP_CONFIG, pickerRunner: runner });
 
     expect(outcome).toBe("dispatched");
     expect(commands).toContainEqual(["workspace", "focus", "w3"]);
@@ -285,7 +286,7 @@ describe("navigation picker flow", () => {
       "agent list": () => ({ stdout: '{"result":{"agents":[]}}', stderr: "", exitCode: 0 }),
     });
 
-    const outcome = await runPicker("agents", { herdr, env: {}, pickerRunner: picker.runner });
+    const outcome = await runPicker("agents", { herdr, signal: SIGNAL, context: {}, config: KEYMAP_CONFIG, pickerRunner: picker.runner });
 
     expect(outcome).toBe("no-agents");
     expect(picker.calls[0]?.signal?.aborted).toBe(true);

@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 
 import { Herdr } from "../src/client/herdr.ts";
+import { DEFAULT_PICKER_KEYMAP, type HerdrPickersConfig } from "../src/config/config.ts";
 import type { PickerMode } from "../src/modes.ts";
 import { runPicker } from "../src/picker.ts";
 import { FakeTerminal, FakeTimers, VIEWPORT, runAdapterPicker } from "./terminal-picker-test-support.ts";
@@ -16,6 +17,8 @@ const WORKSPACES = JSON.stringify({ result: { workspaces: [{ workspace_id: "w1",
 const AGENTS = JSON.stringify({ result: { agents: [{ terminal_id: "t1", label: "pi", workspace_id: "w1" }] } });
 const ITEM = { id: "one", target: "one", display: "one", searchText: "one" };
 const OPTIONS = { prompt: "test> ", noun: "targets", items: [ITEM] };
+const CONFIG: HerdrPickersConfig = { placement: "popup", keymap: DEFAULT_PICKER_KEYMAP, projects: { roots: [] } };
+const SIGNAL = new AbortController().signal;
 
 for (const key of [CANCEL, ESCAPE, ENTER]) {
   test(`retains the frame until surface dismissal completes for ${JSON.stringify(key)}`, async () => {
@@ -82,7 +85,7 @@ for (const mode of MODES) {
       stdout: argv.includes("workspace") ? WORKSPACES : AGENTS, stderr: "", exitCode: 0,
     }) });
     const result = await runPicker(mode, {
-      herdr, env: {},
+      herdr, signal: SIGNAL, context: {}, config: CONFIG,
       pickerRunner: options => runAdapterPicker({
         ...options, terminal,
         dismiss: async () => {
