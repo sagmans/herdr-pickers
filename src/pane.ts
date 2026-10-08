@@ -3,7 +3,7 @@
 // signal handlers, surface close, and session release on every exit path.
 import { Herdr } from "./client/herdr.ts";
 import { closePickerSurface, pickerSurfaceFromEnv } from "./client/popup.ts";
-import { createPickerFocusGuard, type PickerFocusGuard } from "./client/picker-focus.ts";
+import { createPickerFocusGuard, PickerFocusFailure } from "./picker-focus-guard.ts";
 import { PICKER_TOKEN_ENV, PickerSession } from "./picker-session.ts";
 import { loadConfig } from "./config/config.ts";
 import { runPickerLoop } from "./picker-loop.ts";
@@ -36,9 +36,6 @@ async function main(): Promise<void> {
     for (const { signal, handler } of handlers) process.on(signal, handler);
     const config = loadConfig(env);
     await withPickerSurface(surface, env.HERDR_SOCKET_PATH, undefined, async terminal => {
-      // Only the newest mode's guard can record a failure: older guards ignore
-      // losses once their mode is aborted, and a failure ends the loop.
-      let focusGuard: PickerFocusGuard | undefined;
       const outcome = await runPickerLoop(session, token, terminal, {
         signal: lifecycle.signal,
         createRuntime: signal => {
@@ -47,7 +44,6 @@ async function main(): Promise<void> {
             signal,
             reason => lifecycle.abort(reason),
           );
-          focusGuard = guard;
           return {
             herdr: new Herdr({ signal }), config,
             beforeDispatch: () => guard.checkBeforeDispatch(),
@@ -56,7 +52,7 @@ async function main(): Promise<void> {
         },
       });
       // Cancellation owns cleanup, but observer failures must still reach the exit boundary.
-      if (focusGuard?.failure) throw focusGuard.failure.error;
+      if (lifecycle.signal.reason instanceof PickerFocusFailure) throw lifecycle.signal.reason.cause;
       if (outcome === "no-agents") {
         console.log(dim(session.latestRequest()?.mode === "repo-agents" ? "No repository agents found." : "No agents found."));
       }
