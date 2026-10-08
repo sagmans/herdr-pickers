@@ -1,9 +1,10 @@
 import { afterEach, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
 import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { join } from "node:path";
 
-import { PickerSession, PickerStartupUncertainError } from "../src/picker-session.ts";
+import { DATABASE_NAME, PickerSession, PickerStartupUncertainError } from "../src/picker-session.ts";
 import { buildPaneOpenArgs, openPicker } from "../src/actions/open.ts";
 import { Herdr } from "../src/client/herdr.ts";
 import { readPickerPaneIds } from "../src/client/types.ts";
@@ -16,10 +17,10 @@ const OVERLAY_SURFACE = { placement: "overlay", paneId: PANE_ID } as const;
 const STALE_TOKEN = "stale-generation";
 const WORKER_PATH = join(import.meta.dir, "fixtures", "picker-session-worker.ts");
 const WORKER_COUNT = 6;
+const UNCLAIMED_GRACE_MS = 10_000;
 const PLUGIN_ID = "herdr-pickers";
 const OPEN_RESULT = JSON.stringify({ result: { type: "ok" } });
 const ALIAS_NAME = "alias";
-const DATABASE_NAME = "picker-sessions.sqlite";
 const SENTINEL_NAME = "sentinel";
 const SENTINEL_CONTENT = "must remain unchanged";
 const REQUEST_MODE = "request";
@@ -372,4 +373,47 @@ test("a delayed reaper cannot remove a newer generation", async () => {
   finishProbe(false);
   expect(await first).toBeUndefined();
   expect(await session.reserve("overlay", async () => false)).toBeUndefined();
+});
+
+test("reclaims a dead opener's reservation only once its grace period has passed", async () => {
+  const { env, root, session } = await fixture();
+  const owner = await worker(env, "unclaimed");
+  owner.proc.stdin.end();
+  await owner.proc.exited;
+  await expect(session.reserve("popup", async () => false)).rejects.toThrow(PickerStartupUncertainError);
+
+  // Backdate the reservation through a second connection, as a long-dead opener would leave it.
+  const database = new Database(join(root, DATABASE_NAME));
+  try {
+    database.query("UPDATE owners SET reserved_at = ?").run(Date.now() - UNCLAIMED_GRACE_MS - 1);
+  } finally {
+    database.close();
+  }
+  expect(await session.reserve("popup", async () => false)).toBeString();
+});
+
+test("migrates a database from before reservation timestamps and reclaims its rows", async () => {
+  const { env, root, session } = await fixture();
+  const owner = await worker(env, "unclaimed");
+  owner.proc.stdin.end();
+  await owner.proc.exited;
+  // Simulate the ownership database of a plugin version without the reserved_at column.
+  const legacy = new Database(join(root, DATABASE_NAME));
+  try {
+    legacy.exec("ALTER TABLE owners DROP COLUMN reserved_at");
+  } finally {
+    legacy.close();
+  }
+  const migrated = new PickerSession(env);
+  sessions.push(migrated);
+  // A legacy row has no timestamp, so a proven-dead opener makes it reclaimable at once.
+  expect(await migrated.reserve("popup", async () => false)).toBeString();
+
+  const columns = new Database(join(root, DATABASE_NAME));
+  try {
+    const names = columns.query<{ name: string }, []>("PRAGMA table_info(owners)").all().map(column => column.name);
+    expect(names).toContain("reserved_at");
+  } finally {
+    columns.close();
+  }
 });
