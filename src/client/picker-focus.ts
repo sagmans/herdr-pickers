@@ -46,15 +46,17 @@ interface PendingDispatch {
 }
 
 /**
- * Observer lifecycle. `owner` is known once the first snapshot confirms focus;
- * `stale` marks a verifying snapshot that focus events may already have outdated.
+ * Observer lifecycle. `confirming` waits for the first snapshot to prove focus;
+ * `reverifying` re-proves it after a departure or during dispatch. `stale` marks
+ * a snapshot that focus events may already have outdated.
  */
 type FocusStage =
   | { readonly kind: "connecting" }
   | { readonly kind: "subscribing" }
+  | { readonly kind: "confirming"; readonly stale: boolean }
   | {
-    readonly kind: "verifying";
-    readonly owner: FocusOwner | undefined;
+    readonly kind: "reverifying";
+    readonly owner: FocusOwner;
     readonly stale: boolean;
     readonly dispatch: PendingDispatch | undefined;
   }
@@ -84,14 +86,15 @@ function advanceFocus(stage: FocusStage, message: PickerFocusLifecycleMessage, p
   switch (message.kind) {
     case "subscription-started":
       if (stage.kind !== "subscribing") return { stage, effect: TERMINATE };
-      return { stage: verifying(undefined, undefined), effect: { kind: "request-snapshot" } };
+      return { stage: confirming(), effect: { kind: "request-snapshot" } };
     case "snapshot": {
-      if (stage.kind !== "verifying" || message.paneId !== paneId) return { stage, effect: TERMINATE };
+      if (!awaitingSnapshot(stage) || message.paneId !== paneId) return { stage, effect: TERMINATE };
       if (!message.globallyFocused) return { stage, effect: { kind: "depart" } };
       const owner = { paneId: message.paneId, tabId: message.tabId, workspaceId: message.workspaceId };
       // Focus moved while this snapshot was in flight; only a fresh one can confirm it.
-      if (stage.stale) return { stage: verifying(owner, stage.dispatch), effect: { kind: "established", reverify: true } };
-      if (stage.dispatch) return { stage: { kind: "stopped" }, effect: { kind: "confirm-dispatch", dispatch: stage.dispatch } };
+      if (stage.stale) return { stage: reverifying(owner, pendingDispatch(stage)), effect: { kind: "established", reverify: true } };
+      const dispatch = pendingDispatch(stage);
+      if (dispatch) return { stage: { kind: "stopped" }, effect: { kind: "confirm-dispatch", dispatch } };
       return { stage: { kind: "watching", owner }, effect: { kind: "established", reverify: false } };
     }
     case "pane-focused":
@@ -107,14 +110,17 @@ function advanceFocus(stage: FocusStage, message: PickerFocusLifecycleMessage, p
 
 function advanceOnFocusEvent(stage: FocusStage, event: FocusEvent): FocusStep {
   switch (stage.kind) {
-    case "verifying":
-      return !stage.owner || focusDeparted(event, stage.owner)
+    case "confirming":
+      // Focus is not confirmed yet, so any event may have moved it elsewhere.
+      return { stage: { ...stage, stale: true }, effect: NO_EFFECT };
+    case "reverifying":
+      return focusDeparted(event, stage.owner)
         ? { stage: { ...stage, stale: true }, effect: NO_EFFECT }
         : { stage, effect: NO_EFFECT };
     case "watching":
       // Herdr replays old focus events, so only current focus can prove departure.
       return focusDeparted(event, stage.owner)
-        ? { stage: verifying(stage.owner, undefined), effect: { kind: "request-snapshot" } }
+        ? { stage: reverifying(stage.owner, undefined), effect: { kind: "request-snapshot" } }
         : { stage, effect: NO_EFFECT };
     case "connecting":
     case "subscribing":
@@ -133,9 +139,10 @@ function advanceOnFocusEvent(stage: FocusStage, event: FocusEvent): FocusStep {
 function advanceOnDispatch(stage: FocusStage, dispatch: PendingDispatch): FocusStep | undefined {
   switch (stage.kind) {
     case "watching":
-      return { stage: verifying(stage.owner, dispatch), effect: { kind: "request-snapshot" } };
-    case "verifying":
-      return stage.owner && !stage.dispatch ? { stage: { ...stage, stale: true, dispatch }, effect: NO_EFFECT } : undefined;
+      return { stage: reverifying(stage.owner, dispatch), effect: { kind: "request-snapshot" } };
+    case "reverifying":
+      return stage.dispatch ? undefined : { stage: { ...stage, stale: true, dispatch }, effect: NO_EFFECT };
+    case "confirming":
     case "connecting":
     case "subscribing":
     case "stopped":
@@ -148,17 +155,26 @@ function advanceOnDispatch(stage: FocusStage, dispatch: PendingDispatch): FocusS
   }
 }
 
-function verifying(owner: FocusOwner | undefined, dispatch: PendingDispatch | undefined): FocusStage {
-  return { kind: "verifying", owner, stale: false, dispatch };
+function confirming(): FocusStage {
+  return { kind: "confirming", stale: false };
+}
+
+function reverifying(owner: FocusOwner, dispatch: PendingDispatch | undefined): FocusStage {
+  return { kind: "reverifying", owner, stale: false, dispatch };
 }
 
 /** True once a snapshot has confirmed focus, i.e. setup has resolved. */
 function established(stage: FocusStage): boolean {
-  return (stage.kind === "verifying" && stage.owner !== undefined) || stage.kind === "watching";
+  return stage.kind === "reverifying" || stage.kind === "watching";
+}
+
+/** A snapshot is in flight exactly while a stage is waiting to be re-proven. */
+function awaitingSnapshot(stage: FocusStage): stage is Extract<FocusStage, { readonly kind: "confirming" | "reverifying" }> {
+  return stage.kind === "confirming" || stage.kind === "reverifying";
 }
 
 function pendingDispatch(stage: FocusStage): PendingDispatch | undefined {
-  return stage.kind === "verifying" ? stage.dispatch : undefined;
+  return stage.kind === "reverifying" ? stage.dispatch : undefined;
 }
 
 function finished(stage: FocusStage): boolean {
@@ -193,7 +209,7 @@ export async function watchPickerFocus(
       signal: controller.signal,
       prepareDispatch(): Promise<void> {
         return new Promise((resolveDispatch, rejectDispatch) => {
-          const step = established(stage) ? advanceOnDispatch(stage, { resolve: resolveDispatch, reject: rejectDispatch }) : undefined;
+          const step = advanceOnDispatch(stage, { resolve: resolveDispatch, reject: rejectDispatch });
           if (!step) return rejectDispatch(new Error(WATCH_FAILURE_MESSAGE));
           dispatchTimer = setTimeout(terminate, SETUP_TIMEOUT_MS);
           apply(step);
@@ -239,7 +255,7 @@ export async function watchPickerFocus(
       clearTimeout(stepTimer);
       stepTimer = setTimeout(terminate, SETUP_TIMEOUT_MS);
       void readPickerSnapshot(socketPath, paneId, snapshots.signal)
-        .then(message => { if (stage.kind === "verifying") handleMessage(message); })
+        .then(message => { if (awaitingSnapshot(stage)) handleMessage(message); })
         .catch(terminate);
     }
 
