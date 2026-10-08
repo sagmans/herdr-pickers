@@ -2,7 +2,7 @@
 // reserved session token, runs the picker loop, and owns process-level cleanup:
 // signal handlers, surface close, and session release on every exit path.
 import { Herdr } from "./client/herdr.ts";
-import { pickerSurfaceFromEnv } from "./client/popup.ts";
+import { closePickerSurface, pickerSurfaceFromEnv } from "./client/popup.ts";
 import { createPickerFocusGuard, type PickerFocusGuard } from "./client/picker-focus.ts";
 import { PICKER_TOKEN_ENV, PickerSession } from "./picker-session.ts";
 import { loadConfig } from "./config/config.ts";
@@ -25,8 +25,14 @@ async function main(): Promise<void> {
   try {
     const token = env[PICKER_TOKEN_ENV];
     const surface = pickerSurfaceFromEnv(env);
-    // A rejected child has no authority to close any existing surface.
-    if (!token || !session.claim(token, surface)) throw new Error("Picker reservation is missing or stale.");
+    // A rejected child has no authority to close any existing surface, but the
+    // overlay pane Herdr opened for this process is provably its own, so a
+    // failed claim must not leave an empty pane showing its error until Herdr
+    // removes it.
+    if (!token || !session.claim(token, surface)) {
+      if (surface.placement === "overlay") await closePickerSurface(surface, env.HERDR_SOCKET_PATH).catch(() => {});
+      throw new Error("Picker reservation is missing or stale.");
+    }
     for (const { signal, handler } of handlers) process.on(signal, handler);
     const config = loadConfig(env);
     await withPickerSurface(surface, env.HERDR_SOCKET_PATH, undefined, async terminal => {

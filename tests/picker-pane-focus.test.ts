@@ -10,6 +10,7 @@ const OTHER = "other-pane";
 const TAB = "picker-tab";
 const WORKSPACE = "picker-workspace";
 const STOP = "\x1b[?1049l";
+const STALE_TOKEN = "stale-generation";
 const PRIVATE_EXECUTABLE_MODE = 0o700;
 const TEST_TIMEOUT_MS = 10_000;
 const PTY = join(import.meta.dir, "fixtures/picker-pane-pty.py");
@@ -103,3 +104,46 @@ for (const scenario of ["setup-error", "protocol-error", "departure"] as const) 
     }
   }, TEST_TIMEOUT_MS);
 }
+
+test("a rejected overlay child closes only the pane Herdr opened for it", async () => {
+  const root = mkdtempSync(TEMP_PREFIX);
+  const socketPath = join(root, "s");
+  const closedPanes: string[] = [];
+  const sockets = new Set<Socket>();
+  const server = createServer(socket => {
+    sockets.add(socket);
+    socket.once("close", () => sockets.delete(socket));
+    let buffer = "";
+    socket.on("data", data => {
+      buffer += data.toString();
+      const newline = buffer.indexOf("\n");
+      if (newline < 0) return;
+      const request = JSON.parse(buffer.slice(0, newline));
+      buffer = "";
+      if (request.method === "plugin.pane.close") {
+        closedPanes.push(request.params.pane_id);
+        socket.end("{}\n");
+      }
+    });
+  });
+  await new Promise<void>(resolve => server.listen(socketPath, resolve));
+  const env = { HERDR_SOCKET_PATH: socketPath, HERDR_PLUGIN_STATE_DIR: root, HERDR_PLUGIN_CONFIG_DIR: root, HERDR_PANE_ID: PANE };
+  const session = new PickerSession(env);
+  try {
+    const process = Bun.spawn(["python3", PTY, Bun.which("bun")!, ENTRYPOINT], {
+      env: { ...env, [PICKER_TOKEN_ENV]: STALE_TOKEN }, stdin: "ignore", stdout: "pipe", stderr: "pipe",
+    });
+    const [output, error, status] = await Promise.all([
+      new Response(process.stdout).text(), new Response(process.stderr).text(), process.exited,
+    ]);
+    expect(error).toBe("");
+    expect(status).toBe(1);
+    expect(output).toContain("Picker reservation is missing or stale");
+    expect(closedPanes).toEqual([PANE]);
+  } finally {
+    session.close();
+    for (const socket of sockets) socket.destroy();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    rmSync(root, { recursive: true, force: true });
+  }
+}, TEST_TIMEOUT_MS);
