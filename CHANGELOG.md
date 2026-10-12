@@ -4,6 +4,22 @@ All notable user-facing changes to Herdr Pickers are recorded in this file.
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-10-12
+
+### Changed
+
+- Dependency and tool updates now wait for a release-age cooldown, and tool locks pin checksums for every Herdr version the smoke workflow tests.
+
+### Fixed
+
+- A picker that never opened no longer blocks later pickers. If Herdr refuses a picker, its reservation is released at once. If the picker's opener dies first, the reservation can be reclaimed after a grace period. Existing ownership databases migrate in place.
+- In nested checkouts, the picker marks only the most specific target as current. The cursor returns to the worktree you came from instead of the enclosing repository.
+- Previous-workspace state now uses a SQLite lock that the kernel releases, instead of a lock file that had to expire. An unreadable lock file is reset once, so the feature recovers by itself.
+- Workspace ids no longer appear in visible or searchable picker labels.
+- Malformed stored request context now reports an invalid-request error, not a raw JSON syntax error.
+- If a picker is still starting, the message now says that its startup is pending. It no longer tells you to reopen after a picker that never opened.
+- If Herdr rejects an overlay picker, the picker now closes the pane that Herdr opened for it. A failed picker no longer leaves an empty error pane behind.
+
 ## [0.3.2] - 2026-09-23
 
 ### Added
