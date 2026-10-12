@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { linkSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { join } from "node:path";
 
@@ -12,6 +12,10 @@ import { readPickerPaneIds } from "../src/client/types.ts";
 const TEMP_PREFIX = "/tmp/hps-owner-";
 const SOCKET_NAME = "herdr.sock";
 const SECOND_SOCKET_NAME = "other.sock";
+// Holds the closed socket's inode so the filesystem cannot hand it to the
+// replacement; ownership identity includes the inode, and birth times only
+// have whole-second precision on some filesystems.
+const RETIRED_SOCKET_NAME = "retired.sock";
 const PANE_ID = "w1:p2";
 const OVERLAY_SURFACE = { placement: "overlay", paneId: PANE_ID } as const;
 const STALE_TOKEN = "stale-generation";
@@ -274,8 +278,9 @@ test("directory aliases cannot bypass session identity", async () => {
 });
 
 test("a replacement socket has independent ownership", async () => {
-  const { env, session } = await fixture();
+  const { root, env, session } = await fixture();
   expect(await session.reserve("popup", async () => false)).toBeString();
+  linkSync(env.HERDR_SOCKET_PATH, join(root, RETIRED_SOCKET_NAME));
   const original = servers.pop()!;
   await new Promise<void>(resolve => original.close(() => resolve()));
   const replacement = createServer();
