@@ -4,7 +4,7 @@ import { describe, expect, test } from "bun:test";
 
 import { PICKER_MODES, type PickerMode } from "../src/modes.ts";
 
-const EXPECTED_RELEASE_VERSION = "0.3.2";
+const EXPECTED_RELEASE_VERSION = "0.3.3";
 
 describe("plugin manifest", () => {
   const manifest = Bun.TOML.parse(readFileSync(join(import.meta.dir, "..", "herdr-plugin.toml"), "utf-8")) as {
