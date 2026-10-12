@@ -17,12 +17,32 @@ jobs:
         # The declared floor (0.8.0) ships the same binary as 0.8.2, so 0.8.2
         # is the oldest distinct runtime that can be exercised.
         herdr: ["0.8.2", "0.9.1"]
+        include:
+          # The floor runtime is pinned in its own mise environment so its
+          # download is verified against mise.herdr-floor.lock.
+          - herdr: "0.8.2"
+            mise_env: herdr-floor
     runs-on: ${{ matrix.os }}
+    env:
+      # Every mise install in this job, including the matrix Herdr, must match
+      # a checksum recorded in a lockfile; an unlisted or re-tagged release fails.
+      MISE_LOCKED: "1"
+      # Empty selects the default environment and its mise.lock.
+      MISE_ENV: ${{ matrix.mise_env }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # No later step pushes or fetches remotely, so the token must not persist in .git/config.
+          persist-credentials: false
       - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
       - run: bun install --frozen-lockfile
-      - run: mise install herdr@${{ matrix.herdr }}
-      - run: echo "$(mise where herdr@${{ matrix.herdr }})" >> "$GITHUB_PATH"
+      # Expression values pass through env, never inline in scripts, so a
+      # matrix value can never be interpreted as shell.
+      - run: mise install "herdr@${HERDR_VERSION}"
+        env:
+          HERDR_VERSION: ${{ matrix.herdr }}
+      - run: mise where "herdr@${HERDR_VERSION}" >> "$GITHUB_PATH"
+        env:
+          HERDR_VERSION: ${{ matrix.herdr }}
       - run: herdr --version
       - run: bun run smoke

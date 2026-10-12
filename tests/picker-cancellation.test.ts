@@ -1,10 +1,12 @@
 import { expect, test } from "bun:test";
 
-import { Herdr, type CommandRunner } from "../src/client/herdr.ts";
-import { runPicker, type PickerMode } from "../src/picker.ts";
+import { Herdr } from "../src/client/herdr.ts";
+import { DEFAULT_PICKER_KEYMAP, type HerdrPickersConfig } from "../src/config/config.ts";
+import { type CommandRunner } from "../src/util/subprocess.ts";
+import type { PickerMode } from "../src/modes.ts";
+import { runPicker } from "../src/picker.ts";
 import type { PickerItem } from "../src/picker-row.ts";
-import { runTerminalPicker } from "../src/terminal-picker.ts";
-import { FakeTerminal, FakeTimers, VIEWPORT } from "./terminal-picker-test-support.ts";
+import { FakeTerminal, FakeTimers, VIEWPORT, runAdapterPicker } from "./terminal-picker-test-support.ts";
 
 const DEADLINE_MS = 100;
 const TIMED_OUT = "timed-out";
@@ -19,12 +21,14 @@ const MODES: PickerMode[] = ["workspaces", "agents"];
 const RELOAD_KEY = "\x12";
 const REFRESH_INTERVAL_MS = 1000;
 const LOAD_PHASES = [true, false] as const;
+const CONFIG: HerdrPickersConfig = { placement: "popup", keymap: DEFAULT_PICKER_KEYMAP, projects: { roots: [] } };
+const SIGNAL = new AbortController().signal;
 
 test("pre-aborted terminal never enters raw mode", async () => {
   const controller = new AbortController();
   controller.abort();
   const terminal = new FakeTerminal([]);
-  expect(await runTerminalPicker({ prompt: PROMPT, noun: NOUN, items: ITEMS, terminal, signal: controller.signal })).toBeUndefined();
+  expect(await runAdapterPicker({ prompt: PROMPT, noun: NOUN, items: ITEMS, terminal, signal: controller.signal })).toBeUndefined();
   expect(terminal.rawModes).toEqual([]);
   expect(terminal.writes).toEqual([]);
 });
@@ -32,7 +36,7 @@ test("pre-aborted terminal never enters raw mode", async () => {
 test("focus cancellation wakes pending input and restores terminal", async () => {
   const controller = new AbortController();
   const terminal = new FakeTerminal([], VIEWPORT, true);
-  const run = runTerminalPicker({ prompt: PROMPT, noun: NOUN, items: ITEMS, terminal, signal: controller.signal });
+  const run = runAdapterPicker({ prompt: PROMPT, noun: NOUN, items: ITEMS, terminal, signal: controller.signal });
   controller.abort();
   const result = await Promise.race([run, Bun.sleep(DEADLINE_MS).then(() => TIMED_OUT)]);
   terminal.finish();
@@ -49,7 +53,7 @@ test("focus cancellation interrupts ranking and discards late output", async () 
   let resolveRank!: (items: PickerItem[]) => void;
   let started!: () => void;
   const ready = new Promise<void>(resolve => { started = resolve; });
-  const run = runTerminalPicker({
+  const run = runAdapterPicker({
     prompt: PROMPT, noun: NOUN, items: ITEMS, terminal, signal: controller.signal,
     ranker: () => { started(); return new Promise(resolve => { resolveRank = resolve; }); },
   });
@@ -75,7 +79,7 @@ for (const loadOnStart of LOAD_PHASES) {
     let started!: () => void;
     let finish!: (rows: { items: PickerItem[] }) => void;
     const ready = new Promise<void>(resolve => { started = resolve; });
-    const run = runTerminalPicker({
+    const run = runAdapterPicker({
       prompt: PROMPT, noun: NOUN, items: ITEMS, terminal, timers, signal: controller.signal, loadOnStart,
       refreshIntervalMilliseconds: REFRESH_INTERVAL_MS,
       reload: () => { started(); return new Promise(resolve => { finish = resolve; }); },
@@ -102,7 +106,7 @@ for (const mode of MODES) {
       return { stdout: argv.includes("workspace") ? WORKSPACES : AGENTS, stderr: "", exitCode: 0 };
     };
     const outcome = await runPicker(mode, {
-      herdr: new Herdr({ runner }), env: {}, signal: controller.signal,
+      herdr: new Herdr({ runner }), signal: controller.signal, context: {}, config: CONFIG,
       pickerRunner: async options => {
         const rows = options.loadOnStart ? await options.reload!() : options;
         controller.abort();
@@ -123,7 +127,7 @@ for (const mode of MODES) {
       return { stdout: argv.includes("workspace") ? WORKSPACES : AGENTS, stderr: "", exitCode: 0 };
     };
     const outcome = await runPicker(mode, {
-      herdr: new Herdr({ runner }), env: {}, signal: controller.signal,
+      herdr: new Herdr({ runner }), signal: controller.signal, context: {}, config: CONFIG,
       beforeDispatch: async () => { await Promise.resolve(); controller.abort(); },
       pickerRunner: async options => {
         const selection = (options.loadOnStart ? await options.reload!() : options).items[0];
@@ -142,7 +146,8 @@ for (const mode of MODES) {
       return { stdout: argv.includes("workspace") ? WORKSPACES : AGENTS, stderr: "", exitCode: 0 };
     };
     const outcome = await runPicker(mode, {
-      herdr: new Herdr({ runner }), env: {}, beforeDispatch: () => { order.push("stop"); },
+      herdr: new Herdr({ runner }), signal: SIGNAL, context: {}, config: CONFIG,
+      beforeDispatch: () => { order.push("stop"); },
       pickerRunner: async options => {
         const selection = (options.loadOnStart ? await options.reload!() : options).items[0];
         if (selection) await options.onAccept?.(selection);

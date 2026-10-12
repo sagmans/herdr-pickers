@@ -1,5 +1,9 @@
+// Query ranking boundary: delegates fuzzy matching to the external fzf binary
+// in filter mode via argv (no shell). Only searchText plus an input index is
+// sent, so hidden ids never leave the process and results map back by index.
 import type { PickerItem } from "./picker-row.ts";
 
+/** Oldest fzf the filter flags are supported on; mirrored in README requirements. */
 export const FZF_MIN_VERSION = "0.48";
 
 const FIELD_DELIMITER = "\t";
@@ -16,6 +20,10 @@ const FZF_FILTER_ARGS = [
   "1",
 ] as const;
 
+/**
+ * Returns items in fzf rank order; an empty query keeps input order. Throws on
+ * abort, an fzf exit other than success/no-match, or output that maps to no item.
+ */
 export async function rankRows(
   query: string,
   items: readonly PickerItem[],

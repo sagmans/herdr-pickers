@@ -3,8 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 
-import { formatEventFailure, parseSubcommand, runLastWorkspace } from "../src/actions/last-workspace.ts";
-import { Herdr, type CommandRunner } from "../src/client/herdr.ts";
+import { parseSubcommand, runLastWorkspace } from "../src/actions/last-workspace.ts";
+import { formatEventFailure } from "../src/util/errors.ts";
+import { Herdr } from "../src/client/herdr.ts";
+import { type CommandRunner } from "../src/util/subprocess.ts";
 import type { WorkspaceMemory } from "../src/last-workspace/memory.ts";
 import { StateStore } from "../src/last-workspace/store.ts";
 

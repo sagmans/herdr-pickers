@@ -1,9 +1,20 @@
+// Target normalization: turns parsed Herdr records and discovered paths into
+// picker targets with current-row marking and repository grouping keys.
+// Ids and paths here are hidden dispatch data; rows.ts decides what is visible.
 import { basename } from "node:path";
 
 import type { AgentRecord, WorkspaceRecord, WorktreeRecord } from "./client/types.ts";
+import type { CurrentContext } from "./context.ts";
 import { isBareRepository } from "./discovery/projects.ts";
 import { canonicalPathKey, isPathWithin } from "./util/paths.ts";
 
+// Below any real path length, so a list with no enclosing path marks nothing current.
+const NO_PATH_DEPTH = -1;
+// Workspace ids are internal Herdr identities and must never reach visible or
+// searchable rows, so an unlabeled workspace with no path gets a neutral name.
+const UNNAMED_WORKSPACE_LABEL = "unnamed workspace";
+
+/** One selectable agent pane. `id`, `agentTarget`, and pane/workspace ids are dispatch data, never row text. */
 export interface AgentTarget {
   readonly kind: "agent";
   readonly id: string;
@@ -22,6 +33,7 @@ export interface AgentTarget {
   readonly paneId?: string | undefined;
 }
 
+/** Navigation target kinds; drives dispatch, kind badges, and preselect priority. */
 export type TargetKind = "project" | "workspace" | "worktree";
 
 interface NavigationTargetBase {
@@ -35,12 +47,14 @@ interface NavigationTargetBase {
   readonly boardLabel?: string | undefined;
 }
 
+/** Project repository path; may map to an already-open workspace so dispatch can focus instead of create. */
 export interface ProjectTarget extends NavigationTargetBase {
   readonly kind: "project";
   readonly path: string;
   readonly existingWorkspaceId?: string | undefined;
 }
 
+/** Open Herdr workspace; path/cwd only feed disambiguation qualifiers, never raw row text. */
 export interface WorkspaceTarget extends NavigationTargetBase {
   readonly kind: "workspace";
   readonly workspaceId: string;
@@ -49,6 +63,7 @@ export interface WorkspaceTarget extends NavigationTargetBase {
   readonly agentStatus?: string | undefined;
 }
 
+/** Git worktree checkout; `existingWorkspaceId` lets dispatch reuse an open workspace. */
 export interface WorktreeTarget extends NavigationTargetBase {
   readonly kind: "worktree";
   readonly path: string;
@@ -57,55 +72,20 @@ export interface WorktreeTarget extends NavigationTargetBase {
   readonly existingWorkspaceId?: string | undefined;
 }
 
+/** Union every navigation mode renders and dispatches. */
 export type PickerTarget = ProjectTarget | WorkspaceTarget | WorktreeTarget;
 
-export interface CurrentContext {
-  readonly workspaceId?: string | undefined;
-  readonly tabId?: string | undefined;
-  readonly paneId?: string | undefined;
-  readonly cwd?: string | undefined;
-}
-
-export const CURRENT_CONTEXT_ENV = {
-  workspaceId: "HERDR_PICKERS_SOURCE_WORKSPACE_ID",
-  tabId: "HERDR_PICKERS_SOURCE_TAB_ID",
-  paneId: "HERDR_PICKERS_SOURCE_PANE_ID",
-  cwd: "HERDR_PICKERS_SOURCE_CWD",
-} as const;
-
-const HERDR_CONTEXT_ENV = {
-  workspaceId: "HERDR_WORKSPACE_ID",
-  tabId: "HERDR_TAB_ID",
-  paneId: "HERDR_PANE_ID",
-  activeWorkspaceId: "HERDR_ACTIVE_WORKSPACE_ID",
-  activePaneCwd: "HERDR_ACTIVE_PANE_CWD",
-} as const;
-
-export function currentContextFromEnv(env: Record<string, string | undefined> | undefined): CurrentContext {
-  return {
-    workspaceId: nonEmpty(env?.[CURRENT_CONTEXT_ENV.workspaceId]) ?? nonEmpty(env?.[HERDR_CONTEXT_ENV.workspaceId]) ?? nonEmpty(env?.[HERDR_CONTEXT_ENV.activeWorkspaceId]),
-    tabId: nonEmpty(env?.[CURRENT_CONTEXT_ENV.tabId]) ?? nonEmpty(env?.[HERDR_CONTEXT_ENV.tabId]),
-    paneId: nonEmpty(env?.[CURRENT_CONTEXT_ENV.paneId]) ?? nonEmpty(env?.[HERDR_CONTEXT_ENV.paneId]),
-    cwd: nonEmpty(env?.[CURRENT_CONTEXT_ENV.cwd]) ?? nonEmpty(env?.[HERDR_CONTEXT_ENV.activePaneCwd]) ?? nonEmpty(env?.PWD),
-  };
-}
-
-export interface AgentTargetOptions {
-  readonly includeFocused?: boolean | undefined;
-}
-
+/** Deduplicates agents by target and marks the one tied to the source pane/workspace as focused. */
 export function buildAgentTargets(
   agents: readonly AgentRecord[],
   workspaces: readonly WorkspaceRecord[] = [],
   current: CurrentContext = {},
-  options: AgentTargetOptions = {},
 ): AgentTarget[] {
   const workspaceById = indexWorkspacesById(workspaces);
-  // Resolve the preference across all visible rows first: an undetected source
+  // Resolve the preference across all rows first: an undetected source
   // pane must not disable every row's claim to be the current one.
-  const visible = agents.filter((agent) => !shouldExcludeAgent(agent, current, options.includeFocused === true));
-  const isCurrent = agentFocusSelector(visible, current);
-  return uniqueBy(visible, (agent) => agent.target).map((agent) => {
+  const isCurrent = agentFocusSelector(agents, current);
+  return uniqueBy(agents, (agent) => agent.target).map((agent) => {
     const workspace = agent.workspaceId ? workspaceById.get(agent.workspaceId) : undefined;
     const worktree = agentWorktreeLabel(agent, workspace);
     return {
@@ -128,6 +108,7 @@ export function buildAgentTargets(
   });
 }
 
+/** Bare-repository roots are dropped because they have no checkout to navigate into. */
 export function buildWorkspaceTargets(
   workspaces: readonly WorkspaceRecord[],
   current: CurrentContext = {},
@@ -150,21 +131,28 @@ export function buildWorkspaceTargets(
     }));
 }
 
+/** Current marks the source workspace's project, else the deepest project enclosing the source cwd. */
 export function buildProjectTargets(
   projects: readonly string[],
   workspaces: readonly WorkspaceRecord[],
   current: CurrentContext = {},
 ): ProjectTarget[] {
   const workspaceByPath = indexWorkspacesByPath(workspaces);
-  return uniqueSorted(projects).flatMap((path): ProjectTarget[] => {
-    const workspace = workspaceByPath.get(canonicalPathKey(path));
+  const paths = uniqueSorted(projects);
+  const matched = paths.map((path) => workspaceByPath.get(canonicalPathKey(path)));
+  const currentFlags = mostSpecificCurrent(paths.map((path, index) => ({
+    identity: isCurrentWorkspace(matched[index], current),
+    path,
+  })), current.cwd);
+  return paths.flatMap((path, index): ProjectTarget[] => {
+    const workspace = matched[index];
     const label = basename(path);
     return [{
       kind: "project",
       id: `project:${path}`,
       path,
       existingWorkspaceId: workspace?.workspaceId,
-      current: isCurrentWorkspace(workspace, current) || isCurrentPath(path, current),
+      current: currentFlags[index] === true,
       repo: label,
       repoKey: canonicalPathKey(path),
       boardLabel: label,
@@ -173,15 +161,23 @@ export function buildProjectTargets(
   });
 }
 
+/** Bare and prunable worktrees are dropped since they cannot host a workspace. */
 export function buildWorktreeTargets(
   worktrees: readonly WorktreeRecord[],
   workspaces: readonly WorkspaceRecord[],
   current: CurrentContext = {},
 ): WorktreeTarget[] {
   const workspaceByPath = indexWorkspacesByPath(workspaces);
-  return uniqueBy(worktrees.filter((worktree) => !worktree.isBare && !worktree.isPrunable), (worktree) => worktree.path)
-    .flatMap((worktree): WorktreeTarget[] => {
-      const workspace = workspaceByPath.get(canonicalPathKey(worktree.path));
+  const visible = uniqueBy(worktrees.filter((worktree) => !worktree.isBare && !worktree.isPrunable), (worktree) => worktree.path);
+  const matched = visible.map((worktree) => workspaceByPath.get(canonicalPathKey(worktree.path)));
+  const currentFlags = mostSpecificCurrent(visible.map((worktree, index) => ({
+    identity: (!!current.workspaceId && worktree.openWorkspaceId === current.workspaceId)
+      || isCurrentWorkspace(matched[index], current),
+    path: worktree.path,
+  })), current.cwd);
+  return visible
+    .flatMap((worktree, index): WorktreeTarget[] => {
+      const workspace = matched[index];
       return [{
         kind: "worktree",
         id: `worktree:${worktree.path}`,
@@ -189,8 +185,7 @@ export function buildWorktreeTargets(
         repoRoot: worktree.repoRoot,
         branch: worktree.branch,
         existingWorkspaceId: worktree.openWorkspaceId ?? workspace?.workspaceId,
-        current: (!!current.workspaceId && worktree.openWorkspaceId === current.workspaceId)
-          || isCurrentPath(worktree.path, current, workspace),
+        current: currentFlags[index] === true,
         repo: worktree.repoRoot ? basename(worktree.repoRoot) : undefined,
         repoKey: canonicalPathKey(worktree.repoRoot ?? worktree.path),
         boardLabel: worktreeBoardLabel(worktree),
@@ -198,10 +193,6 @@ export function buildWorktreeTargets(
         detail: worktreeDetail(worktree),
       }];
     });
-}
-
-export function workspaceRepoRoot(workspace: WorkspaceRecord): string | undefined {
-  return workspace.worktree?.repoRoot;
 }
 
 function indexWorkspacesById(workspaces: readonly WorkspaceRecord[]): Map<string, WorkspaceRecord> {
@@ -214,7 +205,7 @@ function workspacePath(workspace: WorkspaceRecord): string | undefined {
 
 function workspaceLabel(workspace: WorkspaceRecord): string {
   const path = workspacePath(workspace);
-  return path ? basename(path) : workspace.workspaceId;
+  return path ? basename(path) : UNNAMED_WORKSPACE_LABEL;
 }
 
 function indexWorkspacesByPath(workspaces: readonly WorkspaceRecord[]): Map<string, WorkspaceRecord> {
@@ -256,15 +247,19 @@ function workspaceRepoName(workspace: WorkspaceRecord): string | undefined {
   return workspace.worktree?.repoName ?? (workspace.worktree?.repoRoot ? basename(workspace.worktree.repoRoot) : undefined);
 }
 
-function workspaceRepoKey(workspace: WorkspaceRecord): string | undefined {
+/**
+ * Repository identity Herdr recorded for a workspace. Rows and repository
+ * scope must agree on it, otherwise scoped modes would filter out their own
+ * source repository.
+ */
+export function workspaceProvenanceRepoKey(workspace: WorkspaceRecord): string | undefined {
   if (workspace.worktree?.repoRoot) return canonicalPathKey(workspace.worktree.repoRoot);
-  if (workspace.worktree?.repoKey) return workspace.worktree.repoKey;
-  return workspace.cwd ? canonicalPathKey(workspace.cwd) : undefined;
+  return workspace.worktree?.repoKey;
 }
 
-function shouldExcludeAgent(agent: AgentRecord, current: CurrentContext, includeFocused: boolean): boolean {
-  if (!includeFocused && agent.focused === true) return true;
-  return !includeFocused && !!current.paneId && (agent.paneId === current.paneId || agent.target === current.paneId);
+// A bare cwd still groups rows, but it is never treated as recorded provenance.
+function workspaceRepoKey(workspace: WorkspaceRecord): string | undefined {
+  return workspaceProvenanceRepoKey(workspace) ?? (workspace.cwd ? canonicalPathKey(workspace.cwd) : undefined);
 }
 
 function workspaceLabelWithRelation(workspace: WorkspaceRecord): string {
@@ -334,9 +329,22 @@ function isCurrentWorkspace(workspace: WorkspaceRecord | undefined, current: Cur
   return workspace?.focused === true;
 }
 
-function isCurrentPath(path: string, current: CurrentContext, workspace: WorkspaceRecord | undefined = undefined): boolean {
-  return isCurrentWorkspace(workspace, current)
-    || (!!current.cwd && isPathWithin(path, current.cwd));
+interface CurrentCandidate {
+  readonly identity: boolean;
+  readonly path: string;
+}
+
+// Ancestry alone would also mark every checkout that encloses a nested one
+// (a repo root around its .worktrees/* children), so the source workspace wins
+// outright and cwd ancestry only picks the deepest enclosing path. A repo row
+// still stays current from any subdirectory when nothing deeper matches.
+function mostSpecificCurrent(candidates: readonly CurrentCandidate[], cwd: string | undefined): boolean[] {
+  if (candidates.some((candidate) => candidate.identity)) return candidates.map((candidate) => candidate.identity);
+  if (!cwd) return candidates.map(() => false);
+  const enclosing = candidates.map((candidate) => isPathWithin(candidate.path, cwd) ? canonicalPathKey(candidate.path) : undefined);
+  // Every enclosing key is an ancestor of the same cwd, so the longest is the deepest.
+  const deepest = Math.max(NO_PATH_DEPTH, ...enclosing.map((key) => key?.length ?? NO_PATH_DEPTH));
+  return enclosing.map((key) => key !== undefined && key.length === deepest);
 }
 
 function checkoutKind(linked: boolean | undefined): string | undefined {
@@ -352,10 +360,6 @@ function joinDetail(...parts: Array<string | undefined>): string | undefined {
   return detail.length > 0 ? detail.join(" · ") : undefined;
 }
 
-function nonEmpty(value: string | undefined): string | undefined {
-  return value && value.trim().length > 0 ? value : undefined;
-}
-
 // Agents share generic labels like "pi", so lead with their workspace relation
 // when Herdr provides one; otherwise use cwd basename as the relation anchor.
 function agentWorktreeLabel(agent: AgentRecord, workspace: WorkspaceRecord | undefined): string | undefined {
@@ -369,7 +373,7 @@ function agentRepoKey(agent: AgentRecord, workspace: WorkspaceRecord | undefined
 }
 
 function agentLabel(agent: AgentRecord, workspace: WorkspaceRecord | undefined): string {
-  const where = workspace ? workspaceLabel(workspace) : (agent.cwd ? basename(agent.cwd) : agent.workspaceId);
+  const where = workspace ? workspaceLabel(workspace) : (agent.cwd ? basename(agent.cwd) : undefined);
   return where ? `${where} ▸ ${agent.label}` : agent.label;
 }
 

@@ -1,3 +1,6 @@
+// Compatibility boundary for Herdr JSON. All Herdr output is untrusted: fields
+// are validated here, version-specific key variants fall back to each other, and
+// callers receive only typed records. Display text is sanitized downstream.
 import { isRecord } from "../util/objects.ts";
 
 const MALFORMED_PICKER_PANES_MESSAGE = "Malformed picker pane list";
@@ -9,7 +12,15 @@ const PICKER_FOCUS_EVENTS = {
   tab: "tab_focused",
   workspace: "workspace_focused",
 } as const;
+// Herdr names an agent under different keys across versions and agent kinds.
+const AGENT_IDENTITY_KEYS = ["label", "name", "agent", "kind"] as const;
+// Herdr reports live run state under agent_status; status/state cover other
+// Herdr versions and agent kinds.
+const STATUS_KEYS = ["agent_status", "status", "state"] as const;
+const AGENT_CWD_KEYS = ["cwd", "foreground_cwd"] as const;
+const AGENT_TARGET_KEYS = ["target", "pane_id", "terminal_id"] as const;
 
+/** Worktree origin Herdr recorded on a workspace; any field may be absent on older Herdr. */
 export interface WorktreeProvenance {
   readonly branch?: string | undefined;
   readonly path?: string | undefined;
@@ -20,17 +31,17 @@ export interface WorktreeProvenance {
   readonly isLinkedWorktree?: boolean | undefined;
 }
 
+/** One Herdr workspace; ids and cwd are hidden routing data, never row text. */
 export interface WorkspaceRecord {
   readonly workspaceId: string;
   readonly label?: string | undefined;
   readonly cwd?: string | undefined;
   readonly worktree?: WorktreeProvenance | undefined;
-  readonly tabCount?: number | undefined;
-  readonly paneCount?: number | undefined;
   readonly agentStatus?: string | undefined;
   readonly focused?: boolean | undefined;
 }
 
+/** One checkout from Herdr or the git porcelain fallback, normalized to one shape. */
 export interface WorktreeRecord {
   readonly path: string;
   readonly label?: string | undefined;
@@ -43,12 +54,13 @@ export interface WorktreeRecord {
   readonly openWorkspaceId?: string | undefined;
 }
 
+/** Worktrees plus the repository root Herdr resolved the lookup against. */
 export interface WorktreeListResult {
   readonly sourceRepoRoot?: string | undefined;
-  readonly sourceWorkspaceId?: string | undefined;
   readonly worktrees: readonly WorktreeRecord[];
 }
 
+/** One agent with a target Herdr can still resolve for focus. */
 export interface AgentRecord {
   readonly target: string;
   readonly label: string;
@@ -60,18 +72,14 @@ export interface AgentRecord {
   readonly focused?: boolean | undefined;
 }
 
+/** Skip count and observed keys let callers explain when no agent had a usable target. */
 export interface AgentListResult {
   readonly agents: readonly AgentRecord[];
   readonly skippedWithoutTarget: number;
-  readonly skippedWithoutIdentity: number;
   readonly observedKeys: readonly string[];
 }
 
-export interface PickerFocusRequestIds {
-  readonly subscribe: string;
-  readonly snapshot: string;
-}
-
+/** Validated focus-socket messages that drive the overlay focus observer. */
 export type PickerFocusLifecycleMessage =
   | { readonly kind: "subscription-started" }
   | {
@@ -85,11 +93,8 @@ export type PickerFocusLifecycleMessage =
   | { readonly kind: "tab-focused"; readonly tabId: string; readonly workspaceId: string }
   | { readonly kind: "workspace-focused"; readonly workspaceId: string };
 
-export function parsePickerFocusLifecycleMessage(
-  raw: string,
-  requestIds: PickerFocusRequestIds,
-  paneId: string,
-): PickerFocusLifecycleMessage {
+/** Parses one subscription line; anything unexpected, including errors, throws one generic message. */
+export function parsePickerFocusLifecycleMessage(raw: string, subscribeRequestId: string): PickerFocusLifecycleMessage {
   let value: unknown;
   try {
     value = JSON.parse(raw) as unknown;
@@ -104,11 +109,8 @@ export function parsePickerFocusLifecycleMessage(
 
     const id = expectString(envelope.id);
     const result = expectRecord(envelope.result);
-    if (id === requestIds.subscribe && result.type === SUBSCRIPTION_STARTED_TYPE) {
+    if (id === subscribeRequestId && result.type === SUBSCRIPTION_STARTED_TYPE) {
       return { kind: "subscription-started" };
-    }
-    if (id === requestIds.snapshot && result.type === SESSION_SNAPSHOT_TYPE) {
-      return readPickerFocusSnapshot(result.snapshot, paneId);
     }
     throw new Error(MALFORMED_PICKER_FOCUS_MESSAGE);
   } catch {
@@ -116,6 +118,7 @@ export function parsePickerFocusLifecycleMessage(
   }
 }
 
+/** Focus snapshot for `paneId`; throws if the pane is absent or the response is malformed. */
 export function parsePickerSnapshotResponse(raw: string, paneId: string): PickerFocusLifecycleMessage {
   try {
     const envelope = expectRecord(JSON.parse(raw));
@@ -127,6 +130,7 @@ export function parsePickerSnapshotResponse(raw: string, paneId: string): Picker
   }
 }
 
+/** Strict: a malformed pane list throws rather than reading as "no picker open". */
 export function readPickerPaneIds(envelope: unknown): string[] {
   const record = expectRecord(envelope);
   const panes = getResult(record).panes;
@@ -134,12 +138,14 @@ export function readPickerPaneIds(envelope: unknown): string[] {
   return panes.map(pane => expectString(expectRecord(pane).pane_id));
 }
 
+/** Lenient: rows without a workspace id are dropped instead of failing the catalog. */
 export function readWorkspaces(envelope: unknown): WorkspaceRecord[] {
   const result = getResult(envelope);
   const rows = getArray(result.workspaces);
   return rows.flatMap(readWorkspace);
 }
 
+/** Repositories Herdr already tracks; the default project set when no roots are configured. */
 export function workspaceRepoRoots(workspaces: readonly WorkspaceRecord[]): string[] {
   const roots = new Set<string>();
   for (const workspace of workspaces) {
@@ -149,12 +155,12 @@ export function workspaceRepoRoots(workspaces: readonly WorkspaceRecord[]): stri
   return [...roots].sort((left, right) => left.localeCompare(right));
 }
 
+/** Lenient: rows without a path are dropped; a missing source root is left to callers. */
 export function readWorktrees(envelope: unknown): WorktreeListResult {
   const result = getResult(envelope);
   const source = optionalRecord(result.source);
   return {
     sourceRepoRoot: optionalString(source?.repo_root),
-    sourceWorkspaceId: optionalString(source?.source_workspace_id),
     worktrees: getArray(result.worktrees).flatMap(readWorktree),
   };
 }
@@ -167,6 +173,7 @@ export function readWorktreeScope(envelope: unknown): string | undefined {
   return optionalString(source?.repo_root);
 }
 
+/** Rows without any agent identity are ignored; identified rows without a stable target are counted. */
 export function readAgentList(envelope: unknown): AgentListResult {
   const result = getResult(envelope);
   const rows = getArray(result.agents).flatMap((value) => {
@@ -178,20 +185,16 @@ export function readAgentList(envelope: unknown): AgentListResult {
   const agents: AgentRecord[] = [];
   const observedKeys = new Set<string>();
   let skippedWithoutTarget = 0;
-  let skippedWithoutIdentity = 0;
 
   for (const row of rows) {
     for (const key of Object.keys(row)) observedKeys.add(key);
-    if (!hasAgentIdentity(row)) {
-      skippedWithoutIdentity += 1;
-      continue;
-    }
+    if (!hasAgentIdentity(row)) continue;
     const agent = readAgent(row, nameCounts, labelCounts);
     if (agent) agents.push(agent);
     else skippedWithoutTarget += 1;
   }
 
-  return { agents, skippedWithoutTarget, skippedWithoutIdentity, observedKeys: [...observedKeys].sort((left, right) => left.localeCompare(right)) };
+  return { agents, skippedWithoutTarget, observedKeys: [...observedKeys].sort((left, right) => left.localeCompare(right)) };
 }
 
 function readPickerFocusEvent(envelope: Record<string, unknown>): PickerFocusLifecycleMessage {
@@ -272,10 +275,6 @@ function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;
 }
 
-function optionalNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
 function optionalBoolean(value: unknown): boolean {
   return optionalBooleanOrUndefined(value) ?? false;
 }
@@ -299,9 +298,7 @@ function readWorkspace(value: unknown): WorkspaceRecord[] {
     label: optionalString(record.label),
     cwd: optionalString(record.cwd),
     worktree,
-    tabCount: optionalNumber(record.tab_count),
-    paneCount: optionalNumber(record.pane_count),
-    agentStatus: firstString(record, ["agent_status", "status", "state"]),
+    agentStatus: firstString(record, STATUS_KEYS),
     focused: optionalBooleanOrUndefined(record.focused),
   }];
 }
@@ -345,20 +342,18 @@ function readAgent(record: Record<string, unknown>, nameCounts: ReadonlyMap<stri
   const sessionAgent = readSessionAgent(record.agent_session);
   return {
     target,
-    label: firstString(record, ["label", "name", "agent", "kind"]) ?? sessionAgent ?? target,
+    label: firstString(record, AGENT_IDENTITY_KEYS) ?? sessionAgent ?? target,
     workspaceId: optionalString(record.workspace_id),
     tabId: optionalString(record.tab_id),
     paneId: optionalString(record.pane_id),
-    // Herdr reports the live run state under agent_status; keep status/state as
-    // fallbacks for other Herdr versions or agent kinds.
-    status: firstString(record, ["agent_status", "status", "state"]),
-    cwd: firstString(record, ["cwd", "foreground_cwd"]),
+    status: firstString(record, STATUS_KEYS),
+    cwd: firstString(record, AGENT_CWD_KEYS),
     focused: typeof record.focused === "boolean" ? record.focused : undefined,
   };
 }
 
 function hasAgentIdentity(record: Record<string, unknown>): boolean {
-  return firstString(record, ["label", "name", "agent", "kind"]) !== undefined || readSessionAgent(record.agent_session) !== undefined;
+  return firstString(record, AGENT_IDENTITY_KEYS) !== undefined || readSessionAgent(record.agent_session) !== undefined;
 }
 
 function readSessionAgent(value: unknown): string | undefined {
@@ -369,7 +364,7 @@ function readSessionAgent(value: unknown): string | undefined {
 // agent names (terminal ids stopped resolving); prefer pane_id so selection
 // keeps working across herdr versions that still expose a legacy target field.
 function stableAgentTarget(record: Record<string, unknown>, nameCounts: ReadonlyMap<string, number>, labelCounts: ReadonlyMap<string, number>): string | undefined {
-  return firstString(record, ["target", "pane_id", "terminal_id"])
+  return firstString(record, AGENT_TARGET_KEYS)
     ?? uniqueField(record, "name", nameCounts)
     ?? uniqueField(record, "label", labelCounts);
 }

@@ -300,14 +300,16 @@ before it can reach your terminal.
 - No projects or worktrees — open a repository in Herdr or configure `[projects].roots`.
 - No agents — open an agent pane first.
 - `Herdr command could not be started.` — check the Herdr executable and retry. A proven process-creation failure releases its unclaimed reservation.
+- `herdr plugin failed` — Herdr refused to open the picker pane. The refusal releases the unclaimed reservation, so retry after you fix the cause.
 - Focus observation failed — the picker closes safely and reports failure. Check that the affected Herdr session remains available.
-- Picker request delivery timed out — close the current picker, then retry.
+- `Picker request could not be delivered before the deadline. Reopen after the current picker closes.` — close the current picker, then retry.
   Close active pickers before updating from a version without mode replacement.
-  If startup remains uncertain, follow the restart guidance below.
-- Picker startup cannot be verified — save active work, then restart the affected Herdr session.
+- `Picker startup is pending. Retry after the earlier picker opens, or after 10 seconds when its reservation expires.` — an earlier picker request was sent, but its picker did not start.
+  After that time, a new picker can take over the reservation.
+  A late picker from the earlier request then exits and does not show a duplicate surface.
   Ownership uses `picker-sessions.sqlite` in the plugin state directory.
   Do not delete this file while any picker is active.
-  If an unrelated process reuses a recorded PID, ownership also fails closed; restart the affected session to recover.
+  If an unrelated process reuses a recorded PID, ownership fails closed; restart the affected session to recover.
 - Red fzf error — verify `fzf --version` is `>= 0.48`.
 
 ## License

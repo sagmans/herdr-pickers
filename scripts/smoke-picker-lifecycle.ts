@@ -2,56 +2,30 @@ import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { readOwnershipDatabase } from "./smoke-database.ts";
 import { runPickerReplacementSmoke } from "./smoke-picker-replacement.ts";
+import {
+  CONFIG_FILE_NAME,
+  KEY_CTRL_C,
+  KEY_ENTER,
+  OWNER_QUERY,
+  OWNERSHIP_DATABASE_NAME,
+  PICKER_PANE_LABEL,
+  PLUGIN_ID,
+  processAlive,
+  READ_REQUEST,
+  WORKSPACES_PICKER_PROMPT,
+  type PickerLifecycleSmokeOptions,
+  type PickerPlacement,
+  type SmokeSession,
+} from "./smoke-support.ts";
 import { POLL_TIMEOUT_EXTENDED_MS } from "./smoke-timing.ts";
 
-const OWNERSHIP_DATABASE_NAME = "picker-sessions.sqlite";
-const OWNERSHIP_TABLE_QUERY = "SELECT session, token, opener, picker, placement, pane FROM owners";
-const REQUEST_QUERY = "SELECT token, mode, acknowledged FROM requests WHERE session = ?";
-const PICKER_PANE_LABEL = "Herdr Picker";
-const WORKSPACE_PICKER_PROMPT = "workspaces ›";
-const KEY_CTRL_C = "\u0003";
-const KEY_ENTER = "\r";
 const INPUT_SETTLE_MS = 400;
-const PROCESS_PROBE_SIGNAL = 0;
 const BURST_SIZE = 6;
 const BURST_ACTIONS = ["workspaces", "projects", "all"] as const;
 const PANE_DIRECTIONS = ["left", "right", "up", "down"] as const;
-const PLUGIN_ID = "herdr-pickers";
-const CONFIG_FILE_NAME = "config.toml";
 const TAB_DESTINATION_LABEL = "smoke-tab-destination";
 const FOCUS_EVENT_BUDGET_BYTES = 64 * 1024;
 const LARGE_SESSION_LABEL = "large-session-".padEnd(96 * 1024, "x");
-
-export interface CliResult {
-  readonly code: number;
-  readonly stdout: string;
-  readonly stderr: string;
-}
-
-export interface SmokeSession {
-  readonly label: string;
-  readonly rawOutputPath: string;
-  run(args: readonly string[]): CliResult;
-  runAsync(args: readonly string[]): Promise<CliResult>;
-  input(text: string): void;
-}
-
-export interface PickerLifecycleSmokeOptions {
-  readonly root: string;
-  readonly repo: string;
-  readonly pluginConfigDir: string;
-  readonly baseConfig: string;
-  readonly primary: SmokeSession;
-  readonly secondary: SmokeSession;
-  readonly firstWorkspaceId: string;
-  readonly firstWorkspaceLabel: string;
-  readonly dispatchWorkspaceId: string;
-  readonly dispatchWorkspaceLabel: string;
-  readonly check: (label: string, ok: boolean, detail?: string) => void;
-  readonly poll: (label: string, probe: () => string | undefined, timeoutMs?: number) => Promise<string>;
-}
-
-type PickerPlacement = "popup" | "overlay";
 
 interface OwnerRow {
   readonly session: string;
@@ -285,10 +259,10 @@ async function openPicker(
     if (placement === "overlay") {
       if (owner.pane === null) return undefined;
       const frame = session.run(["pane", "read", owner.pane, "--source", "visible", "--format", "text"]);
-      return frame.code === 0 && frame.stdout.includes(WORKSPACE_PICKER_PROMPT) ? "rendered" : undefined;
+      return frame.code === 0 && frame.stdout.includes(WORKSPACES_PICKER_PROMPT) ? "rendered" : undefined;
     }
     const output = readFileSync(session.rawOutputPath).subarray(outputOffset).toString("utf8");
-    return output.includes(WORKSPACE_PICKER_PROMPT) ? "rendered" : undefined;
+    return output.includes(WORKSPACES_PICKER_PROMPT) ? "rendered" : undefined;
   }, POLL_TIMEOUT_EXTENDED_MS);
 
   if (placement === "popup") return { owner };
@@ -307,12 +281,12 @@ function writePlacement(options: PickerLifecycleSmokeOptions, placement: PickerP
 
 function readRequest(databasePath: string, session: string): RequestRow | null {
   return readOwnershipDatabase(databasePath, (database) =>
-    database.query<RequestRow, [string]>(REQUEST_QUERY).get(session));
+    database.query<RequestRow, [string]>(READ_REQUEST).get(session));
 }
 
 function readOwners(databasePath: string): OwnerRow[] {
   return readOwnershipDatabase(databasePath, (database) =>
-    database.query<unknown, []>(OWNERSHIP_TABLE_QUERY).all().map(parseOwner));
+    database.query<unknown, []>(OWNER_QUERY).all().map(parseOwner));
 }
 
 function parseOwner(value: unknown): OwnerRow {
@@ -346,19 +320,6 @@ function onlyOwnerSession(databasePath: string): string {
 }
 
 const pickerAlive = (owner: OwnerRow): boolean => owner.picker !== null && processAlive(owner.picker);
-
-function processAlive(pid: number): boolean {
-  try {
-    process.kill(pid, PROCESS_PROBE_SIGNAL);
-    return true;
-  } catch (error) {
-    return errorCode(error) !== "ESRCH";
-  }
-}
-
-function errorCode(error: unknown): string | undefined {
-  return error && typeof error === "object" && "code" in error && typeof error.code === "string" ? error.code : undefined;
-}
 
 async function waitForPickerExit(options: PickerLifecycleSmokeOptions, owner: OwnerRow, label: string): Promise<void> {
   await options.poll(label, () => owner.picker !== null && !processAlive(owner.picker) ? owner.token : undefined);

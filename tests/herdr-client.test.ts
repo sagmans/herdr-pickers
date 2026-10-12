@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
-import { Herdr, HerdrCommandError, HerdrJsonError, type CommandRunner } from "../src/client/herdr.ts";
+import { Herdr, HerdrCommandError, HerdrJsonError } from "../src/client/herdr.ts";
+import { type CommandRunner } from "../src/util/subprocess.ts";
 
 function failingRunner(stderr: string, exitCode = 1): CommandRunner {
   return async () => ({ stdout: "", stderr, exitCode });

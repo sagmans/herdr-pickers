@@ -1,11 +1,16 @@
+// Visible/searchable row rendering for every picker mode. Owns ordering,
+// grouping, and duplicate-name qualifiers; must never expose hidden ids or
+// paths, and sanitizes every untrusted string before it reaches a row.
 import { dirname, parse, sep } from "node:path";
 
 import { parseAgentStatus, statusColor, statusGlyph, type AgentState } from "./agent-status.ts";
 import type { AgentTarget, PickerTarget, TargetKind } from "./catalog.ts";
-import type { NavigationMode } from "./navigation.ts";
+import { navigationModeSpec, type NavigationMode, type NavigationModeSpec } from "./modes.ts";
 import { PICKER_PALETTE } from "./palette.ts";
 import type { PickerGroup, PickerItem, PickerRows } from "./picker-row.ts";
 import { bold, dim, trueColor } from "./style.ts";
+// Herdr metadata is untrusted: every field rendered into a row passes through
+// sanitizeTerminalText so hidden escapes and tabs never reach visible fields.
 import { sanitizeTerminalText } from "./util/terminal-text.ts";
 
 const UNKNOWN_REPO = "unknown repo";
@@ -16,10 +21,20 @@ const GROUP_PREFIX = "▾ ";
 const CURRENT_MARKER = "●";
 const CURRENT_MARKER_SUFFIX = " ";
 const SEARCH_FIELD_SEPARATOR = " ";
+// Rows nest under their repository header so the list reads as a tree.
+const ROW_INDENT = "  ";
 const KIND_PRIORITY: Readonly<Record<TargetKind, number>> = {
   project: 0,
   workspace: 1,
   worktree: 2,
+};
+// All mode can mark a project, its open workspace, and its checkout current at
+// once; the cursor starts on the narrowest one so Enter returns to the source
+// workspace instead of the repository's main checkout.
+const PRESELECT_PRIORITY: Readonly<Record<TargetKind, number>> = {
+  workspace: 0,
+  worktree: 1,
+  project: 2,
 };
 
 interface RepositoryTarget {
@@ -32,6 +47,7 @@ interface NavigationQualifiers {
   readonly workspaces: ReadonlyMap<string, string>;
 }
 
+/** Agent rows grouped by repository; the first focused target becomes the initial cursor row. */
 export function renderAgentRows(targets: readonly AgentTarget[]): PickerRows {
   const ordered = orderAgents(targets);
   const qualifiers = repositoryQualifiers(ordered);
@@ -41,7 +57,7 @@ export function renderAgentRows(targets: readonly AgentTarget[]): PickerRows {
   let group: PickerGroup | undefined;
 
   for (const target of ordered) {
-    const repoKey = target.repoKey ?? UNKNOWN_REPO_KEY;
+    const repoKey = repositoryKey(target);
     if (repoKey !== previousRepoKey) {
       const label = repoLabel(target, qualifiers);
       group = {
@@ -55,7 +71,7 @@ export function renderAgentRows(targets: readonly AgentTarget[]): PickerRows {
     const display = renderTargetLine(target, state, false);
     items.push({
       id: target.id,
-      searchText: [group?.label, target.worktree ? sanitize(target.worktree) : undefined, sanitize(target.agentLabel)].filter(Boolean).join(SEARCH_FIELD_SEPARATOR),
+      searchText: [group?.label, target.worktree ? sanitizeTerminalText(target.worktree) : undefined, sanitizeTerminalText(target.agentLabel)].filter(Boolean).join(SEARCH_FIELD_SEPARATOR),
       display,
       selectedDisplay: renderTargetLine(target, state, true),
       selectionColor: statusColor(state),
@@ -68,31 +84,41 @@ export function renderAgentRows(targets: readonly AgentTarget[]): PickerRows {
   return { items, focusedId };
 }
 
+/** Navigation rows shaped by the mode spec (grouping, kind badges); preselects the narrowest current target. */
 export function renderNavigationRows(
   mode: NavigationMode,
   targets: readonly PickerTarget[],
 ): PickerRows {
-  const ordered = orderNavigationTargets(mode, targets);
+  const spec = navigationModeSpec(mode);
+  const ordered = orderNavigationTargets(spec, targets);
   const qualifiers: NavigationQualifiers = {
     repositories: repositoryQualifiers(ordered),
     workspaces: workspaceQualifiers(ordered),
   };
   const items = ordered.map((target): PickerItem => {
-    const group = mode === "projects" ? undefined : navigationGroup(target, qualifiers.repositories);
-    const identity = navigationIdentity(mode, target, qualifiers);
-    const detail = target.detail ? sanitize(target.detail) : undefined;
-    const badge = mode === "all" ? target.kind : undefined;
+    const group = spec.grouped ? navigationGroup(target, qualifiers.repositories) : undefined;
+    const identity = navigationIdentity(spec, target, qualifiers);
+    const detail = target.detail ? sanitizeTerminalText(target.detail) : undefined;
+    const badge = spec.kindBadges ? target.kind : undefined;
     const marker = target.current ? currentMarker() : "";
     return {
       id: target.id,
       target: target.id,
       group,
       searchText: [group?.label, badge, identity, detail].filter(Boolean).join(SEARCH_FIELD_SEPARATOR),
-      display: renderNavigationTarget(mode, target, identity, detail, false, marker),
-      selectedDisplay: renderNavigationTarget(mode, target, identity, detail, true, marker),
+      display: renderNavigationTarget(spec, target, identity, detail, false, marker),
+      selectedDisplay: renderNavigationTarget(spec, target, identity, detail, true, marker),
     };
   });
-  return { items, focusedId: ordered.find((target) => target.current)?.id };
+  return { items, focusedId: preselectedTarget(ordered)?.id };
+}
+
+function preselectedTarget(ordered: readonly PickerTarget[]): PickerTarget | undefined {
+  // Ties keep display order so a single-kind list still preselects its first current row.
+  return ordered
+    .filter((target) => target.current)
+    .reduce<PickerTarget | undefined>((best, target) =>
+      best === undefined || PRESELECT_PRIORITY[target.kind] < PRESELECT_PRIORITY[best.kind] ? target : best, undefined);
 }
 
 function renderGroup(label: string, unknown: boolean): string {
@@ -102,15 +128,13 @@ function renderGroup(label: string, unknown: boolean): string {
 
 function renderTargetLine(target: AgentTarget, state: AgentState, selected: boolean): string {
   const glyph = trueColor(statusColor(state), statusGlyph(state));
-  const worktree = target.worktree ? sanitize(target.worktree) : undefined;
-  const label = sanitize(target.agentLabel);
+  const worktree = target.worktree ? sanitizeTerminalText(target.worktree) : undefined;
+  const label = sanitizeTerminalText(target.agentLabel);
   const relation = worktree ? worktree + RELATION_SEPARATOR : "";
   const identity = selected
     ? bold(trueColor(statusColor(state), relation + label))
     : `${worktree ? trueColor(PICKER_PALETTE.muted, relation) : ""}${trueColor(PICKER_PALETTE.identity, label)}`;
-  // Children nest under their repository header so the list reads as a tree:
-  // the header owns the first column, agent rows indent beneath it.
-  return `  ${glyph} ${identity}`;
+  return `${ROW_INDENT}${glyph} ${identity}`;
 }
 
 function navigationGroup(
@@ -131,7 +155,7 @@ function currentMarker(): string {
 }
 
 function renderNavigationTarget(
-  mode: NavigationMode,
+  spec: NavigationModeSpec,
   target: PickerTarget,
   identity: string,
   detail: string | undefined,
@@ -139,32 +163,33 @@ function renderNavigationTarget(
   marker = "",
 ): string {
   const kindColor = PICKER_PALETTE.kind[target.kind];
-  const badge = mode === "all" ? `${trueColor(kindColor, `[${target.kind}]`)} ` : "";
+  const badge = spec.kindBadges ? `${trueColor(kindColor, `[${target.kind}]`)} ` : "";
   const primaryColor = selected
     ? PICKER_PALETTE.selected
-    : mode === "all"
+    : spec.kindBadges
       ? kindColor
       : PICKER_PALETTE.muted;
   const primary = bold(trueColor(primaryColor, identity));
-  return `  ${marker}${badge}${primary}${detail ? ` ${trueColor(PICKER_PALETTE.muted, detail)}` : ""}`;
+  return `${ROW_INDENT}${marker}${badge}${primary}${detail ? ` ${trueColor(PICKER_PALETTE.muted, detail)}` : ""}`;
 }
 
 function navigationIdentity(
-  mode: NavigationMode,
+  spec: NavigationModeSpec,
   target: PickerTarget,
   qualifiers: NavigationQualifiers,
 ): string {
   const label = navigationDisplayLabel(target);
-  const qualifier = mode === "projects"
+  // Without a group header, the repository qualifier must ride on the row itself.
+  const qualifier = !spec.grouped
     ? qualifiers.repositories.get(repositoryKey(target))
     : qualifiers.workspaces.get(target.id);
-  return sanitize(qualifier ? `${label}${GROUP_QUALIFIER_SEPARATOR}${qualifier}` : label);
+  return sanitizeTerminalText(qualifier ? `${label}${GROUP_QUALIFIER_SEPARATOR}${qualifier}` : label);
 }
 
 function repoLabel(target: RepositoryTarget, qualifiers: ReadonlyMap<string, string>): string {
   const label = target.repo ?? UNKNOWN_REPO;
-  const qualifier = qualifiers.get(target.repoKey ?? UNKNOWN_REPO_KEY);
-  return sanitize(qualifier ? `${label}${GROUP_QUALIFIER_SEPARATOR}${qualifier}` : label);
+  const qualifier = qualifiers.get(repositoryKey(target));
+  return sanitizeTerminalText(qualifier ? `${label}${GROUP_QUALIFIER_SEPARATOR}${qualifier}` : label);
 }
 
 // Duplicate repository names gain the shortest unique parent path suffix so
@@ -174,7 +199,7 @@ function repositoryQualifiers(targets: readonly RepositoryTarget[]): ReadonlyMap
   for (const target of targets) {
     const label = target.repo ?? UNKNOWN_REPO;
     const keys = keysByLabel.get(label) ?? new Set<string>();
-    keys.add(target.repoKey ?? UNKNOWN_REPO_KEY);
+    keys.add(repositoryKey(target));
     keysByLabel.set(label, keys);
   }
 
@@ -232,18 +257,18 @@ function orderAgents(targets: readonly AgentTarget[]): AgentTarget[] {
     if (byRepo !== 0) return byRepo;
     const byAgent = left.agentLabel.localeCompare(right.agentLabel);
     if (byAgent !== 0) return byAgent;
-    const byLabel = agentDisplayLabel(left).localeCompare(agentDisplayLabel(right));
+    const byLabel = sanitizeTerminalText(left.boardLabel).localeCompare(sanitizeTerminalText(right.boardLabel));
     return byLabel !== 0 ? byLabel : left.id.localeCompare(right.id);
   });
 }
 
-function orderNavigationTargets(mode: NavigationMode, targets: readonly PickerTarget[]): PickerTarget[] {
+function orderNavigationTargets(spec: NavigationModeSpec, targets: readonly PickerTarget[]): PickerTarget[] {
   return targets.toSorted((left, right) => {
-    if (mode !== "projects") {
+    if (spec.grouped) {
       const byRepo = compareRepositories(left, right);
       if (byRepo !== 0) return byRepo;
     }
-    if (mode === "all") {
+    if (spec.kindBadges) {
       const byKind = KIND_PRIORITY[left.kind] - KIND_PRIORITY[right.kind];
       if (byKind !== 0) return byKind;
     }
@@ -256,7 +281,7 @@ function workspaceQualifiers(targets: readonly PickerTarget[]): ReadonlyMap<stri
   const groups = new Map<string, Extract<PickerTarget, { readonly kind: "workspace" }>[]>();
   for (const target of targets) {
     if (target.kind !== "workspace") continue;
-    const signature = [repositoryKey(target), navigationDisplayLabel(target), sanitize(target.detail ?? "")].join("\0");
+    const signature = [repositoryKey(target), navigationDisplayLabel(target), sanitizeTerminalText(target.detail ?? "")].join("\0");
     const group = groups.get(signature) ?? [];
     group.push(target);
     groups.set(signature, group);
@@ -276,12 +301,8 @@ function workspaceQualifiers(targets: readonly PickerTarget[]): ReadonlyMap<stri
   return result;
 }
 
-function agentDisplayLabel(target: AgentTarget): string {
-  return sanitize(target.boardLabel ?? target.label);
-}
-
 function navigationDisplayLabel(target: PickerTarget): string {
-  return sanitize(target.boardLabel ?? target.label);
+  return sanitizeTerminalText(target.boardLabel ?? target.label);
 }
 
 function repositoryKey(target: RepositoryTarget): string {
@@ -290,12 +311,5 @@ function repositoryKey(target: RepositoryTarget): string {
 
 function compareRepositories(left: RepositoryTarget, right: RepositoryTarget): number {
   const byLabel = (left.repo ?? UNKNOWN_REPO).localeCompare(right.repo ?? UNKNOWN_REPO);
-  return byLabel !== 0 ? byLabel : (left.repoKey ?? UNKNOWN_REPO_KEY).localeCompare(right.repoKey ?? UNKNOWN_REPO_KEY);
-}
-
-// Strip ANSI sequences, bidi controls, and control codes from metadata
-// rendered into rows so hidden escapes and tabs can never leak into the
-// visible fields.
-function sanitize(value: string): string {
-  return sanitizeTerminalText(value);
+  return byLabel !== 0 ? byLabel : repositoryKey(left).localeCompare(repositoryKey(right));
 }

@@ -3,7 +3,8 @@ import { delimiter, dirname, join } from "node:path";
 import { getEventListeners } from "node:events";
 import { afterEach, describe, expect, test } from "bun:test";
 
-import { Herdr, HerdrCommandError, type CommandResult, type CommandRunner } from "../src/client/herdr.ts";
+import { Herdr, HerdrCommandError } from "../src/client/herdr.ts";
+import { type CommandResult, type CommandRunner } from "../src/util/subprocess.ts";
 import {
   listGitWorktrees,
   listWorktreesForContext,

@@ -1,3 +1,6 @@
+// Picker surface lifecycle: decides popup versus overlay from the Herdr env and
+// closes an inferred surface. Shared by the pane entrypoint, the session claim,
+// and focus observation so they agree on placement and close exactly once.
 import { createConnection } from "node:net";
 
 const SOCKET_ENV = "HERDR_SOCKET_PATH";
@@ -7,36 +10,58 @@ const OVERLAY_CLOSE_METHOD = "plugin.pane.close";
 const OVERLAY_CLOSE_TIMEOUT_MS = 100;
 const NEWLINE_BYTE = 0x0a;
 
-export type SocketWriter = (path: string, payload: string) => Promise<void>;
+/**
+ * Where a picker child draws. Herdr gives a plugin pane child HERDR_PANE_ID only
+ * when it runs as an overlay pane; a native popup has no pane of its own. This
+ * is the one place that inference is made so claim, focus, and close agree.
+ */
+export type PickerSurface =
+  | { readonly placement: "overlay"; readonly paneId: string }
+  | { readonly placement: "popup" };
 
-export async function closePickerSurface(
-  env: Record<string, string | undefined> = process.env,
-  write: SocketWriter = writeSocket,
-): Promise<void> {
+/** Shared popup value; a popup carries no pane id to target. */
+export const POPUP_SURFACE: PickerSurface = { placement: "popup" };
+
+/** Single inference point for placement; see PickerSurface for the HERDR_PANE_ID contract. */
+export function pickerSurfaceFromEnv(env: Record<string, string | undefined>): PickerSurface {
   const paneId = env[PANE_ID_ENV];
-  if (paneId) {
-    await Promise.race([
-      closeOverlayPane(paneId, env, write),
-      delay(OVERLAY_CLOSE_TIMEOUT_MS),
-    ]);
-    return;
-  }
-  // Native exit removes this popup; an unqualified close could dismiss its successor.
+  return paneId ? { placement: "overlay", paneId } : POPUP_SURFACE;
 }
 
-export async function closeOverlayPane(
-  paneId: string,
-  env: Record<string, string | undefined> = process.env,
+/** Socket transport seam so close requests can be exercised without a live Herdr. */
+export type SocketWriter = (path: string, payload: string) => Promise<void>;
+
+/**
+ * Closes an overlay best effort within a short bound so exit is never blocked;
+ * popups are left to Herdr, which removes them when the child exits.
+ */
+export async function closePickerSurface(
+  surface: PickerSurface,
+  socketPath: string | undefined,
   write: SocketWriter = writeSocket,
 ): Promise<void> {
-  const path = env[SOCKET_ENV];
-  if (!path) throw new Error(`${SOCKET_ENV} is required to close the picker overlay.`);
+  if (surface.placement === "overlay") {
+    await Promise.race([
+      closeOverlayPane(surface.paneId, socketPath, write),
+      delay(OVERLAY_CLOSE_TIMEOUT_MS),
+    ]);
+  }
+  // Native exit removes a popup; an unqualified close could dismiss its successor.
+}
+
+/** Asks Herdr to close one overlay pane by id; throws when no socket is available. */
+export async function closeOverlayPane(
+  paneId: string,
+  socketPath: string | undefined,
+  write: SocketWriter = writeSocket,
+): Promise<void> {
+  if (!socketPath) throw new Error(`${SOCKET_ENV} is required to close the picker overlay.`);
   const payload = `${JSON.stringify({
     id: OVERLAY_CLOSE_REQUEST_ID,
     method: OVERLAY_CLOSE_METHOD,
     params: { pane_id: paneId },
   })}\n`;
-  await write(path, payload);
+  await write(socketPath, payload);
 }
 
 function delay(ms: number): Promise<void> {

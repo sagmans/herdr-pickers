@@ -1,3 +1,6 @@
+// Pure layout and rendering for the picker frame: header, result list, and
+// prompt rail. Shared by drawing and mouse hit-testing so both agree on
+// where each row sits.
 import { PICKER_PALETTE } from "./palette.ts";
 import {
   expandPickerItems,
@@ -24,6 +27,7 @@ const POINTER = "→";
 const CURSOR_COLUMN_SUFFIX = "G";
 const CSI_PREFIX = "\x1b[";
 
+/** Terminal size in cells; every layout decision derives from it. */
 export interface Viewport {
   readonly columns: number;
   readonly rows: number;
@@ -36,6 +40,7 @@ interface ListLayout {
   readonly rows: readonly PickerDisplayRow[];
 }
 
+/** Render-relevant picker state; `selected` is -1 when nothing is selectable. */
 export interface PickerState {
   readonly prompt: string;
   readonly noun: string;
@@ -48,12 +53,14 @@ export interface PickerState {
   readonly scrollTop: number;
 }
 
+/** Meaning of a mouse event once mapped onto the current layout. */
 export type PickerAction =
   | { readonly type: "close" }
   | { readonly type: "select"; readonly index: number }
   | { readonly type: "scroll"; readonly delta: number }
   | { readonly type: "none" };
 
+/** One string per viewport row; results anchor to the bottom, next to the prompt. */
 export function renderFrame(state: PickerState, viewport: Viewport): readonly string[] {
   if (viewport.rows <= 0) return [];
   const frame = Array.from({ length: viewport.rows }, () => "");
@@ -87,6 +94,7 @@ export function renderFrame(state: PickerState, viewport: Viewport): readonly st
   return frame;
 }
 
+/** Hit-tests against the same layout renderFrame draws, so clicks match what is shown. */
 export function mouseAction(event: MouseEvent, state: PickerState, viewport: Viewport): PickerAction {
   if (event.released) return { type: "none" };
   if (event.button === "wheel-up") return { type: "scroll", delta: -1 };
@@ -101,6 +109,7 @@ export function mouseAction(event: MouseEvent, state: PickerState, viewport: Vie
   return row?.type === "item" ? { type: "select", index: row.itemIndex } : { type: "none" };
 }
 
+/** Opens on the active target when listed, so the picker starts where the user is. */
 export function initialSelection(items: readonly PickerItem[], focusedId?: string): number {
   if (items.length === 0) return -1;
   if (focusedId === undefined) return 0;
@@ -108,6 +117,7 @@ export function initialSelection(items: readonly PickerItem[], focusedId?: strin
   return focused >= 0 ? focused : 0;
 }
 
+/** Clamps at list ends instead of wrapping, keeping the selection visible. */
 export function moveSelection(state: PickerState, delta: number, viewport: Viewport): PickerState {
   if (state.items.length === 0) return state;
   return fitSelection({
@@ -116,6 +126,7 @@ export function moveSelection(state: PickerState, delta: number, viewport: Viewp
   }, viewport);
 }
 
+/** Wheel scrolling; the selection follows only when it would leave the visible window. */
 export function scrollRows(state: PickerState, delta: number, viewport: Viewport): PickerState {
   const rows = expandPickerItems(state.items);
   const capacity = resultCapacity(viewport);
@@ -132,6 +143,7 @@ export function scrollRows(state: PickerState, delta: number, viewport: Viewport
   return { ...state, selected, scrollTop };
 }
 
+/** Restores selection and scroll invariants after items or viewport change. */
 export function fitSelection(state: PickerState, viewport: Viewport): PickerState {
   const rows = expandPickerItems(state.items);
   const capacity = resultCapacity(viewport);

@@ -1,9 +1,10 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { Database } from "bun:sqlite";
+import { linkSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { join } from "node:path";
 
-import { PickerSession } from "../src/picker-session.ts";
+import { DATABASE_NAME, PickerSession, PickerStartupUncertainError } from "../src/picker-session.ts";
 import { buildPaneOpenArgs, openPicker } from "../src/actions/open.ts";
 import { Herdr } from "../src/client/herdr.ts";
 import { readPickerPaneIds } from "../src/client/types.ts";
@@ -11,14 +12,19 @@ import { readPickerPaneIds } from "../src/client/types.ts";
 const TEMP_PREFIX = "/tmp/hps-owner-";
 const SOCKET_NAME = "herdr.sock";
 const SECOND_SOCKET_NAME = "other.sock";
+// Holds the closed socket's inode so the filesystem cannot hand it to the
+// replacement; ownership identity includes the inode, and birth times only
+// have whole-second precision on some filesystems.
+const RETIRED_SOCKET_NAME = "retired.sock";
 const PANE_ID = "w1:p2";
+const OVERLAY_SURFACE = { placement: "overlay", paneId: PANE_ID } as const;
 const STALE_TOKEN = "stale-generation";
 const WORKER_PATH = join(import.meta.dir, "fixtures", "picker-session-worker.ts");
 const WORKER_COUNT = 6;
+const UNCLAIMED_GRACE_MS = 10_000;
 const PLUGIN_ID = "herdr-pickers";
 const OPEN_RESULT = JSON.stringify({ result: { type: "ok" } });
 const ALIAS_NAME = "alias";
-const DATABASE_NAME = "picker-sessions.sqlite";
 const SENTINEL_NAME = "sentinel";
 const SENTINEL_CONTENT = "must remain unchanged";
 const REQUEST_MODE = "request";
@@ -89,7 +95,7 @@ test("a real pre-submission spawn failure permits a new owner in another process
 test("new requests replace the mailbox and reject stale acknowledgements", async () => {
   const { session } = await fixture();
   const owner = await session.reserve("overlay", async () => false);
-  session.claim(owner!, PANE_ID);
+  session.claim(owner!, OVERLAY_SURFACE);
   const first = session.request("agents", { paneId: "w1:p1", cwd: "/source" });
   const latest = session.request("worktrees", { paneId: PANE_ID, cwd: "/plugin" });
   expect(session.latestRequest()?.token).toBe(latest.token);
@@ -199,7 +205,7 @@ test("delivery deadline also bounds a stalled Herdr open command", async () => {
 });
 
 test("forwards the exact reserved generation to the pane", () => {
-  expect(buildPaneOpenArgs({ pluginId: PLUGIN_ID, mode: "all", token: STALE_TOKEN })).toContain(`HERDR_PICKERS_SESSION_TOKEN=${STALE_TOKEN}`);
+  expect(buildPaneOpenArgs({ pluginId: PLUGIN_ID, token: STALE_TOKEN })).toContain(`HERDR_PICKERS_SESSION_TOKEN=${STALE_TOKEN}`);
 });
 
 test("reserves once across modes and placements before a child starts", async () => {
@@ -209,8 +215,8 @@ test("reserves once across modes and placements before a child starts", async ()
   const token = await session.reserve("overlay", async () => false);
   expect(typeof token).toBe("string");
   expect(await other.reserve("popup", async () => false)).toBeUndefined();
-  expect(session.claim(token!, PANE_ID)).toBe(true);
-  expect(session.claim(token!, PANE_ID)).toBe(false);
+  expect(session.claim(token!, OVERLAY_SURFACE)).toBe(true);
+  expect(session.claim(token!, OVERLAY_SURFACE)).toBe(false);
   expect(await other.reserve("overlay", async () => false)).toBeUndefined();
 });
 
@@ -272,8 +278,9 @@ test("directory aliases cannot bypass session identity", async () => {
 });
 
 test("a replacement socket has independent ownership", async () => {
-  const { env, session } = await fixture();
+  const { root, env, session } = await fixture();
   expect(await session.reserve("popup", async () => false)).toBeString();
+  linkSync(env.HERDR_SOCKET_PATH, join(root, RETIRED_SOCKET_NAME));
   const original = servers.pop()!;
   await new Promise<void>(resolve => original.close(() => resolve()));
   const replacement = createServer();
@@ -338,8 +345,8 @@ test("concurrent processes converge on one owner and recover after exit", async 
   for (const candidate of contenders) { candidate.proc.stdin.end(); await candidate.proc.exited; }
   const next = await session.reserve("overlay", async () => false);
   expect(next).toBeString();
-  expect(session.claim(winners[0]!.token!, PANE_ID)).toBe(false);
-  expect(session.claim(next!, PANE_ID)).toBe(true);
+  expect(session.claim(winners[0]!.token!, OVERLAY_SURFACE)).toBe(false);
+  expect(session.claim(next!, OVERLAY_SURFACE)).toBe(true);
 });
 
 test("waits for overlay removal even after its owner process exits", async () => {
@@ -356,7 +363,7 @@ test("uncertain startup never permits a second request", async () => {
   const owner = await worker(env, "unclaimed");
   owner.proc.stdin.end();
   await owner.proc.exited;
-  await expect(session.reserve("popup", async () => false)).rejects.toThrow("could not be verified");
+  await expect(session.reserve("popup", async () => false)).rejects.toThrow(PickerStartupUncertainError);
 });
 
 test("a delayed reaper cannot remove a newer generation", async () => {
@@ -371,4 +378,47 @@ test("a delayed reaper cannot remove a newer generation", async () => {
   finishProbe(false);
   expect(await first).toBeUndefined();
   expect(await session.reserve("overlay", async () => false)).toBeUndefined();
+});
+
+test("reclaims a dead opener's reservation only once its grace period has passed", async () => {
+  const { env, root, session } = await fixture();
+  const owner = await worker(env, "unclaimed");
+  owner.proc.stdin.end();
+  await owner.proc.exited;
+  await expect(session.reserve("popup", async () => false)).rejects.toThrow(PickerStartupUncertainError);
+
+  // Backdate the reservation through a second connection, as a long-dead opener would leave it.
+  const database = new Database(join(root, DATABASE_NAME));
+  try {
+    database.query("UPDATE owners SET reserved_at = ?").run(Date.now() - UNCLAIMED_GRACE_MS - 1);
+  } finally {
+    database.close();
+  }
+  expect(await session.reserve("popup", async () => false)).toBeString();
+});
+
+test("migrates a database from before reservation timestamps and reclaims its rows", async () => {
+  const { env, root, session } = await fixture();
+  const owner = await worker(env, "unclaimed");
+  owner.proc.stdin.end();
+  await owner.proc.exited;
+  // Simulate the ownership database of a plugin version without the reserved_at column.
+  const legacy = new Database(join(root, DATABASE_NAME));
+  try {
+    legacy.exec("ALTER TABLE owners DROP COLUMN reserved_at");
+  } finally {
+    legacy.close();
+  }
+  const migrated = new PickerSession(env);
+  sessions.push(migrated);
+  // A legacy row has no timestamp, so a proven-dead opener makes it reclaimable at once.
+  expect(await migrated.reserve("popup", async () => false)).toBeString();
+
+  const columns = new Database(join(root, DATABASE_NAME));
+  try {
+    const names = columns.query<{ name: string }, []>("PRAGMA table_info(owners)").all().map(column => column.name);
+    expect(names).toContain("reserved_at");
+  } finally {
+    columns.close();
+  }
 });

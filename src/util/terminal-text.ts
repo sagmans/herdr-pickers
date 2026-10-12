@@ -10,9 +10,12 @@ const BIDI_CONTROL_PATTERN = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g;
 const CONTROL_PATTERN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g;
 const WHITESPACE_PATTERN = /\s+/g;
 
+/** One field or line: long enough for real labels, short enough that hostile input cannot flood a row. */
 export const MAX_TERMINAL_TEXT_LENGTH = 1024;
+/** Whole multi-line error block, so aggregate failures stay readable but bounded. */
 export const MAX_AGGREGATE_MESSAGE_LENGTH = 2048;
 
+/** Single-line safe form: escapes and bidi controls dropped, control bytes and whitespace runs collapsed. */
 export function sanitizeTerminalText(value: string): string {
   return value
     .replace(ANSI_OSC_PATTERN, "")
@@ -24,6 +27,7 @@ export function sanitizeTerminalText(value: string): string {
     .trim();
 }
 
+/** Sanitized and length-capped, for untrusted text embedded in messages. */
 export function boundedTerminalText(value: string, maxLength = MAX_TERMINAL_TEXT_LENGTH): string {
   return sanitizeTerminalText(value).slice(0, maxLength);
 }

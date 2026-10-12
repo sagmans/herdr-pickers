@@ -1,13 +1,14 @@
+// Decodes raw terminal bytes into picker key and mouse events. Partial
+// escape sequences are kept as a remainder so chunk splits and mode
+// handoffs never leak stray control bytes into the query.
 import { DEFAULT_PICKER_KEYMAP, type PickerKeyAction, type PickerKeymap } from "./config/config.ts";
+import { ESCAPE_KEY_SEQUENCE, KEY_BACKSPACE, KEY_CTRL_C } from "./terminal-keys.ts";
 
 const MOUSE_PATTERN = /^\x1b\[<(\d+);(\d+);(\d+)([Mm])/;
 const CSI_PATTERN = /^\x1b\[[0-9;?]*[ -/]*[@-~]/;
 const C1_CSI_PATTERN = /^\u009b[0-9;?]*[ -/]*[@-~]/;
-export const ESCAPE_KEY_SEQUENCE = "\x1b";
 const MOUSE_PREFIX = "\x1b[<";
 const CSI_PREFIX = "\x1b[";
-const KEY_BACKSPACE = "\x7f";
-const KEY_CTRL_C = "\x03";
 const MOUSE_LEFT = 0;
 const MOUSE_WHEEL_UP = 64;
 const MOUSE_WHEEL_DOWN = 65;
@@ -17,6 +18,7 @@ const C1_CONTROL_MAX = 0x9f;
 const SINGLE_CHARACTER_LENGTH = 1;
 const MIN_CSI_SEQUENCE_LENGTH = 3;
 
+/** SGR mouse report; column and row are 1-based terminal cells. */
 export interface MouseEvent {
   readonly type: "mouse";
   readonly button: "left" | "wheel-up" | "wheel-down" | "other";
@@ -25,6 +27,7 @@ export interface MouseEvent {
   readonly released: boolean;
 }
 
+/** Terminal-independent input vocabulary consumed by the interaction reducer. */
 export type InputEvent =
   | MouseEvent
   | { readonly type: "up" }
@@ -36,11 +39,16 @@ export type InputEvent =
   | { readonly type: "backspace" }
   | { readonly type: "text"; readonly value: string };
 
+/** Events decoded so far plus an incomplete trailing sequence to retry with more input. */
 export interface ParsedInput {
   readonly events: readonly InputEvent[];
   readonly remainder: string;
 }
 
+/**
+ * Never emits events for unknown escape sequences. Events from the first
+ * `stalePrefixLength` characters are dropped as leftovers of a previous mode.
+ */
 export function parseInput(data: string, keymap: PickerKeymap = DEFAULT_PICKER_KEYMAP, stalePrefixLength = 0): ParsedInput {
   const events: InputEvent[] = [];
   let sequenceStart = 0;
@@ -121,6 +129,7 @@ export function parseInput(data: string, keymap: PickerKeymap = DEFAULT_PICKER_K
   return { events, remainder: "" };
 }
 
+/** Resolves a user-configurable key binding; undefined means the sequence is unbound. */
 export function mappedKeyEvent(sequence: string, keymap: PickerKeymap): InputEvent | undefined {
   const action = keymap.get(sequence);
   if (action === undefined) return undefined;
@@ -157,4 +166,62 @@ function mouseButton(code: number): MouseEvent["button"] {
 function isPrintable(value: string): boolean {
   const code = value.codePointAt(0);
   return code !== undefined && code >= PRINTABLE_CODE_MIN && (code < DELETE_CODE || code > C1_CONTROL_MAX);
+}
+
+const ESCAPE_INPUT_EVENT: InputEvent = { type: "escape" };
+
+/**
+ * Frames decoded terminal text into events across chunk boundaries. The
+ * remainder lives in shared state so a replacement mode inherits, and then
+ * discards, a key sequence its predecessor only half received.
+ */
+export class InputFramer {
+  private pending: string;
+  private discardFragment: boolean;
+
+  constructor(private readonly shared: { remainder: string }, private readonly keymap: PickerKeymap) {
+    this.pending = shared.remainder;
+    this.discardFragment = this.pending.length > 0;
+  }
+
+  /** True while a buffered Escape may still be the start of a longer sequence. */
+  get awaitingEscape(): boolean {
+    return this.pending.startsWith(ESCAPE_KEY_SEQUENCE);
+  }
+
+  feed(chunk: string): readonly InputEvent[] {
+    const stalePrefixLength = this.discardFragment ? this.pending.length : 0;
+    this.pending += chunk;
+    const parsed = parseInput(this.pending, this.keymap, stalePrefixLength);
+    this.discardFragment = stalePrefixLength > this.pending.length - parsed.remainder.length;
+    this.pending = parsed.remainder;
+    return parsed.events;
+  }
+
+  /**
+   * Called when no continuation arrived in time: a lone Escape becomes a key
+   * press unless it belonged to the predecessor mode.
+   */
+  expireEscape(): readonly InputEvent[] {
+    if (this.pending !== ESCAPE_KEY_SEQUENCE) return [];
+    this.pending = "";
+    if (this.discardFragment) {
+      this.discardFragment = false;
+      return [];
+    }
+    return [ESCAPE_INPUT_EVENT];
+  }
+
+  /**
+   * Input ended: a lone Escape still counts, but stays buffered so a successor
+   * mode treats it as stale rather than replaying it.
+   */
+  finalEvents(): readonly InputEvent[] {
+    return this.pending === ESCAPE_KEY_SEQUENCE && !this.discardFragment ? [ESCAPE_INPUT_EVENT] : [];
+  }
+
+  /** Hands the unparsed tail to whichever mode reads next. */
+  save(): void {
+    this.shared.remainder = this.pending;
+  }
 }

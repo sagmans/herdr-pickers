@@ -1,25 +1,29 @@
 import { statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { PickerLifecycleSmokeOptions } from "./smoke-picker-lifecycle.ts";
 import { readOwnershipDatabase } from "./smoke-database.ts";
+import {
+  CONFIG_FILE_NAME,
+  KEY_CTRL_C,
+  KEY_ENTER,
+  OWNER_QUERY,
+  PICKER_PANE_LABEL,
+  PLUGIN_ID,
+  processAlive,
+  READ_REQUEST,
+  type PickerLifecycleSmokeOptions,
+} from "./smoke-support.ts";
 import { POLL_TIMEOUT_EXTENDED_MS } from "./smoke-timing.ts";
-import { hasErrorCode } from "../src/util/objects.ts";
+import { PICKER_MODES, type PickerMode } from "../src/modes.ts";
 
-const OWNER_QUERY = "SELECT session, token, picker, pane, placement FROM owners";
-const REQUEST_QUERY = "SELECT token, mode, context, acknowledged FROM requests WHERE session = ?";
-const PLUGIN = "herdr-pickers";
-const CONFIG_FILE = "config.toml";
-const PICKER_LABEL = "Herdr Picker";
 const AGENT_LABEL = "smoke-agent";
 const AGENT_SOURCE = "picker-replacement-smoke";
 const SOURCE_WORKTREE_QUERY = "feature";
 const WORKTREE_WORKSPACE = "w2";
-const CTRL_C = "\u0003";
-const ENTER = "\r";
 const READY_MS = 400;
-const PROBE_SIGNAL = 0;
-const MODES = ["agents", "worktrees", "repo-agents", "all", "projects", "workspaces", "repo-workspaces", "repo-worktrees"] as const;
-const STARTUP_MODES = ["workspaces", "projects", "all"] as const;
+// Replacement order is deliberate: it repeats the opening mode, alternates kinds,
+// and ends on repo-worktrees so the follow-up dispatch proves source scope.
+const MODES = ["agents", "worktrees", "repo-agents", "all", "projects", "workspaces", "repo-workspaces", "repo-worktrees"] as const satisfies readonly PickerMode[];
+const STARTUP_MODES = ["workspaces", "projects", "all"] as const satisfies readonly PickerMode[];
 
 interface Owner {
   session: string;
@@ -35,18 +39,12 @@ export async function runPickerReplacementSmoke(options: PickerLifecycleSmokeOpt
   const owners = (): Owner[] =>
     readOwnershipDatabase(path, (database) => database.query<Owner, []>(OWNER_QUERY).all());
   const request = (owner: Owner): Request | null =>
-    readOwnershipDatabase(path, (database) => database.query<Request, [string]>(REQUEST_QUERY).get(owner.session));
+    readOwnershipDatabase(path, (database) => database.query<Request, [string]>(READ_REQUEST).get(owner.session));
   const invoke = (mode: string) => {
-    const result = session.run(["plugin", "action", "invoke", `${PLUGIN}.${mode}`]);
+    const result = session.run(["plugin", "action", "invoke", `${PLUGIN_ID}.${mode}`]);
     check(`${mode} replacement invokes`, result.code === 0, result.stderr);
   };
-  const alive = (owner: Owner): boolean => {
-    if (owner.picker === null) return false;
-    try { process.kill(owner.picker, PROBE_SIGNAL); return true; } catch (error) {
-      if (hasErrorCode(error, "ESRCH")) return false;
-      throw error;
-    }
-  };
+  const alive = (owner: Owner): boolean => owner.picker !== null && processAlive(owner.picker);
   const readRows = (kind: string): Array<Record<string, unknown>> => {
     const result = session.run([kind, "list"]);
     check(`${kind} list succeeds`, result.code === 0, result.stderr);
@@ -81,7 +79,7 @@ export async function runPickerReplacementSmoke(options: PickerLifecycleSmokeOpt
   };
 
   for (const placement of ["popup", "overlay"] as const) {
-    writeFileSync(join(options.pluginConfigDir, CONFIG_FILE), `placement = "${placement}"\n\n${options.baseConfig}`);
+    writeFileSync(join(options.pluginConfigDir, CONFIG_FILE_NAME), `placement = "${placement}"\n\n${options.baseConfig}`);
     const focused = session.run(["worktree", "open", "--cwd", options.repo, "--path", options.repo, "--focus"]);
     check("replacement source opens with repository provenance", focused.code === 0, focused.stderr);
     const sourceWorkspace = readRows("workspace").find(row => row.focused === true)?.workspace_id;
@@ -97,13 +95,13 @@ export async function runPickerReplacementSmoke(options: PickerLifecycleSmokeOpt
     await Bun.sleep(READY_MS);
     session.input(AGENT_LABEL);
     const alternate = placement === "overlay" ? "popup" : "overlay";
-    writeFileSync(join(options.pluginConfigDir, CONFIG_FILE), `placement = "${alternate}"\n\n${options.baseConfig}`);
+    writeFileSync(join(options.pluginConfigDir, CONFIG_FILE_NAME), `placement = "${alternate}"\n\n${options.baseConfig}`);
     for (const mode of MODES) {
       const previous = request(owner)?.token;
       invoke(mode);
       await waitAdopted(owner, mode, previous);
       if (owner.pane) {
-        const prompt = `${mode.replace("repo-", "repo ")} ›`;
+        const prompt = PICKER_MODES[mode].prompt.trimEnd();
         await poll(`${mode} overlay frame renders`, () => {
           const frame = session.run(["pane", "read", owner.pane!, "--source", "visible", "--format", "text"]);
           return frame.code === 0 && frame.stdout.includes(prompt) ? mode : undefined;
@@ -115,22 +113,22 @@ export async function runPickerReplacementSmoke(options: PickerLifecycleSmokeOpt
       const current = owners().find(row => row.session === owner.session);
       check(`${placement} ${mode} keeps owner and surface`, current?.token === owner.token && current.picker === owner.picker && current.pane === owner.pane && current.placement === placement);
       if (owner.pane) {
-        check("exactly one overlay remains", readRows("pane").filter(row => row.label === PICKER_LABEL).length === 1);
+        check("exactly one overlay remains", readRows("pane").filter(row => row.label === PICKER_PANE_LABEL).length === 1);
         const context = JSON.parse(request(owner)!.context) as { workspaceId?: string; paneId?: string };
         check("repository replacement retains original context", context.workspaceId === sourceWorkspace && context.paneId === sourcePane);
       }
     }
-    writeFileSync(join(options.pluginConfigDir, CONFIG_FILE), `placement = "${placement}"\n\n${options.baseConfig}`);
+    writeFileSync(join(options.pluginConfigDir, CONFIG_FILE_NAME), `placement = "${placement}"\n\n${options.baseConfig}`);
     // A real worktree dispatch proves source scope and that the previous agent query was cleared.
     await Bun.sleep(READY_MS);
     session.input(SOURCE_WORKTREE_QUERY);
     await Bun.sleep(READY_MS);
-    session.input(ENTER);
+    session.input(KEY_ENTER);
     await poll("replacement worktree dispatch focuses its workspace", () =>
       readRows("workspace").find(row => row.focused === true)?.workspace_id === WORKTREE_WORKSPACE ? WORKTREE_WORKSPACE : undefined);
     await waitClosed(owner);
 
-    const burst = await Promise.all(STARTUP_MODES.map(mode => session.runAsync(["plugin", "action", "invoke", `${PLUGIN}.${mode}`])));
+    const burst = await Promise.all(STARTUP_MODES.map(mode => session.runAsync(["plugin", "action", "invoke", `${PLUGIN_ID}.${mode}`])));
     check(`${placement} startup burst invokes`, burst.every(result => result.code === 0));
     const started = await waitOwner();
     const startupRequest = request(started)?.token;
@@ -139,7 +137,7 @@ export async function runPickerReplacementSmoke(options: PickerLifecycleSmokeOpt
     await Bun.sleep(READY_MS);
     const previous = request(started)?.token;
     // Back-to-back client input and action overlap dismissal without changing the plugin's timing.
-    session.input(CTRL_C);
+    session.input(KEY_CTRL_C);
     invoke("workspaces");
     await poll(`${placement} dismissal request survives`, () => {
       const active = owners().find(alive);
@@ -150,11 +148,11 @@ export async function runPickerReplacementSmoke(options: PickerLifecycleSmokeOpt
     });
     const successor = await waitOwner();
     if (successor.token !== started.token) check("successor waits for old process exit", !alive(started));
-    if (placement === "overlay") check("dismissal leaves one picker pane", readRows("pane").filter(row => row.label === PICKER_LABEL).length === 1);
+    if (placement === "overlay") check("dismissal leaves one picker pane", readRows("pane").filter(row => row.label === PICKER_PANE_LABEL).length === 1);
     await Bun.sleep(READY_MS);
     session.input(options.firstWorkspaceLabel);
     await Bun.sleep(READY_MS);
-    session.input(ENTER);
+    session.input(KEY_ENTER);
     await poll("dismissal successor dispatches newest request", () =>
       readRows("workspace").find(row => row.focused === true)?.workspace_id === options.firstWorkspaceId ? options.firstWorkspaceId : undefined);
     await waitClosed(successor);

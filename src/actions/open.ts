@@ -1,19 +1,21 @@
-import { Herdr, HerdrSpawnError } from "../client/herdr.ts";
+// Action entrypoint for every picker mode. It records the request in the picker
+// session and spawns a picker pane only when no live picker can take it, so a
+// repeated action switches mode instead of stacking popups (see picker-session.ts).
+import { Herdr, HerdrCommandError, HerdrSpawnError } from "../client/herdr.ts";
 import { readPickerPaneIds } from "../client/types.ts";
-import { PICKER_TOKEN_ENV, PickerSession, PickerStartupUncertainError } from "../picker-session.ts";
-import { PICKER_REQUEST_POLL_MS, PICKER_REQUEST_TIMEOUT_MS } from "../picker-request.ts";
-import { CURRENT_CONTEXT_ENV, currentContextFromEnv } from "../catalog.ts";
+import {
+  PICKER_REQUEST_POLL_MS, PICKER_REQUEST_TIMEOUT_MS, PICKER_TOKEN_ENV, PickerSession, PickerStartupUncertainError,
+} from "../picker-session.ts";
+import { currentContextFromEnv } from "../context.ts";
 import { loadConfig, type PickerPlacement } from "../config/config.ts";
-import { parseMode, type PickerMode } from "../picker.ts";
-import { formatPaneError } from "../pane.ts";
+import { parseMode, type PickerMode } from "../modes.ts";
+import { formatErrorBlock } from "../util/errors.ts";
 
-const MODE_ENV = "HERDR_PICKERS_MODE";
 const DELIVERY_FAILURE = "Picker request could not be delivered before the deadline. Reopen after the current picker closes.";
 
+/** Herdr argv for spawning the picker entrypoint; the token is the only state passed through the pane env. */
 export function buildPaneOpenArgs(options: {
   readonly pluginId: string;
-  readonly mode: PickerMode;
-  readonly env?: Record<string, string | undefined> | undefined;
   readonly placement?: PickerPlacement;
   readonly token?: string;
 }): string[] {
@@ -28,11 +30,16 @@ export function buildPaneOpenArgs(options: {
     "--entrypoint",
     "picker",
     ...(options.placement === "overlay" ? ["--placement", "overlay"] : []),
-    ...paneEnvArgs(options.mode, options.env),
+    // Mode and source context travel in the picker request, not the pane
+    // environment, so a replacement switches mode without respawning the pane.
     ...(options.token ? ["--env", `${PICKER_TOKEN_ENV}=${options.token}`] : []),
   ];
 }
 
+/**
+ * Resolves once a picker acknowledges this request or a newer request supersedes it.
+ * Throws a user-facing delivery failure when the deadline passes first.
+ */
 export async function openPicker(
   mode: PickerMode,
   env: Record<string, string | undefined> = process.env,
@@ -43,73 +50,83 @@ export async function openPicker(
 
   const config = loadConfig(env);
   const session = new PickerSession(env);
+  const deadline = AbortSignal.timeout(PICKER_REQUEST_TIMEOUT_MS);
   const cancellation = new AbortController();
-  const client = herdr ?? new Herdr({ signal: cancellation.signal });
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const expired = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
-      const error = new Error(DELIVERY_FAILURE);
-      cancellation.abort(error);
-      reject(error);
-    }, PICKER_REQUEST_TIMEOUT_MS);
-  });
+  const signal = AbortSignal.any([cancellation.signal, deadline]);
+  const client = herdr ?? new Herdr({ signal });
+  const paneExists = async (paneId: string): Promise<boolean> => {
+    const panes = await client.json(["pane", "list"]);
+    signal.throwIfAborted();
+    return readPickerPaneIds(panes).includes(paneId);
+  };
+  const launch = async (token: string): Promise<void> => {
+    try {
+      await client.run(buildPaneOpenArgs({ pluginId, placement: config.placement, token }));
+    } catch (error) {
+      // A non-zero Herdr exit may still have spawned a child, but releasing is
+      // safe: the release only removes an unclaimed reservation, so a child
+      // that already claimed keeps it, and a later child fails its
+      // token-guarded claim and exits before it shows a picker. Transport loss
+      // and aborts stay reserved until the grace period ends.
+      if (error instanceof HerdrSpawnError || error instanceof HerdrCommandError) session.releaseUnsubmitted(token);
+      throw error;
+    }
+  };
+  // Remembers why the latest reservation attempt waited, so a deadline that
+  // expires while no picker exists reports the actionable pending state.
+  let startupUncertain = false;
   try {
     const request = session.request(mode, currentContextFromEnv(env));
-    const deliver = async () => {
-      let opened = false;
-      while (true) {
-        cancellation.signal.throwIfAborted();
-        const latest = session.latestRequest();
-        if (latest?.token !== request.token || latest.acknowledgedBy !== null) return;
-        if (!opened) {
-          const token = await session.reserve(config.placement, async paneId => {
-            const panes = await client.json(["pane", "list"]);
-            cancellation.signal.throwIfAborted();
-            return readPickerPaneIds(panes).includes(paneId);
-          }).catch(error => {
-            // A submitted child can claim after its opener exits; waiting never authorizes a duplicate.
-            if (error instanceof PickerStartupUncertainError) return undefined;
-            throw error;
-          });
-          cancellation.signal.throwIfAborted();
-          if (token) {
-            // Even a superseded opener must launch its reserved child; the child reads the newest request.
-            opened = true;
-            try {
-              await client.run(buildPaneOpenArgs({ pluginId, mode, env, placement: config.placement, token }));
-            } catch (error) {
-              if (error instanceof HerdrSpawnError) session.releaseUnsubmitted(token);
-              throw error;
-            }
-          }
+    let launched = false;
+    // Delivery ends when a picker acknowledges this request or a newer one supersedes it.
+    while (isUndelivered(session, request.token)) {
+      if (!launched) {
+        const token = await untilAborted(session.reserve(config.placement, paneExists).then(reserved => {
+          startupUncertain = false;
+          return reserved;
+        }, error => {
+          // A submitted child can claim after its opener exits; waiting never authorizes a duplicate.
+          if (!(error instanceof PickerStartupUncertainError)) throw error;
+          startupUncertain = true;
+          return undefined;
+        }), signal);
+        if (token) {
+          // Even a superseded opener must launch its reserved child; the child reads the newest request.
+          launched = true;
+          await untilAborted(launch(token), signal);
         }
-        cancellation.signal.throwIfAborted();
-        await Bun.sleep(PICKER_REQUEST_POLL_MS);
       }
-    };
-    await Promise.race([deliver(), expired]);
+      await untilAborted(Bun.sleep(PICKER_REQUEST_POLL_MS), signal);
+    }
+  } catch (error) {
+    // Whatever was in flight at the deadline, the user-facing cause is the
+    // deadline, unless no picker could take the request yet.
+    if (deadline.aborted) throw startupUncertain ? new PickerStartupUncertainError() : new Error(DELIVERY_FAILURE);
+    throw error;
   } finally {
-    clearTimeout(timer);
     cancellation.abort();
     session.close();
   }
 }
 
-function paneEnvArgs(mode: PickerMode, env: Record<string, string | undefined> | undefined): string[] {
-  const current = currentContextFromEnv(env);
-  const entries: Array<readonly [string, string | undefined]> = [
-    [MODE_ENV, mode],
-    [CURRENT_CONTEXT_ENV.workspaceId, current.workspaceId],
-    [CURRENT_CONTEXT_ENV.tabId, current.tabId],
-    [CURRENT_CONTEXT_ENV.paneId, current.paneId],
-    [CURRENT_CONTEXT_ENV.cwd, current.cwd],
-  ];
-  return entries.flatMap(([key, value]) => value ? ["--env", `${key}=${value}`] : []);
+function isUndelivered(session: PickerSession, token: string): boolean {
+  const latest = session.latestRequest();
+  return latest?.token === token && latest.acknowledgedBy === null;
+}
+
+/** Stops waiting at the deadline even when an injected or stalled operation ignores the signal. */
+function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  signal.throwIfAborted();
+  return new Promise<T>((resolve, reject) => {
+    const abort = (): void => reject(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+    work.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
 }
 
 if (import.meta.main) {
   Promise.resolve().then(() => openPicker(parseMode(process.argv[2]))).catch((error: unknown) => {
-    console.error(formatPaneError(error));
+    console.error(formatErrorBlock(error));
     process.exit(1);
   });
 }

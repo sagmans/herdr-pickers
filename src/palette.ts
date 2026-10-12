@@ -1,3 +1,5 @@
+// Single color authority for picker rows. rows.ts and agent-status.ts read it
+// so every mode shares one visual language independent of terminal themes.
 import type { RgbColor } from "./style.ts";
 
 interface PickerPalette {

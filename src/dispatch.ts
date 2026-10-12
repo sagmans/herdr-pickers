@@ -1,3 +1,5 @@
+// Turns an accepted picker row into a Herdr focus or create command. Every call
+// is argv-based, so target paths and labels never pass through a shell.
 import { basename } from "node:path";
 
 import { Herdr, HerdrCommandError } from "./client/herdr.ts";
@@ -5,10 +7,12 @@ import type { PickerTarget } from "./catalog.ts";
 
 const RECOVERABLE_WORKTREE_ERROR = /not found|does not exist|no worktree|not a worktree|not linked/i;
 
+/** `target` is the stable focus id resolved in catalog.ts, never a display label. */
 export async function dispatchAgent(target: string, herdr: Herdr): Promise<void> {
   await herdr.run(["agent", "focus", target]);
 }
 
+/** Focuses an open workspace when one exists; otherwise opens or creates one for the target. */
 export async function dispatchNavigationTarget(target: PickerTarget, herdr: Herdr): Promise<void> {
   switch (target.kind) {
     case "workspace":

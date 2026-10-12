@@ -1,0 +1,6 @@
+# Oldest distinct Herdr runtime the on-demand smoke workflow exercises.
+# A separate mise environment gives this version its own checksummed lockfile,
+# so CI can install it in locked mode without changing the contributor default.
+# Activate with MISE_ENV=herdr-floor.
+[tools]
+herdr = "0.8.2"
