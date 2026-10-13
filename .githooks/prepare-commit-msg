@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# prepare-commit-msg: add the DCO Signed-off-by trailer, then the repo's
+# .githooks/prepare-commit-msg.d/*.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib/run-local.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/lib/run-local.sh"
+"$CHECKS_DIR/prepare-commit-msg.sh" "$@"
+run_local prepare-commit-msg "$@"

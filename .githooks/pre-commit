@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# pre-commit: generic secret scan, then the repo's .githooks/pre-commit.d/*.
+# Activated per clone by scripts/setup-hooks (core.hooksPath=.githooks).
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib/run-local.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/lib/run-local.sh"
+
+# Repo checks read the index git is committing, which is a temporary one for
+# `commit -a` and `commit <paths>`; an absolute path survives a cd.
+index="${GIT_INDEX_FILE:-$(git rev-parse --git-path index)}"
+case "$index" in /*) ;; *) index="$PWD/$index" ;; esac
+export PROJECT_HOOK_INDEX_FILE="$index"
+
+"$CHECKS_DIR/secrets.sh" staged
+run_local pre-commit "$@"
