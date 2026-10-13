@@ -1,0 +1,8 @@
+#!/bin/sh
+# Type errors are the cheapest regressions to catch, and tsc on this repo
+# finishes in seconds, so it gates each commit instead of waiting for push.
+set -eu
+cd "$(git rev-parse --show-toplevel)"
+. .githooks/_lib/tool.sh
+echo "pre-commit: bun run typecheck"
+run_tool bun run typecheck
