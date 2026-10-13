@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# pre-merge-commit: git skips pre-commit for merge commits, so run the same
+# checks here to keep a local merge from landing unchecked content.
+set -euo pipefail
+exec "$(dirname -- "${BASH_SOURCE[0]}")/pre-commit" "$@"

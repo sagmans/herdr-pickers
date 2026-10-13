@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# commit-msg: generic message structure and DCO sign-off, then the repo's
+# .githooks/commit-msg.d/*.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib/run-local.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/lib/run-local.sh"
+"$CHECKS_DIR/commit-msg.sh" "$@"
+run_local commit-msg "$@"

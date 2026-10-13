@@ -32,14 +32,11 @@ Run one test file while iterating:
 bun test tests/<module>.test.ts
 ```
 
-The global git hooks (dotf, local-hooks standard v2) run `.githooks/<hook>.d/*` after their own sign-off and signature checks. They replace pull-request CI. Once per clone, remove any old local `core.hooksPath`, then review and trust the hooks (again whenever `.githooks` changes):
+After cloning, run `scripts/setup-hooks` once. It sets `core.hooksPath=.githooks` for this clone and its worktrees. The hooks run the generic checks first (DCO sign-off, message structure, gitleaks secret scan, signed commits on push), then this repo's checks in `.githooks/<hook>.d/`. They replace pull-request CI.
 
-```sh
-scripts/setup-hooks.sh
-githooks-trust
-```
+All checks must pass before a push. Never bypass them with `--no-verify`. The generic files in `.githooks/` and `scripts/setup-hooks` are copies of the dotf template (`templates/githooks/`); change them there, not here.
 
-`pre-commit` runs the type check; `pre-push` runs the full gate below on every pushed commit. Never bypass them with `--no-verify`.
+`pre-commit` runs the type check; `pre-push` runs the full gate below on every pushed commit.
 
 The pre-push gate:
 
