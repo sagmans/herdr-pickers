@@ -1,0 +1,14 @@
+#!/bin/sh
+# Replaces the former pull-request CI job: tests, type checks and the
+# dependency audit must pass before code leaves the machine.
+set -eu
+cd "$(git rev-parse --show-toplevel)"
+. .githooks/_lib/tool.sh
+echo "pre-push: bun install --frozen-lockfile"
+run_tool bun install --frozen-lockfile
+echo "pre-push: bun test"
+run_tool bun test
+echo "pre-push: bun run typecheck"
+run_tool bun run typecheck
+echo "pre-push: bun audit"
+run_tool bun audit

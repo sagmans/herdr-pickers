@@ -32,7 +32,15 @@ Run one test file while iterating:
 bun test tests/<module>.test.ts
 ```
 
-Match the pull-request CI gate before handoff:
+Enable the tracked git hooks once per clone. They chain the global hooks first, then run the checks that used to run in pull-request CI:
+
+```sh
+scripts/setup-hooks.sh
+```
+
+`pre-commit` runs the type check; `pre-push` runs the full gate below. Never bypass them with `--no-verify`.
+
+The pre-push gate:
 
 ```sh
 bun test
