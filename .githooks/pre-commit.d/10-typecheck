@@ -3,6 +3,6 @@
 # finishes in seconds, so it gates each commit instead of waiting for push.
 set -eu
 cd "$(git rev-parse --show-toplevel)"
-. .githooks/_lib/tool.sh
+. "$(dirname -- "$0")/../_lib/tool.sh"
 echo "pre-commit: bun run typecheck"
 run_tool bun run typecheck

@@ -1,5 +1,0 @@
-#!/bin/sh
-# Git runs hooks by file name only. This wrapper forwards its own name and
-# arguments to the shared runner, which runs the global hook and then this
-# hook's project-specific scripts in the matching .d directory.
-exec "$(dirname -- "$0")/_lib/run-hook.sh" "$(basename -- "$0")" "$@"

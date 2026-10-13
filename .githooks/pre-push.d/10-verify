@@ -1,14 +1,27 @@
 #!/bin/sh
-# Replaces the former pull-request CI job: tests, type checks and the
-# dependency audit must pass before code leaves the machine.
+# Full checks that used to run in CI (ci.yml): frozen install, tests,
+# typecheck and audit, against each pushed commit (not just HEAD).
 set -eu
-cd "$(git rev-parse --show-toplevel)"
-. .githooks/_lib/tool.sh
-echo "pre-push: bun install --frozen-lockfile"
-run_tool bun install --frozen-lockfile
-echo "pre-push: bun test"
-run_tool bun test
-echo "pre-push: bun run typecheck"
-run_tool bun run typecheck
-echo "pre-push: bun audit"
-run_tool bun audit
+# shellcheck disable=SC1090,SC1091  # dotf dispatcher helpers
+. "${HOOK_HELPERS:?run by the dotf hook dispatcher}"
+. "$(dirname -- "$0")/../_lib/tool.sh"
+
+verify() {
+	echo "pre-push: bun install --frozen-lockfile --ignore-scripts"
+	run_tool bun install --frozen-lockfile --ignore-scripts
+	echo "pre-push: bun test"
+	run_tool bun test
+	echo "pre-push: bun run typecheck"
+	run_tool bun run typecheck
+	echo "pre-push: bun audit"
+	run_tool bun audit
+}
+
+# for loop, not `| while`: a failure must exit this script (fail closed).
+shas=$(pushed_shas <"$HOOK_STDIN_FILE") || exit 1
+shas=$(printf '%s\n' "$shas" | sort -u)
+# shellcheck disable=SC2086  # one SHA per word
+for sha in $shas; do
+	echo "pre-push: verifying $(git rev-parse --short "$sha")"
+	at_sha "$sha" verify || exit 1
+done
