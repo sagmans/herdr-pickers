@@ -32,13 +32,14 @@ Run one test file while iterating:
 bun test tests/<module>.test.ts
 ```
 
-Enable the tracked git hooks once per clone. They chain the global hooks first, then run the checks that used to run in pull-request CI:
+The global git hooks (dotf, local-hooks standard v2) run `.githooks/<hook>.d/*` after their own sign-off and signature checks. They replace pull-request CI. Once per clone, remove any old local `core.hooksPath`, then review and trust the hooks (again whenever `.githooks` changes):
 
 ```sh
 scripts/setup-hooks.sh
+githooks-trust
 ```
 
-`pre-commit` runs the type check; `pre-push` runs the full gate below. Never bypass them with `--no-verify`.
+`pre-commit` runs the type check; `pre-push` runs the full gate below on every pushed commit. Never bypass them with `--no-verify`.
 
 The pre-push gate:
 
