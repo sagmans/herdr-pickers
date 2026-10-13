@@ -31,7 +31,7 @@ The release surface includes these controls:
 - `herdr-plugin.toml` defines the plugin version, Herdr requirement, platforms, actions, events, and popup pane.
 - `package.json` and `herdr-plugin.toml` use the same version. `tests/manifest.test.ts` enforces this rule.
 - `mise.toml`, `mise.lock`, `mise.herdr-floor.toml`, `mise.herdr-floor.lock`, `bun.lock`, and `bunfig.toml` pin tools and checksums and protect dependency installation.
-- Pull-request CI runs tests, type checks, and `bun audit` on Linux.
+- The tracked `.githooks` run type checks on commit and tests, type checks, and `bun audit` on push (`scripts/setup-hooks.sh` enables them). There is no pull-request CI.
 - `scripts/smoke.ts` runs the plugin in an isolated Herdr runtime. The on-demand smoke workflow runs on macOS and Linux across the declared Herdr version range.
 - `README.md`, `SECURITY.md`, `LICENSE`, and `THIRD_PARTY_NOTICES.md` define installation, trust, reporting, and license terms.
 
