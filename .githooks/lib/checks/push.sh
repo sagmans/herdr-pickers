@@ -10,6 +10,9 @@ set -euo pipefail
 
 remote="$1"
 z40="0000000000000000000000000000000000000000"
+# Release pipelines are tag-triggered, so a tag is what ships: it must be a
+# signed annotated tag, the same trust bar as the commits it points to.
+tag_prefix="refs/tags/"
 
 commit_sha_for_ref() {
     git rev-parse --verify --quiet "${1}^{commit}" 2>/dev/null
@@ -65,6 +68,18 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     if [ "$local_sha" = "$z40" ]; then
         continue
     fi
+
+    case "$local_ref" in
+    "$tag_prefix"*)
+        tag_name="${local_ref#"$tag_prefix"}"
+        # A lightweight tag has no tag object, so it can carry no signature.
+        if [ "$(git cat-file -t "$local_sha" 2>/dev/null)" != "tag" ] ||
+            ! git verify-tag "$local_sha" >/dev/null 2>&1; then
+            echo >&2 "❌ Push rejected: tag $tag_name must be signed: use git tag -s"
+            exit 1
+        fi
+        ;;
+    esac
 
     # Sign-off validation only applies to commits made after the remote default branch tip.
     if [ "$base_sha_resolved" -eq 0 ]; then
