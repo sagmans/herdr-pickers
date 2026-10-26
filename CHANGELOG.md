@@ -6,7 +6,7 @@ All notable user-facing changes to Herdr Pickers are recorded in this file.
 
 ### Changed
 
-- Bump `@types/bun` to 1.4.2 and TypeScript to 7.0.2 (native compiler).
+- Bump `@types/bun` to 1.4.3 and TypeScript to 7.0.2 (native compiler).
 
 ### Security
 

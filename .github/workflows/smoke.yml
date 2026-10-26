@@ -34,7 +34,7 @@ jobs:
         with:
           # No later step pushes or fetches remotely, so the token must not persist in .git/config.
           persist-credentials: false
-      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+      - uses: jdx/mise-action@9b200bcecbfd6303e69a4a261b2e09e3757440a7 # v5.2.0
       - run: bun install --frozen-lockfile
       # Expression values pass through env, never inline in scripts, so a
       # matrix value can never be interpreted as shell.
