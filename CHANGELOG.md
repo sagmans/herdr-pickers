@@ -8,6 +8,10 @@ All notable user-facing changes to Herdr Pickers are recorded in this file.
 
 - Bump `@types/bun` to 1.4.2 and TypeScript to 7.0.2 (native compiler).
 
+### Security
+
+- The contributor and smoke-workflow Bun moves to 1.4.4. It fixes a Brotli decoder out-of-bounds write and drops three eMudhra roots after the eMudhra CA key compromise.
+
 ## [0.3.3] - 2026-10-12
 
 ### Changed
