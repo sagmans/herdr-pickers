@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test";
 
 import { buildPaneOpenArgs } from "../src/actions/open.ts";
+import { AgentTargetError, loadAgentTargets } from "../src/agents.ts";
 import { Herdr } from "../src/client/herdr.ts";
-import { type CommandRunner } from "../src/util/subprocess.ts";
 import { parseConfig } from "../src/config/config.ts";
 import { parseMode } from "../src/modes.ts";
-import { AgentTargetError, loadAgentTargets } from "../src/agents.ts";
-import { runAgentPicker, runPicker, type PickerRunner } from "../src/picker.ts";
+import { type PickerRunner, runAgentPicker, runPicker } from "../src/picker.ts";
 import type { PickerOptions } from "../src/terminal-picker.ts";
+import type { CommandRunner } from "../src/util/subprocess.ts";
 
 type PickerCall = PickerOptions;
 
@@ -23,7 +23,10 @@ function fakePicker(target: string | undefined): { readonly runner: PickerRunner
   return { runner, calls };
 }
 
-function herdrWith(routes: Record<string, () => { stdout: string; stderr: string; exitCode: number }>, commands: string[][] = []): Herdr {
+function herdrWith(
+  routes: Record<string, () => { stdout: string; stderr: string; exitCode: number }>,
+  commands: string[][] = [],
+): Herdr {
   const runner: CommandRunner = async (argv) => {
     const joined = argv.join(" ");
     commands.push([...argv.slice(1)]);
@@ -33,8 +36,10 @@ function herdrWith(routes: Record<string, () => { stdout: string; stderr: string
   return new Herdr({ runner });
 }
 
-const AGENTS = '{"result":{"agents":[{"terminal_id":"t1","label":"pi","workspace_id":"w1","focused":true},{"terminal_id":"t2","label":"alpha","workspace_id":"w1","status":"working"}]}}';
-const WORKSPACES = '{"result":{"workspaces":[{"workspace_id":"w1","focused":true,"worktree":{"repo_root":"/repo/sample-repo","repo_name":"sample-repo","checkout_path":"/repo/sample-repo/main","is_linked_worktree":true}}]}}';
+const AGENTS =
+  '{"result":{"agents":[{"terminal_id":"t1","label":"pi","workspace_id":"w1","focused":true},{"terminal_id":"t2","label":"alpha","workspace_id":"w1","status":"working"}]}}';
+const WORKSPACES =
+  '{"result":{"workspaces":[{"workspace_id":"w1","focused":true,"worktree":{"repo_root":"/repo/sample-repo","repo_name":"sample-repo","checkout_path":"/repo/sample-repo/main","is_linked_worktree":true}}]}}';
 const NO_AGENTS_MESSAGE = "No agents found.";
 const CONFIG_PATH = "/example/config.toml";
 const KEYMAP_CONFIG = parseConfig('[keymap]\ndown = ["ctrl-j"]\n', CONFIG_PATH);
@@ -104,13 +109,22 @@ describe("modes", () => {
 describe("picker flow", () => {
   test("dispatches the accepted agent selection", async () => {
     const commands: string[][] = [];
-    const herdr = herdrWith({
-      "workspace list": () => ({ stdout: WORKSPACES, stderr: "", exitCode: 0 }),
-      "agent list": () => ({ stdout: AGENTS, stderr: "", exitCode: 0 }),
-    }, commands);
+    const herdr = herdrWith(
+      {
+        "workspace list": () => ({ stdout: WORKSPACES, stderr: "", exitCode: 0 }),
+        "agent list": () => ({ stdout: AGENTS, stderr: "", exitCode: 0 }),
+      },
+      commands,
+    );
     const picker = fakePicker("t2");
 
-    const outcome = await runAgentPicker("agents", { herdr, signal: SIGNAL, context: {}, pickerRunner: picker.runner, config: KEYMAP_CONFIG });
+    const outcome = await runAgentPicker("agents", {
+      herdr,
+      signal: SIGNAL,
+      context: {},
+      pickerRunner: picker.runner,
+      config: KEYMAP_CONFIG,
+    });
 
     expect(outcome).toBe("dispatched");
     expect(commands).toContainEqual(["agent", "focus", "t2"]);
@@ -121,13 +135,22 @@ describe("picker flow", () => {
 
   test("supplies group headers only as non-selectable agent context", async () => {
     const commands: string[][] = [];
-    const herdr = herdrWith({
-      "workspace list": () => ({ stdout: WORKSPACES, stderr: "", exitCode: 0 }),
-      "agent list": () => ({ stdout: AGENTS, stderr: "", exitCode: 0 }),
-    }, commands);
+    const herdr = herdrWith(
+      {
+        "workspace list": () => ({ stdout: WORKSPACES, stderr: "", exitCode: 0 }),
+        "agent list": () => ({ stdout: AGENTS, stderr: "", exitCode: 0 }),
+      },
+      commands,
+    );
     const picker = fakePicker(undefined);
 
-    const outcome = await runAgentPicker("agents", { herdr, signal: SIGNAL, context: {}, config: KEYMAP_CONFIG, pickerRunner: picker.runner });
+    const outcome = await runAgentPicker("agents", {
+      herdr,
+      signal: SIGNAL,
+      context: {},
+      config: KEYMAP_CONFIG,
+      pickerRunner: picker.runner,
+    });
 
     expect(outcome).toBe("cancelled");
     expect(picker.calls[0]?.items.map((item) => item.target)).toEqual(["t2", "t1"]);
@@ -137,13 +160,22 @@ describe("picker flow", () => {
 
   test("treats picker cancellation as a clean close", async () => {
     const commands: string[][] = [];
-    const herdr = herdrWith({
-      "workspace list": () => ({ stdout: WORKSPACES, stderr: "", exitCode: 0 }),
-      "agent list": () => ({ stdout: AGENTS, stderr: "", exitCode: 0 }),
-    }, commands);
+    const herdr = herdrWith(
+      {
+        "workspace list": () => ({ stdout: WORKSPACES, stderr: "", exitCode: 0 }),
+        "agent list": () => ({ stdout: AGENTS, stderr: "", exitCode: 0 }),
+      },
+      commands,
+    );
     const picker = fakePicker(undefined);
 
-    const outcome = await runAgentPicker("agents", { herdr, signal: SIGNAL, context: {}, config: KEYMAP_CONFIG, pickerRunner: picker.runner });
+    const outcome = await runAgentPicker("agents", {
+      herdr,
+      signal: SIGNAL,
+      context: {},
+      config: KEYMAP_CONFIG,
+      pickerRunner: picker.runner,
+    });
 
     expect(outcome).toBe("cancelled");
     expect(commands.flat().join(" ")).not.toContain("agent focus");
@@ -156,7 +188,13 @@ describe("picker flow", () => {
       "agent list": () => ({ stdout: '{"result":{"agents":[]}}', stderr: "", exitCode: 0 }),
     });
 
-    const outcome = await runAgentPicker("agents", { herdr, signal: SIGNAL, context: {}, config: KEYMAP_CONFIG, pickerRunner: picker.runner });
+    const outcome = await runAgentPicker("agents", {
+      herdr,
+      signal: SIGNAL,
+      context: {},
+      config: KEYMAP_CONFIG,
+      pickerRunner: picker.runner,
+    });
 
     expect(outcome).toBe("no-agents");
     expect(picker.calls).toHaveLength(1);
@@ -192,7 +230,11 @@ describe("picker flow", () => {
   test("reports agents without stable targets as an error", async () => {
     const herdr = herdrWith({
       "workspace list": () => ({ stdout: '{"result":{"workspaces":[]}}', stderr: "", exitCode: 0 }),
-      "agent list": () => ({ stdout: '{"result":{"agents":[{"id":"internal","agent":"Claude"}]}}', stderr: "", exitCode: 0 }),
+      "agent list": () => ({
+        stdout: '{"result":{"agents":[{"id":"internal","agent":"Claude"}]}}',
+        stderr: "",
+        exitCode: 0,
+      }),
     });
 
     await expect(loadAgentTargets("agents", herdr, {})).rejects.toThrow(AgentTargetError);
@@ -202,13 +244,17 @@ describe("picker flow", () => {
 describe("navigation picker flow", () => {
   test("dispatches selected typed navigation targets", async () => {
     const commands: string[][] = [];
-    const herdr = herdrWith({
-      "workspace list": () => ({
-        stdout: '{"result":{"workspaces":[{"workspace_id":"w1","focused":true},{"workspace_id":"w2","label":"other"}]}}',
-        stderr: "",
-        exitCode: 0,
-      }),
-    }, commands);
+    const herdr = herdrWith(
+      {
+        "workspace list": () => ({
+          stdout:
+            '{"result":{"workspaces":[{"workspace_id":"w1","focused":true},{"workspace_id":"w2","label":"other"}]}}',
+          stderr: "",
+          exitCode: 0,
+        }),
+      },
+      commands,
+    );
     const runner: PickerRunner = async (options) => {
       expect(options.items).toEqual([]);
       expect(options.loadOnStart).toBe(true);
@@ -223,7 +269,13 @@ describe("navigation picker flow", () => {
       return selection;
     };
 
-    const outcome = await runPicker("workspaces", { herdr, signal: SIGNAL, context: {}, pickerRunner: runner, config: KEYMAP_CONFIG });
+    const outcome = await runPicker("workspaces", {
+      herdr,
+      signal: SIGNAL,
+      context: {},
+      pickerRunner: runner,
+      config: KEYMAP_CONFIG,
+    });
 
     expect(outcome).toBe("dispatched");
     expect(commands).toContainEqual(["workspace", "focus", "w2"]);
@@ -242,7 +294,13 @@ describe("navigation picker flow", () => {
       return undefined;
     };
 
-    const outcome = await runPicker("workspaces", { herdr, signal: SIGNAL, context: {}, config: KEYMAP_CONFIG, pickerRunner: runner });
+    const outcome = await runPicker("workspaces", {
+      herdr,
+      signal: SIGNAL,
+      context: {},
+      config: KEYMAP_CONFIG,
+      pickerRunner: runner,
+    });
 
     expect(outcome).toBe("cancelled");
     expect(reloads).toBe(1);
@@ -251,20 +309,27 @@ describe("navigation picker flow", () => {
   test("resolves selections against targets from the latest reload", async () => {
     let reads = 0;
     const commands: string[][] = [];
-    const herdr = herdrWith({
-      "workspace list": () => {
-        reads += 1;
-        const targetId = reads === 1 ? "w2" : "w3";
-        return {
-          stdout: JSON.stringify({ result: { workspaces: [
-            { workspace_id: "w1", focused: true },
-            { workspace_id: targetId, label: targetId },
-          ] } }),
-          stderr: "",
-          exitCode: 0,
-        };
+    const herdr = herdrWith(
+      {
+        "workspace list": () => {
+          reads += 1;
+          const targetId = reads === 1 ? "w2" : "w3";
+          return {
+            stdout: JSON.stringify({
+              result: {
+                workspaces: [
+                  { workspace_id: "w1", focused: true },
+                  { workspace_id: targetId, label: targetId },
+                ],
+              },
+            }),
+            stderr: "",
+            exitCode: 0,
+          };
+        },
       },
-    }, commands);
+      commands,
+    );
     const runner: PickerRunner = async (options) => {
       await options.reload?.();
       const refreshed = await options.reload?.();
@@ -273,7 +338,13 @@ describe("navigation picker flow", () => {
       return selection;
     };
 
-    const outcome = await runPicker("workspaces", { herdr, signal: SIGNAL, context: {}, config: KEYMAP_CONFIG, pickerRunner: runner });
+    const outcome = await runPicker("workspaces", {
+      herdr,
+      signal: SIGNAL,
+      context: {},
+      config: KEYMAP_CONFIG,
+      pickerRunner: runner,
+    });
 
     expect(outcome).toBe("dispatched");
     expect(commands).toContainEqual(["workspace", "focus", "w3"]);
@@ -286,7 +357,13 @@ describe("navigation picker flow", () => {
       "agent list": () => ({ stdout: '{"result":{"agents":[]}}', stderr: "", exitCode: 0 }),
     });
 
-    const outcome = await runPicker("agents", { herdr, signal: SIGNAL, context: {}, config: KEYMAP_CONFIG, pickerRunner: picker.runner });
+    const outcome = await runPicker("agents", {
+      herdr,
+      signal: SIGNAL,
+      context: {},
+      config: KEYMAP_CONFIG,
+      pickerRunner: picker.runner,
+    });
 
     expect(outcome).toBe("no-agents");
     expect(picker.calls[0]?.signal?.aborted).toBe(true);
@@ -307,12 +384,24 @@ describe("repository agent scoping", () => {
 
   test("falls back to the worktree list source when provenance is missing", async () => {
     const commands: string[][] = [];
-    const fallbackAgents = '{"result":{"agents":[{"terminal_id":"t1","label":"pi","cwd":"/repo/sample-repo","focused":true}]}}';
-    const herdr = herdrWith({
-      "workspace list": () => ({ stdout: '{"result":{"workspaces":[{"workspace_id":"w1","focused":true}]}}', stderr: "", exitCode: 0 }),
-      "agent list": () => ({ stdout: fallbackAgents, stderr: "", exitCode: 0 }),
-      "worktree list": () => ({ stdout: '{"result":{"source":{"repo_root":"/repo/sample-repo"},"worktrees":[]}}', stderr: "", exitCode: 0 }),
-    }, commands);
+    const fallbackAgents =
+      '{"result":{"agents":[{"terminal_id":"t1","label":"pi","cwd":"/repo/sample-repo","focused":true}]}}';
+    const herdr = herdrWith(
+      {
+        "workspace list": () => ({
+          stdout: '{"result":{"workspaces":[{"workspace_id":"w1","focused":true}]}}',
+          stderr: "",
+          exitCode: 0,
+        }),
+        "agent list": () => ({ stdout: fallbackAgents, stderr: "", exitCode: 0 }),
+        "worktree list": () => ({
+          stdout: '{"result":{"source":{"repo_root":"/repo/sample-repo"},"worktrees":[]}}',
+          stderr: "",
+          exitCode: 0,
+        }),
+      },
+      commands,
+    );
 
     const targets = await loadAgentTargets("repo-agents", herdr, { workspaceId: "w1" });
 

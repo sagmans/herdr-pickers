@@ -2,14 +2,13 @@
 // file. Openers (actions/open.ts) reserve and post requests; the picker pane
 // (pane.ts) claims and acknowledges them, so at most one picker surface exists.
 import { Database } from "bun:sqlite";
-import { closeSync, constants, fstatSync, mkdirSync, openSync, realpathSync, lstatSync } from "node:fs";
+import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, realpathSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-
+import { type PickerSurface, POPUP_SURFACE } from "./client/popup.ts";
+import type { PickerPlacement } from "./config/config.ts";
 import type { CurrentContext } from "./context.ts";
 import type { PickerMode } from "./modes.ts";
-import { encodeRequestContext, readPickerRequest, type PickerRequest } from "./picker-request.ts";
-import type { PickerPlacement } from "./config/config.ts";
-import { POPUP_SURFACE, type PickerSurface } from "./client/popup.ts";
+import { encodeRequestContext, type PickerRequest, readPickerRequest } from "./picker-request.ts";
 import { hasErrorCode } from "./util/objects.ts";
 
 /** Pane env var carrying the reservation token from opener to the spawned picker. */
@@ -57,16 +56,20 @@ const OWNER_COLUMNS = "PRAGMA table_info(owners)";
 const ADD_RESERVED_AT = `ALTER TABLE owners ADD COLUMN ${RESERVED_AT_COLUMN} INTEGER`;
 const DELETE_OWNER = "DELETE FROM owners WHERE session = ? AND token = ?";
 const RELEASE_UNSUBMITTED = "DELETE FROM owners WHERE session = ? AND token = ? AND opener = ? AND picker IS NULL";
-const CLAIM_OWNER = "UPDATE owners SET picker = ?, pane = ? WHERE session = ? AND token = ? AND picker IS NULL AND placement = ?";
+const CLAIM_OWNER =
+  "UPDATE owners SET picker = ?, pane = ? WHERE session = ? AND token = ? AND picker IS NULL AND placement = ?";
 const MILLISECONDS_PER_SECOND = 1_000;
 // Users only see this after an opener's whole delivery deadline, so it names
 // the wait that actually unblocks them instead of an internal state.
-const UNCERTAIN_STARTUP = "Picker startup is pending. Retry after the earlier picker opens, or after "
-  + `${UNCLAIMED_RESERVATION_GRACE_MS / MILLISECONDS_PER_SECOND} seconds when its reservation expires.`;
+const UNCERTAIN_STARTUP =
+  "Picker startup is pending. Retry after the earlier picker opens, or after " +
+  `${UNCLAIMED_RESERVATION_GRACE_MS / MILLISECONDS_PER_SECOND} seconds when its reservation expires.`;
 
 /** A reserved picker may still start; openers wait rather than risk a duplicate surface. */
 export class PickerStartupUncertainError extends Error {
-  constructor() { super(UNCERTAIN_STARTUP); }
+  constructor() {
+    super(UNCERTAIN_STARTUP);
+  }
 }
 
 interface Owner {
@@ -89,17 +92,27 @@ export class PickerSession {
   constructor(env: Record<string, string | undefined>) {
     const stateDir = env.HERDR_PLUGIN_STATE_DIR;
     const socketPath = env.HERDR_SOCKET_PATH;
-    if (!stateDir || !socketPath) throw new Error("Herdr plugin state and session socket are required for picker ownership.");
+    if (!stateDir || !socketPath)
+      throw new Error("Herdr plugin state and session socket are required for picker ownership.");
     const canonicalSocket = join(realpathSync(dirname(socketPath)), basename(socketPath));
     const socket = lstatSync(canonicalSocket, { bigint: true });
     if (!socket.isSocket()) throw new Error("Picker session identity must be a Herdr socket.");
-    this.session = JSON.stringify([canonicalSocket, String(socket.dev), String(socket.ino), String(socket.birthtimeNs)]);
+    this.session = JSON.stringify([
+      canonicalSocket,
+      String(socket.dev),
+      String(socket.ino),
+      String(socket.birthtimeNs),
+    ]);
     mkdirSync(stateDir, { recursive: true, mode: PRIVATE_DIRECTORY_MODE });
     const path = join(stateDir, DATABASE_NAME);
     const fd = openSync(path, constants.O_CREAT | constants.O_RDWR | constants.O_NOFOLLOW, PRIVATE_FILE_MODE);
     try {
       const file = fstatSync(fd);
-      if (!file.isFile() || (file.mode & PRIVATE_FILE_MODE) !== PRIVATE_FILE_MODE || (file.mode & ~PRIVATE_FILE_MODE & FILE_PERMISSION_MASK) !== 0) {
+      if (
+        !file.isFile() ||
+        (file.mode & PRIVATE_FILE_MODE) !== PRIVATE_FILE_MODE ||
+        (file.mode & ~PRIVATE_FILE_MODE & FILE_PERMISSION_MASK) !== 0
+      ) {
         throw new Error("Picker ownership storage must be a private regular file.");
       }
     } finally {
@@ -115,7 +128,10 @@ export class PickerSession {
     }
   }
 
-  async reserve(placement: PickerPlacement, paneExists: (paneId: string) => Promise<boolean>): Promise<string | undefined> {
+  async reserve(
+    placement: PickerPlacement,
+    paneExists: (paneId: string) => Promise<boolean>,
+  ): Promise<string | undefined> {
     const observed = this.read();
     if (observed) {
       if (ownerAlive(observed)) return undefined;
@@ -128,18 +144,26 @@ export class PickerSession {
         if (await paneExists(observed.pane)) return undefined;
       }
     }
-    return this.database.transaction(() => {
-      const current = this.read();
-      if (current) {
-        // Recheck after the external observation so a late claim cannot be reaped.
-        if (!observed || current.token !== observed.token || current.picker !== observed.picker
-          || current.pane !== observed.pane || ownerAlive(current)) return undefined;
-        this.database.query(DELETE_OWNER).run(this.session, current.token);
-      }
-      const token = crypto.randomUUID();
-      this.database.query(INSERT_OWNER).run(this.session, token, process.pid, placement, Date.now());
-      return token;
-    }).immediate();
+    return this.database
+      .transaction(() => {
+        const current = this.read();
+        if (current) {
+          // Recheck after the external observation so a late claim cannot be reaped.
+          if (
+            !observed ||
+            current.token !== observed.token ||
+            current.picker !== observed.picker ||
+            current.pane !== observed.pane ||
+            ownerAlive(current)
+          )
+            return undefined;
+          this.database.query(DELETE_OWNER).run(this.session, current.token);
+        }
+        const token = crypto.randomUUID();
+        this.database.query(INSERT_OWNER).run(this.session, token, process.pid, placement, Date.now());
+        return token;
+      })
+      .immediate();
   }
 
   releaseUnsubmitted(token: string): void {
@@ -147,15 +171,18 @@ export class PickerSession {
   }
 
   request(mode: PickerMode, context: CurrentContext): PickerRequest {
-    return this.database.transaction(() => {
-      const owner = this.read();
-      const previous = this.latestRequest();
-      // Actions invoked from an overlay must not turn the plugin's pane into the source repository.
-      const source = owner?.pane && context.paneId === owner.pane && previous ? previous.context : context;
-      const token = crypto.randomUUID();
-      this.database.query(WRITE_REQUEST).run(this.session, token, mode, encodeRequestContext(source));
-      return this.latestRequest()!;
-    }).immediate();
+    return this.database
+      .transaction(() => {
+        const owner = this.read();
+        const previous = this.latestRequest();
+        // Actions invoked from an overlay must not turn the plugin's pane into the source repository.
+        const source = owner?.pane && context.paneId === owner.pane && previous ? previous.context : context;
+        const token = crypto.randomUUID();
+        this.database.query(WRITE_REQUEST).run(this.session, token, mode, encodeRequestContext(source));
+        // biome-ignore lint/style/noNonNullAssertion: the row was written above in this same immediate transaction, so the read cannot miss it.
+        return this.latestRequest()!;
+      })
+      .immediate();
   }
 
   latestRequest(): PickerRequest | undefined {
@@ -164,12 +191,16 @@ export class PickerSession {
   }
 
   acknowledge(request: string, owner: string): boolean {
-    return this.database.query(ACK_REQUEST).run(owner, this.session, request, this.session, owner, process.pid).changes === 1;
+    return (
+      this.database.query(ACK_REQUEST).run(owner, this.session, request, this.session, owner, process.pid).changes === 1
+    );
   }
 
   claim(token: string, surface: PickerSurface = POPUP_SURFACE): boolean {
     const paneId = surface.placement === "overlay" ? surface.paneId : null;
-    return this.database.query(CLAIM_OWNER).run(process.pid, paneId, this.session, token, surface.placement).changes === 1;
+    return (
+      this.database.query(CLAIM_OWNER).run(process.pid, paneId, this.session, token, surface.placement).changes === 1
+    );
   }
 
   close(): void {
@@ -182,13 +213,18 @@ export class PickerSession {
   // The unlocked probe keeps every later open free of a write lock.
   private migrate(): void {
     if (this.hasReservedAt()) return;
-    this.database.transaction(() => {
-      if (!this.hasReservedAt()) this.database.exec(ADD_RESERVED_AT);
-    }).immediate();
+    this.database
+      .transaction(() => {
+        if (!this.hasReservedAt()) this.database.exec(ADD_RESERVED_AT);
+      })
+      .immediate();
   }
 
   private hasReservedAt(): boolean {
-    return this.database.query<{ name: string }, []>(OWNER_COLUMNS).all().some(column => column.name === RESERVED_AT_COLUMN);
+    return this.database
+      .query<{ name: string }, []>(OWNER_COLUMNS)
+      .all()
+      .some((column) => column.name === RESERVED_AT_COLUMN);
   }
 
   private read(): Owner | null {

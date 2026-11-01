@@ -1,7 +1,7 @@
 // Keeps one picker pane serving successive requests. When a newer request
 // replaces the current mode, the loop restarts on the same leased terminal so
 // the popup never flashes; picker-session.ts supplies the request mailbox.
-import { runPicker, type PickerOutcome, type PickerRuntime } from "./picker.ts";
+import { type PickerOutcome, type PickerRuntime, runPicker } from "./picker.ts";
 import type { PickerItem } from "./picker-row.ts";
 import { PICKER_REQUEST_POLL_MS, type PickerSession } from "./picker-session.ts";
 import type { PickerTerminal } from "./picker-terminal.ts";
@@ -34,7 +34,12 @@ export async function runPickerLoop(
   return loop(session, owner, options, terminal);
 }
 
-async function loop(session: RequestSession, owner: string, options: LoopOptions, terminal: PickerTerminal): Promise<PickerOutcome> {
+async function loop(
+  session: RequestSession,
+  owner: string,
+  options: LoopOptions,
+  terminal: PickerTerminal,
+): Promise<PickerOutcome> {
   while (!options.signal?.aborted) {
     const request = session.latestRequest();
     if (!request) throw new Error(OWNER_LOST);
@@ -50,7 +55,12 @@ async function loop(session: RequestSession, owner: string, options: LoopOptions
       if (!dispatching && session.latestRequest()?.token !== request.token) current.abort(new Error(REPLACED));
     };
     const timer = setInterval(() => {
-      try { checkRequest(); } catch (error) { fault = { error }; current.abort(error); }
+      try {
+        checkRequest();
+      } catch (error) {
+        fault = { error };
+        current.abort(error);
+      }
     }, PICKER_REQUEST_POLL_MS);
     let runtime: LoopRuntime | undefined;
     let outcome: PickerOutcome;
@@ -62,7 +72,7 @@ async function loop(session: RequestSession, owner: string, options: LoopOptions
         ...runtime,
         context: request.context,
         signal,
-        pickerRunner: picker => runner({ ...picker, terminal: terminal.lease(picker.signal ?? signal) }),
+        pickerRunner: (picker) => runner({ ...picker, terminal: terminal.lease(picker.signal ?? signal) }),
         beforeDispatch: async () => {
           checkRequest();
           signal.throwIfAborted();

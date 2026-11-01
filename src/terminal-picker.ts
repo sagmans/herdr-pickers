@@ -3,19 +3,15 @@
 // cleanup stays with the lease owner on every exit path.
 import { DEFAULT_PICKER_KEYMAP, type PickerKeymap } from "./config/config.ts";
 import { rankRows } from "./fzf.ts";
-import {
-  arrangePickerItems,
-  type PickerItem,
-  type PickerRows,
-} from "./picker-row.ts";
+import { arrangePickerItems, type PickerItem, type PickerRows } from "./picker-row.ts";
 import { CURSOR_SHOW, type TerminalLease } from "./picker-terminal.ts";
-import { InputFramer, type InputEvent } from "./terminal-picker-input.ts";
-import { reduceInteraction, type InteractionState } from "./terminal-picker-state.ts";
+import { type InputEvent, InputFramer } from "./terminal-picker-input.ts";
+import { type InteractionState, reduceInteraction } from "./terminal-picker-state.ts";
 import {
   fitSelection,
   initialSelection,
-  renderFrame,
   type PickerState,
+  renderFrame,
   type Viewport,
 } from "./terminal-picker-view.ts";
 
@@ -83,17 +79,20 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
   const intervalHandles: unknown[] = [];
   let rows: PickerRows = { items: [...options.items], focusedId: options.focusedId };
   let interaction: InteractionState = {
-    view: fitSelection({
-      prompt: options.prompt,
-      noun: options.noun,
-      live: options.live,
-      emptyMessage: options.loadOnStart === true ? LOADING_MESSAGE : options.emptyMessage,
-      query: "",
-      items: arrangePickerItems(rows.items),
-      sourceCount: rows.items.length,
-      selected: initialSelection(rows.items, rows.focusedId),
-      scrollTop: 0,
-    }, terminal.getViewport()),
+    view: fitSelection(
+      {
+        prompt: options.prompt,
+        noun: options.noun,
+        live: options.live,
+        emptyMessage: options.loadOnStart === true ? LOADING_MESSAGE : options.emptyMessage,
+        query: "",
+        items: arrangePickerItems(rows.items),
+        sourceCount: rows.items.length,
+        selected: initialSelection(rows.items, rows.focusedId),
+        scrollTop: 0,
+      },
+      terminal.getViewport(),
+    ),
   };
   // "accepting" freezes the selected frame until the destination owns focus.
   let phase: "running" | "accepting" | "closed" = "running";
@@ -139,9 +138,7 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
     }
     if (revision !== rankRevision || phase === "closed") return;
     const view = interaction.view;
-    let selected = query.length === 0
-      ? initialSelection(items, rows.focusedId)
-      : items.length === 0 ? -1 : 0;
+    let selected = query.length === 0 ? initialSelection(items, rows.focusedId) : items.length === 0 ? -1 : 0;
     if (preserveSelection) {
       const selectedItem = view.items[view.selected];
       const previous = selectedItem === undefined ? -1 : items.findIndex((item) => item.id === selectedItem.id);
@@ -155,7 +152,10 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
     if (idle()) return;
     rows = { items: [...loaded.items], focusedId: loaded.focusedId };
     // Loading copy is placeholder-only: once rows arrive, emptiness is real.
-    interaction = { ...interaction, view: { ...interaction.view, emptyMessage: options.emptyMessage, sourceCount: rows.items.length } };
+    interaction = {
+      ...interaction,
+      view: { ...interaction.view, emptyMessage: options.emptyMessage, sourceCount: rows.items.length },
+    };
     await applyQuery(interaction.view.query);
     draw();
   };
@@ -192,7 +192,8 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
     return CONTINUE;
   };
   // Background failures (timers, cancellation) interrupt whichever await is pending.
-  const settle = (events: readonly InputEvent[]): Promise<Outcome> => Promise.race([handleEvents(events), failure.promise]);
+  const settle = (events: readonly InputEvent[]): Promise<Outcome> =>
+    Promise.race([handleEvents(events), failure.promise]);
 
   let iterator: AsyncIterator<string> | undefined;
   const abort = (): void => failFromBackground(signal?.reason);
@@ -203,9 +204,11 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
       draw();
     });
     if (options.reload && options.refreshIntervalMilliseconds !== undefined) {
-      intervalHandles.push(timers.setInterval(() => {
-        void refresh().catch(failFromBackground);
-      }, options.refreshIntervalMilliseconds));
+      intervalHandles.push(
+        timers.setInterval(() => {
+          void refresh().catch(failFromBackground);
+        }, options.refreshIntervalMilliseconds),
+      );
     }
     draw();
     // First frame must precede discovery; loading failures ride the same
@@ -223,9 +226,12 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
           : []),
         failure.promise,
       ]);
-      const events = raced.type === "timeout"
-        ? framer.expireEscape()
-        : raced.result.done ? framer.finalEvents() : framer.feed(raced.result.value);
+      const events =
+        raced.type === "timeout"
+          ? framer.expireEscape()
+          : raced.result.done
+            ? framer.finalEvents()
+            : framer.feed(raced.result.value);
       const outcome = events.length > 0 ? await settle(events) : CONTINUE;
       if (outcome.done) return outcome.selection;
       if (raced.type === "input") {
@@ -251,7 +257,9 @@ export async function runTerminalPicker(options: TerminalPickerOptions): Promise
 function failureChannel(): { readonly promise: Promise<never>; fail(error: unknown): void } {
   let raised = false;
   let reject!: (error: unknown) => void;
-  const promise = new Promise<never>((_resolve, rejectPromise) => { reject = rejectPromise; });
+  const promise = new Promise<never>((_resolve, rejectPromise) => {
+    reject = rejectPromise;
+  });
   return {
     promise,
     fail: (error) => {
@@ -292,7 +300,9 @@ function coalesce(task: () => Promise<void>, active: () => boolean): () => Promi
 function drawFrame(terminal: TerminalLease, state: PickerState): void {
   const viewport = terminal.getViewport();
   const frame = renderFrame(state, viewport);
-  terminal.write(`${CURSOR_HIDE}${CLEAR_SCREEN}${CURSOR_HOME}${frame.join("\r\n")}${searchCursorPosition(state, viewport)}${CURSOR_SHOW}`);
+  terminal.write(
+    `${CURSOR_HIDE}${CLEAR_SCREEN}${CURSOR_HOME}${frame.join("\r\n")}${searchCursorPosition(state, viewport)}${CURSOR_SHOW}`,
+  );
 }
 
 function searchCursorPosition(state: PickerState, viewport: Viewport): string {

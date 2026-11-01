@@ -110,9 +110,7 @@ export function resolveToggle(
   const last = memory.last;
   if (last !== undefined && exists(last) && last !== currentId) {
     // Live focus repairs missed events while preserving a valid toggle target.
-    const nextMemory = memory.current === currentId
-      ? memory
-      : { kind: "current" as const, current: currentId, last };
+    const nextMemory = memory.current === currentId ? memory : { kind: "current" as const, current: currentId, last };
     return { memory: nextMemory, target: last };
   }
   if (memory.current === currentId && memory.last === undefined) return { memory, target: undefined };

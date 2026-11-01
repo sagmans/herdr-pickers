@@ -1,12 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import type { PickerGroup, PickerItem } from "../src/picker-row.ts";
-import {
-  mouseAction,
-  renderFrame,
-  type PickerState,
-  type Viewport,
-} from "../src/terminal-picker-view.ts";
+import { mouseAction, type PickerState, renderFrame, type Viewport } from "../src/terminal-picker-view.ts";
 
 const ANSI_PATTERN = /\x1b\[[0-?]*[ -/]*[@-~]/g;
 const ANSI_RESET = "\x1b[0m";
@@ -106,12 +101,7 @@ describe("terminal picker rendering", () => {
     const state = { ...STATE, items: STATE.items.slice(0, 1), selected: 0 };
     const frame = renderFrame(state, TALL_VIEWPORT).map(plain);
 
-    expect(frame.slice(2, 6)).toEqual([
-      "",
-      "",
-      "  ▾ sample-repo",
-      "→   ✓ main ▸ pi",
-    ]);
+    expect(frame.slice(2, 6)).toEqual(["", "", "  ▾ sample-repo", "→   ✓ main ▸ pi"]);
     expect(frame[6]).toBe("─".repeat(TALL_VIEWPORT.columns));
     expect(frame[7]).toBe("agents › pi1 match");
   });
@@ -140,21 +130,33 @@ describe("terminal picker rendering", () => {
 
 describe("terminal picker mouse mapping", () => {
   test("closes only from the small top-right button hit area", () => {
-    expect(mouseAction({ type: "mouse", button: "left", column: 23, row: 1, released: false }, STATE, VIEWPORT)).toEqual({ type: "close" });
-    expect(mouseAction({ type: "mouse", button: "left", column: 2, row: 1, released: false }, STATE, VIEWPORT)).toEqual({ type: "none" });
+    expect(
+      mouseAction({ type: "mouse", button: "left", column: 23, row: 1, released: false }, STATE, VIEWPORT),
+    ).toEqual({ type: "close" });
+    expect(mouseAction({ type: "mouse", button: "left", column: 2, row: 1, released: false }, STATE, VIEWPORT)).toEqual(
+      { type: "none" },
+    );
   });
 
   test("maps list clicks through the scroll offset", () => {
     const state = { ...STATE, scrollTop: 2 };
 
-    expect(mouseAction({ type: "mouse", button: "left", column: 5, row: 4, released: false }, state, VIEWPORT)).toEqual({ type: "select", index: 1 });
+    expect(mouseAction({ type: "mouse", button: "left", column: 5, row: 4, released: false }, state, VIEWPORT)).toEqual(
+      { type: "select", index: 1 },
+    );
   });
 
   test("maps clicks from the bottom-aligned start of a short list", () => {
     const state = { ...STATE, items: STATE.items.slice(0, 1), selected: 0 };
 
-    expect(mouseAction({ type: "mouse", button: "left", column: 5, row: 4, released: false }, state, TALL_VIEWPORT)).toEqual({ type: "none" });
-    expect(mouseAction({ type: "mouse", button: "left", column: 5, row: 5, released: false }, state, TALL_VIEWPORT)).toEqual({ type: "none" });
-    expect(mouseAction({ type: "mouse", button: "left", column: 5, row: 6, released: false }, state, TALL_VIEWPORT)).toEqual({ type: "select", index: 0 });
+    expect(
+      mouseAction({ type: "mouse", button: "left", column: 5, row: 4, released: false }, state, TALL_VIEWPORT),
+    ).toEqual({ type: "none" });
+    expect(
+      mouseAction({ type: "mouse", button: "left", column: 5, row: 5, released: false }, state, TALL_VIEWPORT),
+    ).toEqual({ type: "none" });
+    expect(
+      mouseAction({ type: "mouse", button: "left", column: 5, row: 6, released: false }, state, TALL_VIEWPORT),
+    ).toEqual({ type: "select", index: 0 });
   });
 });

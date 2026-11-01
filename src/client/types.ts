@@ -83,12 +83,12 @@ export interface AgentListResult {
 export type PickerFocusLifecycleMessage =
   | { readonly kind: "subscription-started" }
   | {
-    readonly kind: "snapshot";
-    readonly paneId: string;
-    readonly tabId: string;
-    readonly workspaceId: string;
-    readonly globallyFocused: boolean;
-  }
+      readonly kind: "snapshot";
+      readonly paneId: string;
+      readonly tabId: string;
+      readonly workspaceId: string;
+      readonly globallyFocused: boolean;
+    }
   | { readonly kind: "pane-focused"; readonly paneId: string; readonly workspaceId: string }
   | { readonly kind: "tab-focused"; readonly tabId: string; readonly workspaceId: string }
   | { readonly kind: "workspace-focused"; readonly workspaceId: string };
@@ -123,7 +123,8 @@ export function parsePickerSnapshotResponse(raw: string, paneId: string): Picker
   try {
     const envelope = expectRecord(JSON.parse(raw));
     const result = expectRecord(envelope.result);
-    if (envelope.error !== undefined || result.type !== SESSION_SNAPSHOT_TYPE) throw new Error(MALFORMED_PICKER_FOCUS_MESSAGE);
+    if (envelope.error !== undefined || result.type !== SESSION_SNAPSHOT_TYPE)
+      throw new Error(MALFORMED_PICKER_FOCUS_MESSAGE);
     return readPickerFocusSnapshot(result.snapshot, paneId);
   } catch {
     throw new Error(MALFORMED_PICKER_FOCUS_MESSAGE);
@@ -135,7 +136,7 @@ export function readPickerPaneIds(envelope: unknown): string[] {
   const record = expectRecord(envelope);
   const panes = getResult(record).panes;
   if (record.error !== undefined || !Array.isArray(panes)) throw new Error(MALFORMED_PICKER_PANES_MESSAGE);
-  return panes.map(pane => expectString(expectRecord(pane).pane_id));
+  return panes.map((pane) => expectString(expectRecord(pane).pane_id));
 }
 
 /** Lenient: rows without a workspace id are dropped instead of failing the catalog. */
@@ -194,7 +195,11 @@ export function readAgentList(envelope: unknown): AgentListResult {
     else skippedWithoutTarget += 1;
   }
 
-  return { agents, skippedWithoutTarget, observedKeys: [...observedKeys].sort((left, right) => left.localeCompare(right)) };
+  return {
+    agents,
+    skippedWithoutTarget,
+    observedKeys: [...observedKeys].sort((left, right) => left.localeCompare(right)),
+  };
 }
 
 function readPickerFocusEvent(envelope: Record<string, unknown>): PickerFocusLifecycleMessage {
@@ -238,10 +243,11 @@ function readPickerFocusSnapshot(value: unknown, paneId: string): PickerFocusLif
     paneId: ownerPaneId,
     tabId,
     workspaceId,
-    globallyFocused: focused
-      && optionalString(snapshot.focused_pane_id) === ownerPaneId
-      && optionalString(snapshot.focused_tab_id) === tabId
-      && optionalString(snapshot.focused_workspace_id) === workspaceId,
+    globallyFocused:
+      focused &&
+      optionalString(snapshot.focused_pane_id) === ownerPaneId &&
+      optionalString(snapshot.focused_tab_id) === tabId &&
+      optionalString(snapshot.focused_workspace_id) === workspaceId,
   };
 }
 
@@ -293,14 +299,16 @@ function readWorkspace(value: unknown): WorkspaceRecord[] {
   if (!record || !workspaceId) return [];
 
   const worktree = readWorktreeProvenance(record.worktree);
-  return [{
-    workspaceId,
-    label: optionalString(record.label),
-    cwd: optionalString(record.cwd),
-    worktree,
-    agentStatus: firstString(record, STATUS_KEYS),
-    focused: optionalBooleanOrUndefined(record.focused),
-  }];
+  return [
+    {
+      workspaceId,
+      label: optionalString(record.label),
+      cwd: optionalString(record.cwd),
+      worktree,
+      agentStatus: firstString(record, STATUS_KEYS),
+      focused: optionalBooleanOrUndefined(record.focused),
+    },
+  ];
 }
 
 function readWorktreeProvenance(value: unknown): WorktreeProvenance | undefined {
@@ -322,20 +330,26 @@ function readWorktree(value: unknown): WorktreeRecord[] {
   const path = optionalString(record?.path) ?? optionalString(record?.checkout_path);
   if (!record || !path) return [];
 
-  return [{
-    path,
-    label: optionalString(record.label),
-    branch: optionalString(record.branch),
-    repoRoot: optionalString(record.repo_root),
-    isBare: optionalBoolean(record.is_bare),
-    isDetached: optionalBoolean(record.is_detached),
-    isLinkedWorktree: optionalBoolean(record.is_linked_worktree),
-    isPrunable: optionalBoolean(record.is_prunable),
-    openWorkspaceId: optionalString(record.open_workspace_id),
-  }];
+  return [
+    {
+      path,
+      label: optionalString(record.label),
+      branch: optionalString(record.branch),
+      repoRoot: optionalString(record.repo_root),
+      isBare: optionalBoolean(record.is_bare),
+      isDetached: optionalBoolean(record.is_detached),
+      isLinkedWorktree: optionalBoolean(record.is_linked_worktree),
+      isPrunable: optionalBoolean(record.is_prunable),
+      openWorkspaceId: optionalString(record.open_workspace_id),
+    },
+  ];
 }
 
-function readAgent(record: Record<string, unknown>, nameCounts: ReadonlyMap<string, number>, labelCounts: ReadonlyMap<string, number>): AgentRecord | undefined {
+function readAgent(
+  record: Record<string, unknown>,
+  nameCounts: ReadonlyMap<string, number>,
+  labelCounts: ReadonlyMap<string, number>,
+): AgentRecord | undefined {
   const target = stableAgentTarget(record, nameCounts, labelCounts);
   if (!target) return undefined;
 
@@ -363,13 +377,23 @@ function readSessionAgent(value: unknown): string | undefined {
 // herdr 0.7.5+ resolves agent targets only through public pane ids or unique
 // agent names (terminal ids stopped resolving); prefer pane_id so selection
 // keeps working across herdr versions that still expose a legacy target field.
-function stableAgentTarget(record: Record<string, unknown>, nameCounts: ReadonlyMap<string, number>, labelCounts: ReadonlyMap<string, number>): string | undefined {
-  return firstString(record, AGENT_TARGET_KEYS)
-    ?? uniqueField(record, "name", nameCounts)
-    ?? uniqueField(record, "label", labelCounts);
+function stableAgentTarget(
+  record: Record<string, unknown>,
+  nameCounts: ReadonlyMap<string, number>,
+  labelCounts: ReadonlyMap<string, number>,
+): string | undefined {
+  return (
+    firstString(record, AGENT_TARGET_KEYS) ??
+    uniqueField(record, "name", nameCounts) ??
+    uniqueField(record, "label", labelCounts)
+  );
 }
 
-function uniqueField(record: Record<string, unknown>, key: string, counts: ReadonlyMap<string, number>): string | undefined {
+function uniqueField(
+  record: Record<string, unknown>,
+  key: string,
+  counts: ReadonlyMap<string, number>,
+): string | undefined {
   const value = optionalString(record[key]);
   return value && counts.get(value) === 1 ? value : undefined;
 }

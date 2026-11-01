@@ -275,6 +275,7 @@ Run the checks:
 ```sh
 bun test
 bun run typecheck
+bun run lint    # Biome format and lint check (bun run format fixes formatting)
 bun run smoke   # PTY smoke against a disposable isolated Herdr runtime
 ```
 

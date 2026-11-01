@@ -4,11 +4,12 @@ import { boundedTerminalBlock, boundedTerminalText } from "./terminal-text.ts";
 
 /** Multi-line form for interactive output: aggregate causes stay visible, one per line. */
 export function formatErrorBlock(error: unknown): string {
-  const rendered = error instanceof AggregateError
-    ? [error.message, ...error.errors.map(formatErrorBlock)].join("\n")
-    : error instanceof Error
-      ? error.message
-      : String(error);
+  const rendered =
+    error instanceof AggregateError
+      ? [error.message, ...error.errors.map(formatErrorBlock)].join("\n")
+      : error instanceof Error
+        ? error.message
+        : String(error);
   // Popup output is user-facing: every line is sanitized and the whole
   // aggregate stays bounded so failures cannot flood the terminal.
   return boundedTerminalBlock(rendered);

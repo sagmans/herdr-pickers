@@ -1,10 +1,9 @@
+import { afterEach, describe, expect, test } from "bun:test";
+import { getEventListeners } from "node:events";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
-import { getEventListeners } from "node:events";
-import { afterEach, describe, expect, test } from "bun:test";
 
 import { Herdr, HerdrCommandError } from "../src/client/herdr.ts";
-import { type CommandResult, type CommandRunner } from "../src/util/subprocess.ts";
 import {
   listGitWorktrees,
   listWorktreesForContext,
@@ -13,6 +12,7 @@ import {
 } from "../src/discovery/worktrees.ts";
 import { rankRows } from "../src/fzf.ts";
 import type { PickerItem } from "../src/picker-row.ts";
+import type { CommandResult, CommandRunner } from "../src/util/subprocess.ts";
 
 const ABORT_EVENT = "abort";
 const BLOCKING_MILLISECONDS = 1_500;
@@ -52,12 +52,16 @@ function createLocalCommand(name: string, markerPath: string, blocking: boolean)
   const directory = temporaryDirectory();
   const commandPath = join(directory, name);
   const wait = blocking ? `setTimeout(() => process.exit(0), ${BLOCKING_MILLISECONDS});` : "";
-  writeFileSync(commandPath, [
-    "#!/usr/bin/env bun",
-    'import { writeFileSync } from "node:fs";',
-    `writeFileSync(${JSON.stringify(markerPath)}, String(process.pid));`,
-    wait,
-  ].join("\n"), { encoding: "utf8", mode: COMMAND_MODE });
+  writeFileSync(
+    commandPath,
+    [
+      "#!/usr/bin/env bun",
+      'import { writeFileSync } from "node:fs";',
+      `writeFileSync(${JSON.stringify(markerPath)}, String(process.pid));`,
+      wait,
+    ].join("\n"),
+    { encoding: "utf8", mode: COMMAND_MODE },
+  );
   return commandPath;
 }
 
@@ -166,24 +170,28 @@ describe.serial("subprocess cancellation", () => {
     expect(error).not.toBeInstanceOf(HerdrCommandError);
   });
 
-  test("Herdr cancels its built-in subprocess without wrapping the abort", async () => {
-    const directory = temporaryDirectory();
-    const markerPath = join(directory, "herdr-started");
-    const commandPath = createLocalCommand("blocking-herdr", markerPath, true);
-    const controller = new AbortController();
-    const baselineListeners = getEventListeners(controller.signal, ABORT_EVENT).length;
-    const running = new Herdr({ bin: commandPath, signal: controller.signal }).run(["workspace", "list"]);
-    await waitFor(() => existsSync(markerPath));
-    const pid = Number(readFileSync(markerPath, "utf8"));
+  test(
+    "Herdr cancels its built-in subprocess without wrapping the abort",
+    async () => {
+      const directory = temporaryDirectory();
+      const markerPath = join(directory, "herdr-started");
+      const commandPath = createLocalCommand("blocking-herdr", markerPath, true);
+      const controller = new AbortController();
+      const baselineListeners = getEventListeners(controller.signal, ABORT_EVENT).length;
+      const running = new Herdr({ bin: commandPath, signal: controller.signal }).run(["workspace", "list"]);
+      await waitFor(() => existsSync(markerPath));
+      const pid = Number(readFileSync(markerPath, "utf8"));
 
-    controller.abort();
-    const error = await settleWithin(caughtFrom(running));
+      controller.abort();
+      const error = await settleWithin(caughtFrom(running));
 
-    expect(error).toBe(controller.signal.reason);
-    expect(error).not.toBeInstanceOf(HerdrCommandError);
-    await waitFor(() => !processIsRunning(pid));
-    expect(getEventListeners(controller.signal, ABORT_EVENT)).toHaveLength(baselineListeners);
-  }, TEST_TIMEOUT_MILLISECONDS);
+      expect(error).toBe(controller.signal.reason);
+      expect(error).not.toBeInstanceOf(HerdrCommandError);
+      await waitFor(() => !processIsRunning(pid));
+      expect(getEventListeners(controller.signal, ABORT_EVENT)).toHaveLength(baselineListeners);
+    },
+    TEST_TIMEOUT_MILLISECONDS,
+  );
 
   test("pre-aborted fzf ranking rejects before work starts", async () => {
     const controller = new AbortController();
@@ -198,11 +206,13 @@ describe.serial("subprocess cancellation", () => {
     ["output", FZF_OUTPUT_PAYLOAD_LENGTH],
     ["input flush", FZF_BLOCKING_PAYLOAD_LENGTH],
   ] as const) {
-    test(`fzf cancellation settles blocked ${waitName} waits`, async () => {
-      const directory = temporaryDirectory();
-      const markerPath = join(directory, "fzf-started");
-      const commandPath = createLocalCommand(FZF_COMMAND, markerPath, true);
-      const source = `
+    test(
+      `fzf cancellation settles blocked ${waitName} waits`,
+      async () => {
+        const directory = temporaryDirectory();
+        const markerPath = join(directory, "fzf-started");
+        const commandPath = createLocalCommand(FZF_COMMAND, markerPath, true);
+        const source = `
         import { existsSync } from "node:fs";
         import { getEventListeners } from "node:events";
         import { rankRows } from ${JSON.stringify(FZF_MODULE_URL)};
@@ -229,12 +239,14 @@ describe.serial("subprocess cancellation", () => {
         }
       `;
 
-      const result = await runWithStartupPath(commandPath, source);
+        const result = await runWithStartupPath(commandPath, source);
 
-      expect(result).toEqual({ stdout: "", stderr: "", exitCode: 0 });
-      const pid = Number(readFileSync(markerPath, "utf8"));
-      await waitFor(() => !processIsRunning(pid));
-    }, TEST_TIMEOUT_MILLISECONDS);
+        expect(result).toEqual({ stdout: "", stderr: "", exitCode: 0 });
+        const pid = Number(readFileSync(markerPath, "utf8"));
+        await waitFor(() => !processIsRunning(pid));
+      },
+      TEST_TIMEOUT_MILLISECONDS,
+    );
   }
 
   test("worktree discovery passes the final signal to injected Git runners", async () => {
@@ -313,11 +325,13 @@ describe.serial("subprocess cancellation", () => {
     expect(gitCalls).toBe(0);
   });
 
-  test("worktree discovery cancels its built-in Git subprocess", async () => {
-    const directory = temporaryDirectory();
-    const markerPath = join(directory, "git-started");
-    const commandPath = createLocalCommand(GIT_COMMAND, markerPath, true);
-    const source = `
+  test(
+    "worktree discovery cancels its built-in Git subprocess",
+    async () => {
+      const directory = temporaryDirectory();
+      const markerPath = join(directory, "git-started");
+      const commandPath = createLocalCommand(GIT_COMMAND, markerPath, true);
+      const source = `
       import { existsSync } from "node:fs";
       import { getEventListeners } from "node:events";
       import { Herdr } from ${JSON.stringify(HERDR_MODULE_URL)};
@@ -340,10 +354,12 @@ describe.serial("subprocess cancellation", () => {
       }
     `;
 
-    const result = await runWithStartupPath(commandPath, source);
+      const result = await runWithStartupPath(commandPath, source);
 
-    expect(result).toEqual({ stdout: "", stderr: "", exitCode: 0 });
-    const pid = Number(readFileSync(markerPath, "utf8"));
-    await waitFor(() => !processIsRunning(pid));
-  }, TEST_TIMEOUT_MILLISECONDS);
+      expect(result).toEqual({ stdout: "", stderr: "", exitCode: 0 });
+      const pid = Number(readFileSync(markerPath, "utf8"));
+      await waitFor(() => !processIsRunning(pid));
+    },
+    TEST_TIMEOUT_MILLISECONDS,
+  );
 });

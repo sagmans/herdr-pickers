@@ -1,0 +1,38 @@
+#!/bin/sh
+# Runs the Biome binary that bun installed from bun.lock, and only when its
+# version equals the exact devDependency pin in package.json. A global or
+# stale Biome formats and lints with other rules, so the hooks would pass or
+# fail for reasons the committed config does not describe; refusing a
+# missing or mismatched binary keeps every check on one known release.
+# Resolved from this script's checkout, so it also works from a directory
+# outside git (the pre-commit snapshot of the index).
+# Usage: scripts/biome <biome args...>
+set -eu
+
+PACKAGE_NAME='@biomejs/biome'
+INSTALL_HINT='run: bun install --frozen-lockfile'
+
+root=$(cd "$(dirname -- "$0")/.." && pwd -P)
+manifest="$root/package.json"
+bin="$root/node_modules/.bin/biome"
+
+# Exact versions only: a range would let the lockfile and the pin disagree.
+pin=$(sed -n 's|^ *"@biomejs/biome": *"\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)",\{0,1\} *$|\1|p' "$manifest")
+if [ -z "$pin" ]; then
+	echo "biome: no exact $PACKAGE_NAME version pinned in $manifest" >&2
+	exit 1
+fi
+
+if [ ! -x "$bin" ]; then
+	echo "biome: $bin not found; $INSTALL_HINT" >&2
+	exit 1
+fi
+
+# `biome --version` prints "Version: X.Y.Z".
+installed=$("$bin" --version | sed -n 's/^Version: *//p')
+if [ "$installed" != "$pin" ]; then
+	echo "biome: installed ${installed:-unknown} but package.json pins $pin; $INSTALL_HINT" >&2
+	exit 1
+fi
+
+exec "$bin" "$@"

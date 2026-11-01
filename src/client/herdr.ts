@@ -1,7 +1,7 @@
 // Herdr CLI boundary: every plugin call to Herdr goes through this argv-only
 // runner so failures surface as typed, sanitized errors and cancellation is
 // honored. JSON payloads it returns are parsed in ./types.ts.
-import { runArgv, type CommandResult, type CommandRunner } from "../util/subprocess.ts";
+import { type CommandResult, type CommandRunner, runArgv } from "../util/subprocess.ts";
 import { boundedTerminalText } from "../util/terminal-text.ts";
 
 const UNKNOWN_COMMAND_FAMILY = "command";

@@ -5,7 +5,7 @@ import { createConnection, type Socket } from "node:net";
 
 import { readPickerSnapshot } from "./picker-snapshot.ts";
 
-import { parsePickerFocusLifecycleMessage, type PickerFocusLifecycleMessage } from "./types.ts";
+import { type PickerFocusLifecycleMessage, parsePickerFocusLifecycleMessage } from "./types.ts";
 
 // Snapshots travel over their own native-client connection, so the
 // subscription socket only ever answers this one request.
@@ -13,11 +13,7 @@ const SUBSCRIBE_REQUEST_ID = "herdr-pickers:focus-subscribe";
 const REQUEST_METHODS = {
   subscribe: "events.subscribe",
 } as const;
-const FOCUS_SUBSCRIPTIONS = [
-  { type: "pane.focused" },
-  { type: "tab.focused" },
-  { type: "workspace.focused" },
-] as const;
+const FOCUS_SUBSCRIPTIONS = [{ type: "pane.focused" }, { type: "tab.focused" }, { type: "workspace.focused" }] as const;
 const MAX_MESSAGE_BUFFER_BYTES = 64 * 1024;
 const SETUP_TIMEOUT_MS = 1_000;
 const NEWLINE_BYTE = 0x0a;
@@ -27,11 +23,15 @@ const FOCUS_DEPARTURE_MESSAGE = "Focus left the picker";
 
 /** Focus left the picker: ordinary cancellation, distinct from observer failure. */
 export class PickerFocusDeparture extends Error {
-  constructor() { super(FOCUS_DEPARTURE_MESSAGE); }
+  constructor() {
+    super(FOCUS_DEPARTURE_MESSAGE);
+  }
 }
 
-type FocusEvent = Exclude<PickerFocusLifecycleMessage,
-  { readonly kind: "subscription-started" } | { readonly kind: "snapshot" }>;
+type FocusEvent = Exclude<
+  PickerFocusLifecycleMessage,
+  { readonly kind: "subscription-started" } | { readonly kind: "snapshot" }
+>;
 
 interface FocusOwner {
   readonly paneId: string;
@@ -55,11 +55,11 @@ type FocusStage =
   | { readonly kind: "subscribing" }
   | { readonly kind: "confirming"; readonly stale: boolean }
   | {
-    readonly kind: "reverifying";
-    readonly owner: FocusOwner;
-    readonly stale: boolean;
-    readonly dispatch: PendingDispatch | undefined;
-  }
+      readonly kind: "reverifying";
+      readonly owner: FocusOwner;
+      readonly stale: boolean;
+      readonly dispatch: PendingDispatch | undefined;
+    }
   | { readonly kind: "watching"; readonly owner: FocusOwner }
   | { readonly kind: "stopped" }
   | { readonly kind: "failed" };
@@ -92,7 +92,8 @@ function advanceFocus(stage: FocusStage, message: PickerFocusLifecycleMessage, p
       if (!message.globallyFocused) return { stage, effect: { kind: "depart" } };
       const owner = { paneId: message.paneId, tabId: message.tabId, workspaceId: message.workspaceId };
       // Focus moved while this snapshot was in flight; only a fresh one can confirm it.
-      if (stage.stale) return { stage: reverifying(owner, pendingDispatch(stage)), effect: { kind: "established", reverify: true } };
+      if (stage.stale)
+        return { stage: reverifying(owner, pendingDispatch(stage)), effect: { kind: "established", reverify: true } };
       const dispatch = pendingDispatch(stage);
       if (dispatch) return { stage: { kind: "stopped" }, effect: { kind: "confirm-dispatch", dispatch } };
       return { stage: { kind: "watching", owner }, effect: { kind: "established", reverify: false } };
@@ -169,7 +170,9 @@ function established(stage: FocusStage): boolean {
 }
 
 /** A snapshot is in flight exactly while a stage is waiting to be re-proven. */
-function awaitingSnapshot(stage: FocusStage): stage is Extract<FocusStage, { readonly kind: "confirming" | "reverifying" }> {
+function awaitingSnapshot(
+  stage: FocusStage,
+): stage is Extract<FocusStage, { readonly kind: "confirming" | "reverifying" }> {
   return stage.kind === "confirming" || stage.kind === "reverifying";
 }
 
@@ -255,7 +258,9 @@ export async function watchPickerFocus(
       clearTimeout(stepTimer);
       stepTimer = setTimeout(terminate, SETUP_TIMEOUT_MS);
       void readPickerSnapshot(socketPath, paneId, snapshots.signal)
-        .then(message => { if (awaitingSnapshot(stage)) handleMessage(message); })
+        .then((message) => {
+          if (awaitingSnapshot(stage)) handleMessage(message);
+        })
         .catch(terminate);
     }
 
@@ -266,12 +271,15 @@ export async function watchPickerFocus(
           stage = step.stage;
           return;
         case "terminate":
-          return terminate();
+          terminate();
+          return;
         case "depart":
-          return finish(new PickerFocusDeparture());
+          finish(new PickerFocusDeparture());
+          return;
         case "request-snapshot":
           stage = step.stage;
-          return requestSnapshot();
+          requestSnapshot();
+          return;
         case "established":
           stage = step.stage;
           clearTimeout(stepTimer);
@@ -286,6 +294,7 @@ export async function watchPickerFocus(
           return;
         default: {
           const exhaustive: never = effect;
+          // biome-ignore lint/correctness/noVoidTypeReturn: returning the `never` value is this repo's compile-time exhaustiveness guard (AGENTS.md); it can never run.
           return exhaustive;
         }
       }
@@ -300,7 +309,10 @@ export async function watchPickerFocus(
       let buffer = Buffer.concat([pending, chunk]);
       let newline = buffer.indexOf(NEWLINE_BYTE);
       while (newline >= 0) {
-        if (newline > budget) return terminate();
+        if (newline > budget) {
+          terminate();
+          return;
+        }
         const raw = buffer.subarray(0, newline).toString("utf8");
         buffer = buffer.subarray(newline + 1);
         try {
@@ -311,7 +323,10 @@ export async function watchPickerFocus(
         if (finished(stage)) return;
         newline = buffer.indexOf(NEWLINE_BYTE);
       }
-      if (buffer.length > budget) return terminate();
+      if (buffer.length > budget) {
+        terminate();
+        return;
+      }
       if (!socket.destroyed) pending = buffer;
     }
 

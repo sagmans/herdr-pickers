@@ -1,7 +1,7 @@
 // Wire format for picker requests stored in the session database. Rows are
 // untrusted input, so every field is validated before it selects behavior.
-import { decodeContext, encodeContext, type CurrentContext } from "./context.ts";
-import { parseMode, type PickerMode } from "./modes.ts";
+import { type CurrentContext, decodeContext, encodeContext } from "./context.ts";
+import { type PickerMode, parseMode } from "./modes.ts";
 import { isRecord } from "./util/objects.ts";
 
 const INVALID_REQUEST = "Invalid picker replacement request";
@@ -23,9 +23,14 @@ export function encodeRequestContext(context: CurrentContext): string {
 
 /** Validates a raw database row; throws on any malformed field or unknown mode. */
 export function readPickerRequest(value: unknown): PickerRequest {
-  if (!isRecord(value) || typeof value.token !== "string" || !value.token
-    || typeof value.mode !== "string" || typeof value.context !== "string"
-    || (value.acknowledged !== null && typeof value.acknowledged !== "string")) {
+  if (
+    !isRecord(value) ||
+    typeof value.token !== "string" ||
+    !value.token ||
+    typeof value.mode !== "string" ||
+    typeof value.context !== "string" ||
+    (value.acknowledged !== null && typeof value.acknowledged !== "string")
+  ) {
     throw new Error(INVALID_REQUEST);
   }
   const context = decodeContext(value.context);

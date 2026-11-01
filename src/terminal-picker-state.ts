@@ -6,8 +6,8 @@ import {
   fitSelection,
   mouseAction,
   moveSelection,
-  scrollRows,
   type PickerState,
+  scrollRows,
   type Viewport,
 } from "./terminal-picker-view.ts";
 
@@ -55,7 +55,11 @@ const NONE: InteractionEffect = { type: "none" };
  * Pure transition for one input event, kept apart from I/O so key and mouse
  * semantics can be reasoned about without the terminal loop.
  */
-export function reduceInteraction(state: InteractionState, event: InputEvent, context: InteractionContext): InteractionStep {
+export function reduceInteraction(
+  state: InteractionState,
+  event: InputEvent,
+  context: InteractionContext,
+): InteractionStep {
   const { view } = state;
   switch (event.type) {
     case "close":
@@ -103,8 +107,11 @@ function reduceMouse(
     case "select": {
       const clickedAt = context.now();
       const clickedItem = view.items[action.index];
-      if (clickedItem !== undefined && previousClick?.itemId === clickedItem.id
-        && clickedAt - previousClick.time <= DOUBLE_CLICK_MILLISECONDS) {
+      if (
+        clickedItem !== undefined &&
+        previousClick?.itemId === clickedItem.id &&
+        clickedAt - previousClick.time <= DOUBLE_CLICK_MILLISECONDS
+      ) {
         return { state, effect: { type: "accept", selection: clickedItem } };
       }
       return {

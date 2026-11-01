@@ -2,11 +2,7 @@ import { POPUP_SURFACE } from "../src/client/popup.ts";
 import type { PickerItem } from "../src/picker-row.ts";
 import { withPickerSurface } from "../src/picker-surface.ts";
 import type { TerminalAdapter } from "../src/picker-terminal.ts";
-import {
-  runTerminalPicker,
-  type PickerOptions,
-  type PickerTimers,
-} from "../src/terminal-picker.ts";
+import { type PickerOptions, type PickerTimers, runTerminalPicker } from "../src/terminal-picker.ts";
 import type { Viewport } from "../src/terminal-picker-view.ts";
 
 export const VIEWPORT: Viewport = { columns: 24, rows: 6 };
@@ -17,7 +13,6 @@ export class FakeTerminal implements TerminalAdapter {
   readonly rawModes: boolean[] = [];
   readonly input: AsyncIterable<string | Uint8Array>;
   inputReturned = false;
-  private resizeListener: (() => void) | undefined;
   private finishInput: (() => void) | undefined;
 
   constructor(
@@ -64,11 +59,9 @@ export class FakeTerminal implements TerminalAdapter {
     return this.viewport;
   }
 
-  onResize(listener: () => void): () => void {
-    this.resizeListener = listener;
-    return () => {
-      this.resizeListener = undefined;
-    };
+  // No test drives resize events, so the fake keeps no listener; the no-op unsubscribe keeps the adapter contract.
+  onResize(_listener: () => void): () => void {
+    return () => {};
   }
 
   finish(): void {
@@ -77,7 +70,8 @@ export class FakeTerminal implements TerminalAdapter {
 }
 
 export class FakeTimers implements PickerTimers {
-  private readonly intervals: Array<{ readonly callback: () => void; readonly milliseconds: number; active: boolean }> = [];
+  private readonly intervals: Array<{ readonly callback: () => void; readonly milliseconds: number; active: boolean }> =
+    [];
 
   readonly setInterval = (callback: () => void, milliseconds: number): unknown => {
     const interval = { callback, milliseconds, active: true };
@@ -109,5 +103,11 @@ export function runAdapterPicker(
   options: PickerOptions & { readonly terminal: TerminalAdapter; readonly dismiss?: () => Promise<void> },
 ): Promise<PickerItem | undefined> {
   const { terminal, dismiss, ...picker } = options;
-  return withPickerSurface(POPUP_SURFACE, undefined, terminal, owner => runTerminalPicker({ ...picker, terminal: owner.lease(picker.signal) }), dismiss);
+  return withPickerSurface(
+    POPUP_SURFACE,
+    undefined,
+    terminal,
+    (owner) => runTerminalPicker({ ...picker, terminal: owner.lease(picker.signal) }),
+    dismiss,
+  );
 }

@@ -46,16 +46,19 @@ export function createPickerFocusGuard(
     if (signal.aborted) return;
     onLost(error instanceof PickerFocusDeparture ? error : new PickerFocusFailure(error));
   };
-  const ready = surface.placement === "popup"
-    ? undefined
-    : (socketPath === undefined
-      ? Promise.reject(new Error(SOCKET_REQUIRED_MESSAGE))
-      : watchPickerFocus(socketPath, surface.paneId, signal)
-    ).then(watcher => {
-      watch = watcher;
-      watcher.signal.addEventListener("abort", () => lose(watcher.signal.reason), { once: true });
-      if (watcher.signal.aborted) lose(watcher.signal.reason);
-    }).catch(lose);
+  const ready =
+    surface.placement === "popup"
+      ? undefined
+      : (socketPath === undefined
+          ? Promise.reject(new Error(SOCKET_REQUIRED_MESSAGE))
+          : watchPickerFocus(socketPath, surface.paneId, signal)
+        )
+          .then((watcher) => {
+            watch = watcher;
+            watcher.signal.addEventListener("abort", () => lose(watcher.signal.reason), { once: true });
+            if (watcher.signal.aborted) lose(watcher.signal.reason);
+          })
+          .catch(lose);
   return {
     async checkBeforeDispatch() {
       await ready;

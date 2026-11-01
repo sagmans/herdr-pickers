@@ -1,5 +1,6 @@
 import { statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { PICKER_MODES, type PickerMode } from "../src/modes.ts";
 import { readOwnershipDatabase } from "./smoke-database.ts";
 import {
   CONFIG_FILE_NAME,
@@ -7,13 +8,12 @@ import {
   KEY_ENTER,
   OWNER_QUERY,
   PICKER_PANE_LABEL,
+  type PickerLifecycleSmokeOptions,
   PLUGIN_ID,
   processAlive,
   READ_REQUEST,
-  type PickerLifecycleSmokeOptions,
 } from "./smoke-support.ts";
 import { POLL_TIMEOUT_EXTENDED_MS } from "./smoke-timing.ts";
-import { PICKER_MODES, type PickerMode } from "../src/modes.ts";
 
 const AGENT_LABEL = "smoke-agent";
 const AGENT_SOURCE = "picker-replacement-smoke";
@@ -22,7 +22,16 @@ const WORKTREE_WORKSPACE = "w2";
 const READY_MS = 400;
 // Replacement order is deliberate: it repeats the opening mode, alternates kinds,
 // and ends on repo-worktrees so the follow-up dispatch proves source scope.
-const MODES = ["agents", "worktrees", "repo-agents", "all", "projects", "workspaces", "repo-workspaces", "repo-worktrees"] as const satisfies readonly PickerMode[];
+const MODES = [
+  "agents",
+  "worktrees",
+  "repo-agents",
+  "all",
+  "projects",
+  "workspaces",
+  "repo-workspaces",
+  "repo-worktrees",
+] as const satisfies readonly PickerMode[];
 const STARTUP_MODES = ["workspaces", "projects", "all"] as const satisfies readonly PickerMode[];
 
 interface Owner {
@@ -32,12 +41,16 @@ interface Owner {
   pane: string | null;
   placement: string;
 }
-interface Request { token: string; mode: string; context: string; acknowledged: string | null }
+interface Request {
+  token: string;
+  mode: string;
+  context: string;
+  acknowledged: string | null;
+}
 
 export async function runPickerReplacementSmoke(options: PickerLifecycleSmokeOptions, path: string): Promise<void> {
   const { primary: session, check, poll } = options;
-  const owners = (): Owner[] =>
-    readOwnershipDatabase(path, (database) => database.query<Owner, []>(OWNER_QUERY).all());
+  const owners = (): Owner[] => readOwnershipDatabase(path, (database) => database.query<Owner, []>(OWNER_QUERY).all());
   const request = (owner: Owner): Request | null =>
     readOwnershipDatabase(path, (database) => database.query<Request, [string]>(READ_REQUEST).get(owner.session));
   const invoke = (mode: string) => {
@@ -48,44 +61,74 @@ export async function runPickerReplacementSmoke(options: PickerLifecycleSmokeOpt
   const readRows = (kind: string): Array<Record<string, unknown>> => {
     const result = session.run([kind, "list"]);
     check(`${kind} list succeeds`, result.code === 0, result.stderr);
-    return (JSON.parse(result.stdout) as { result: Record<string, Array<Record<string, unknown>>> }).result[`${kind}s`]!;
+    return (JSON.parse(result.stdout) as { result: Record<string, Array<Record<string, unknown>>> }).result[
+      `${kind}s`
+    ]!;
   };
   const waitOwner = async (): Promise<Owner> => {
-    const serialized = await poll("replacement owner claims", () => {
-      const active = owners().filter(alive);
-      check("at most one replacement owner", active.length <= 1);
-      return active[0] ? JSON.stringify(active[0]) : undefined;
-    }, POLL_TIMEOUT_EXTENDED_MS);
+    const serialized = await poll(
+      "replacement owner claims",
+      () => {
+        const active = owners().filter(alive);
+        check("at most one replacement owner", active.length <= 1);
+        return active[0] ? JSON.stringify(active[0]) : undefined;
+      },
+      POLL_TIMEOUT_EXTENDED_MS,
+    );
     return JSON.parse(serialized) as Owner;
   };
   const waitAdopted = async (owner: Owner, mode: string, oldRequest?: string): Promise<void> => {
-    await poll(`${mode} newest request adopted`, () => {
-      const current = request(owner);
-      return current?.mode === mode && current.acknowledged === owner.token && current.token !== oldRequest ? current.token : undefined;
-    }, POLL_TIMEOUT_EXTENDED_MS);
+    await poll(
+      `${mode} newest request adopted`,
+      () => {
+        const current = request(owner);
+        return current?.mode === mode && current.acknowledged === owner.token && current.token !== oldRequest
+          ? current.token
+          : undefined;
+      },
+      POLL_TIMEOUT_EXTENDED_MS,
+    );
   };
   const waitClosed = async (owner: Owner): Promise<void> => {
-    await poll("replacement owner exits", () => !alive(owner) ? owner.token : undefined);
-    if (owner.pane) await poll("replacement pane removed", () =>
-      readRows("pane").some(row => row.pane_id === owner.pane) ? undefined : owner.pane!);
+    await poll("replacement owner exits", () => (!alive(owner) ? owner.token : undefined));
+    if (owner.pane)
+      await poll("replacement pane removed", () =>
+        readRows("pane").some((row) => row.pane_id === owner.pane) ? undefined : owner.pane!,
+      );
     check("replacement final cleanup completes", true);
   };
   const waitFrame = async (mode: string, offset: number): Promise<void> => {
     // Herdr paints client diffs, so a popup prompt that already sits on screen
     // emits no bytes to match; any client paint after the invoke proves the
     // replacement reached the screen, and the ownership checks prove the mode.
-    await poll(`${mode} replacement frame renders`, () =>
-      statSync(session.rawOutputPath).size > offset ? mode : undefined, POLL_TIMEOUT_EXTENDED_MS);
+    await poll(
+      `${mode} replacement frame renders`,
+      () => (statSync(session.rawOutputPath).size > offset ? mode : undefined),
+      POLL_TIMEOUT_EXTENDED_MS,
+    );
   };
 
   for (const placement of ["popup", "overlay"] as const) {
-    writeFileSync(join(options.pluginConfigDir, CONFIG_FILE_NAME), `placement = "${placement}"\n\n${options.baseConfig}`);
+    writeFileSync(
+      join(options.pluginConfigDir, CONFIG_FILE_NAME),
+      `placement = "${placement}"\n\n${options.baseConfig}`,
+    );
     const focused = session.run(["worktree", "open", "--cwd", options.repo, "--path", options.repo, "--focus"]);
     check("replacement source opens with repository provenance", focused.code === 0, focused.stderr);
-    const sourceWorkspace = readRows("workspace").find(row => row.focused === true)?.workspace_id;
-    const sourcePane = readRows("pane").find(row => row.focused === true)?.pane_id;
+    const sourceWorkspace = readRows("workspace").find((row) => row.focused === true)?.workspace_id;
+    const sourcePane = readRows("pane").find((row) => row.focused === true)?.pane_id;
     check("replacement source pane exists", typeof sourcePane === "string");
-    const report = session.run(["pane", "report-agent", String(sourcePane), "--source", AGENT_SOURCE, "--agent", AGENT_LABEL, "--state", "idle"]);
+    const report = session.run([
+      "pane",
+      "report-agent",
+      String(sourcePane),
+      "--source",
+      AGENT_SOURCE,
+      "--agent",
+      AGENT_LABEL,
+      "--state",
+      "idle",
+    ]);
     check("isolated agent fixture registers", report.code === 0, report.stderr);
 
     const offset = statSync(session.rawOutputPath).size;
@@ -95,41 +138,71 @@ export async function runPickerReplacementSmoke(options: PickerLifecycleSmokeOpt
     await Bun.sleep(READY_MS);
     session.input(AGENT_LABEL);
     const alternate = placement === "overlay" ? "popup" : "overlay";
-    writeFileSync(join(options.pluginConfigDir, CONFIG_FILE_NAME), `placement = "${alternate}"\n\n${options.baseConfig}`);
+    writeFileSync(
+      join(options.pluginConfigDir, CONFIG_FILE_NAME),
+      `placement = "${alternate}"\n\n${options.baseConfig}`,
+    );
     for (const mode of MODES) {
       const previous = request(owner)?.token;
       invoke(mode);
       await waitAdopted(owner, mode, previous);
       if (owner.pane) {
         const prompt = PICKER_MODES[mode].prompt.trimEnd();
-        await poll(`${mode} overlay frame renders`, () => {
-          const frame = session.run(["pane", "read", owner.pane!, "--source", "visible", "--format", "text"]);
-          return frame.code === 0 && frame.stdout.includes(prompt) ? mode : undefined;
-        }, POLL_TIMEOUT_EXTENDED_MS);
+        await poll(
+          `${mode} overlay frame renders`,
+          () => {
+            const frame = session.run(["pane", "read", owner.pane!, "--source", "visible", "--format", "text"]);
+            return frame.code === 0 && frame.stdout.includes(prompt) ? mode : undefined;
+          },
+          POLL_TIMEOUT_EXTENDED_MS,
+        );
       } else {
         // Herdr's client emits screen diffs; an unchanged popup prompt has no new byte sequence to match.
         await Bun.sleep(READY_MS);
       }
-      const current = owners().find(row => row.session === owner.session);
-      check(`${placement} ${mode} keeps owner and surface`, current?.token === owner.token && current.picker === owner.picker && current.pane === owner.pane && current.placement === placement);
+      const current = owners().find((row) => row.session === owner.session);
+      check(
+        `${placement} ${mode} keeps owner and surface`,
+        current?.token === owner.token &&
+          current.picker === owner.picker &&
+          current.pane === owner.pane &&
+          current.placement === placement,
+      );
       if (owner.pane) {
-        check("exactly one overlay remains", readRows("pane").filter(row => row.label === PICKER_PANE_LABEL).length === 1);
+        check(
+          "exactly one overlay remains",
+          readRows("pane").filter((row) => row.label === PICKER_PANE_LABEL).length === 1,
+        );
         const context = JSON.parse(request(owner)!.context) as { workspaceId?: string; paneId?: string };
-        check("repository replacement retains original context", context.workspaceId === sourceWorkspace && context.paneId === sourcePane);
+        check(
+          "repository replacement retains original context",
+          context.workspaceId === sourceWorkspace && context.paneId === sourcePane,
+        );
       }
     }
-    writeFileSync(join(options.pluginConfigDir, CONFIG_FILE_NAME), `placement = "${placement}"\n\n${options.baseConfig}`);
+    writeFileSync(
+      join(options.pluginConfigDir, CONFIG_FILE_NAME),
+      `placement = "${placement}"\n\n${options.baseConfig}`,
+    );
     // A real worktree dispatch proves source scope and that the previous agent query was cleared.
     await Bun.sleep(READY_MS);
     session.input(SOURCE_WORKTREE_QUERY);
     await Bun.sleep(READY_MS);
     session.input(KEY_ENTER);
     await poll("replacement worktree dispatch focuses its workspace", () =>
-      readRows("workspace").find(row => row.focused === true)?.workspace_id === WORKTREE_WORKSPACE ? WORKTREE_WORKSPACE : undefined);
+      readRows("workspace").find((row) => row.focused === true)?.workspace_id === WORKTREE_WORKSPACE
+        ? WORKTREE_WORKSPACE
+        : undefined,
+    );
     await waitClosed(owner);
 
-    const burst = await Promise.all(STARTUP_MODES.map(mode => session.runAsync(["plugin", "action", "invoke", `${PLUGIN_ID}.${mode}`])));
-    check(`${placement} startup burst invokes`, burst.every(result => result.code === 0));
+    const burst = await Promise.all(
+      STARTUP_MODES.map((mode) => session.runAsync(["plugin", "action", "invoke", `${PLUGIN_ID}.${mode}`])),
+    );
+    check(
+      `${placement} startup burst invokes`,
+      burst.every((result) => result.code === 0),
+    );
     const started = await waitOwner();
     const startupRequest = request(started)?.token;
     invoke("workspaces");
@@ -144,17 +217,25 @@ export async function runPickerReplacementSmoke(options: PickerLifecycleSmokeOpt
       if (!active) return undefined;
       const latest = request(active);
       return latest?.mode === "workspaces" && latest.token !== previous && latest.acknowledged === active.token
-        ? latest.token : undefined;
+        ? latest.token
+        : undefined;
     });
     const successor = await waitOwner();
     if (successor.token !== started.token) check("successor waits for old process exit", !alive(started));
-    if (placement === "overlay") check("dismissal leaves one picker pane", readRows("pane").filter(row => row.label === PICKER_PANE_LABEL).length === 1);
+    if (placement === "overlay")
+      check(
+        "dismissal leaves one picker pane",
+        readRows("pane").filter((row) => row.label === PICKER_PANE_LABEL).length === 1,
+      );
     await Bun.sleep(READY_MS);
     session.input(options.firstWorkspaceLabel);
     await Bun.sleep(READY_MS);
     session.input(KEY_ENTER);
     await poll("dismissal successor dispatches newest request", () =>
-      readRows("workspace").find(row => row.focused === true)?.workspace_id === options.firstWorkspaceId ? options.firstWorkspaceId : undefined);
+      readRows("workspace").find((row) => row.focused === true)?.workspace_id === options.firstWorkspaceId
+        ? options.firstWorkspaceId
+        : undefined,
+    );
     await waitClosed(successor);
   }
 }

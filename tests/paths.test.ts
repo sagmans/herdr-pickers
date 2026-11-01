@@ -1,7 +1,7 @@
+import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { expect, test } from "bun:test";
 
 import { canonicalPathKey, isPathWithin } from "../src/util/paths.ts";
 

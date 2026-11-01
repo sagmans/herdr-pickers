@@ -45,13 +45,13 @@ const PLACEMENT_ERROR_MESSAGE = "placement must be 'popup' or 'overlay'";
 const DEFAULT_CONFIG = [
   "# Optional. popup (default) is a 75% centered float.",
   "# overlay is a full-pane zoom and hides Kitty images from the pane underneath.",
-  "# placement = \"overlay\"",
+  '# placement = "overlay"',
   "",
   "[projects]",
   "# Optional. Parent directories that contain project repositories.",
   "# When empty, navigation mirrors repositories Herdr already tracks.",
   "# Set roots to include repositories not yet opened in Herdr.",
-  "# Example: roots = [\"~/projects\"]",
+  '# Example: roots = ["~/projects"]',
   "roots = []",
   "",
   "# Optional. Each action list replaces only that action's default keys.",
@@ -59,8 +59,8 @@ const DEFAULT_CONFIG = [
   "# Keys: up, down, enter, ctrl-a through ctrl-z, except ctrl-c.",
   "# Escape and Ctrl-C are fixed cancellation controls.",
   "# [keymap]",
-  "# up = [\"up\", \"ctrl-k\"]",
-  "# down = [\"down\", \"ctrl-j\"]",
+  '# up = ["up", "ctrl-k"]',
+  '# down = ["down", "ctrl-j"]',
   "",
 ].join("\n");
 
@@ -78,7 +78,10 @@ export interface HerdrPickersConfig {
 
 /** Invalid user config; the message carries the config path so users can locate the fix. */
 export class ConfigError extends Error {
-  constructor(message: string, readonly configPath: string) {
+  constructor(
+    message: string,
+    readonly configPath: string,
+  ) {
     super(`${message} (${configPath})`);
     this.name = "ConfigError";
   }
@@ -200,7 +203,10 @@ function resolvePickerKeymap(value: unknown, configPath: string): PickerKeymap {
       if (sequence === undefined) throw new ConfigError(`Unknown key '${name}' in keymap.${action}`, configPath);
       const previous = explicit.get(sequence);
       if (previous !== undefined) {
-        throw new ConfigError(`Key '${name}' in keymap.${action} conflicts with '${previous.name}' in keymap.${previous.action}`, configPath);
+        throw new ConfigError(
+          `Key '${name}' in keymap.${action} conflicts with '${previous.name}' in keymap.${previous.action}`,
+          configPath,
+        );
       }
       explicit.set(sequence, { action, name });
     }

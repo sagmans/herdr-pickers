@@ -47,9 +47,11 @@ function hasGitCheckoutMetadata(path: string): boolean {
 export function isBareRepository(path: string): boolean {
   if (hasGitCheckoutMetadata(path)) return false;
   try {
-    return statSync(join(path, "HEAD")).isFile()
-      && statSync(join(path, "objects")).isDirectory()
-      && statSync(join(path, "refs")).isDirectory();
+    return (
+      statSync(join(path, "HEAD")).isFile() &&
+      statSync(join(path, "objects")).isDirectory() &&
+      statSync(join(path, "refs")).isDirectory()
+    );
   } catch {
     return false;
   }

@@ -11,14 +11,7 @@ const FZF_COMMAND = "fzf";
 const FZF_SUCCESS = 0;
 const FZF_NO_MATCH = 1;
 const MIN_SOURCE_INDEX = 0;
-const FZF_FILTER_ARGS = [
-  "--delimiter",
-  FIELD_DELIMITER,
-  "--with-nth",
-  "1",
-  "--nth",
-  "1",
-] as const;
+const FZF_FILTER_ARGS = ["--delimiter", FIELD_DELIMITER, "--with-nth", "1", "--nth", "1"] as const;
 
 /**
  * Returns items in fzf rank order; an empty query keeps input order. Throws on
@@ -45,11 +38,7 @@ export async function rankRows(
     proc.stdin.write(`${indexedLines.join("\n")}\n`);
     await proc.stdin.flush();
     proc.stdin.end();
-    result = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
+    result = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
   } catch (error) {
     proc.stdin.end();
     signal?.throwIfAborted();
@@ -61,10 +50,14 @@ export async function rankRows(
   if (exitCode !== FZF_SUCCESS) {
     throw new Error(`fzf filter failed with exit code ${exitCode}`);
   }
-  return stdout.split("\n").filter((line) => line.length > 0).map((line) => {
-    const sourceIndex = Number(line.slice(line.lastIndexOf(FIELD_DELIMITER) + FIELD_DELIMITER.length));
-    const source = Number.isSafeInteger(sourceIndex) && sourceIndex >= MIN_SOURCE_INDEX ? items[sourceIndex] : undefined;
-    if (source === undefined) throw new Error(`fzf returned invalid source index: ${sourceIndex}`);
-    return source;
-  });
+  return stdout
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => {
+      const sourceIndex = Number(line.slice(line.lastIndexOf(FIELD_DELIMITER) + FIELD_DELIMITER.length));
+      const source =
+        Number.isSafeInteger(sourceIndex) && sourceIndex >= MIN_SOURCE_INDEX ? items[sourceIndex] : undefined;
+      if (source === undefined) throw new Error(`fzf returned invalid source index: ${sourceIndex}`);
+      return source;
+    });
 }

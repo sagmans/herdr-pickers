@@ -4,17 +4,16 @@
 set -eu
 # shellcheck disable=SC1090,SC1091  # path exported by .githooks/lib/run-local.sh
 . "${HOOK_HELPERS:?run from .githooks (scripts/setup-hooks)}"
-. "$(dirname -- "$0")/../_lib/tool.sh"
 
 verify() {
 	echo "pre-push: bun install --frozen-lockfile --ignore-scripts"
-	run_tool bun install --frozen-lockfile --ignore-scripts
+	scripts/run-tool bun install --frozen-lockfile --ignore-scripts
 	echo "pre-push: bun test"
-	run_tool bun test
+	scripts/run-tool bun test
 	echo "pre-push: bun run typecheck"
-	run_tool bun run typecheck
+	scripts/run-tool bun run typecheck
 	echo "pre-push: bun audit"
-	run_tool bun audit
+	scripts/run-tool bun audit
 }
 
 # for loop, not `| while`: a failure must exit this script (fail closed).

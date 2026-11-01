@@ -1,6 +1,6 @@
+import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, test } from "bun:test";
 
 import { PICKER_MODES, type PickerMode } from "../src/modes.ts";
 
@@ -16,7 +16,14 @@ describe("plugin manifest", () => {
     build?: unknown;
     actions?: Array<{ id?: string; title?: string; contexts?: string[]; command?: string[] }>;
     events?: Array<{ on?: string; command?: string[] }>;
-    panes?: Array<{ id?: string; title?: string; placement?: string; width?: string; height?: string; command?: string[] }>;
+    panes?: Array<{
+      id?: string;
+      title?: string;
+      placement?: string;
+      width?: string;
+      height?: string;
+      command?: string[];
+    }>;
   };
 
   test("declares unified plugin metadata", () => {
@@ -78,13 +85,15 @@ describe("plugin manifest", () => {
   });
 
   test("declares one centered popup pane at 75% of the screen", () => {
-    expect(manifest.panes).toEqual([{
-      id: "picker",
-      title: "Herdr Picker",
-      placement: "popup",
-      width: "75%",
-      height: "75%",
-      command: ["bun", "src/pane.ts"],
-    }]);
+    expect(manifest.panes).toEqual([
+      {
+        id: "picker",
+        title: "Herdr Picker",
+        placement: "popup",
+        width: "75%",
+        height: "75%",
+        command: ["bun", "src/pane.ts"],
+      },
+    ]);
   });
 });

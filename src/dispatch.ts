@@ -1,9 +1,8 @@
 // Turns an accepted picker row into a Herdr focus or create command. Every call
 // is argv-based, so target paths and labels never pass through a shell.
 import { basename } from "node:path";
-
-import { Herdr, HerdrCommandError } from "./client/herdr.ts";
 import type { PickerTarget } from "./catalog.ts";
+import { type Herdr, HerdrCommandError } from "./client/herdr.ts";
 
 const RECOVERABLE_WORKTREE_ERROR = /not found|does not exist|no worktree|not a worktree|not linked/i;
 

@@ -2,16 +2,28 @@
 // processes. Read-modify-write runs under a kernel-held SQLite lock and
 // writes are atomic renames, so racing events never corrupt or interleave.
 import { Database } from "bun:sqlite";
-import { closeSync, constants, fchmodSync, fstatSync, ftruncateSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  fchmodSync,
+  fstatSync,
+  ftruncateSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 
 import { hasErrorCode } from "../util/objects.ts";
 import {
   EMPTY_MEMORY,
   fromPersisted,
+  type PersistedState,
   parsePersistedState,
   toPersisted,
-  type PersistedState,
   type WorkspaceMemory,
 } from "./memory.ts";
 

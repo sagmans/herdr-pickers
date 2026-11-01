@@ -2,13 +2,13 @@
 // mirror the plugin come from src so a rename there cannot leave the smoke
 // probing a stale name, and the shared types keep the smoke modules free of
 // import cycles between each other.
-import { CONFIG_FILE_NAME, PLUGIN_ID, type PickerPlacement } from "../src/config/config.ts";
+import { CONFIG_FILE_NAME, type PickerPlacement, PLUGIN_ID } from "../src/config/config.ts";
 import { PICKER_MODES } from "../src/modes.ts";
 import { DATABASE_NAME, READ_REQUEST } from "../src/picker-session.ts";
 import { ESCAPE_KEY_SEQUENCE, KEY_CTRL_C, KEY_ENTER } from "../src/terminal-keys.ts";
 import { hasErrorCode } from "../src/util/objects.ts";
 
-export { CONFIG_FILE_NAME, KEY_CTRL_C, KEY_ENTER, PLUGIN_ID, READ_REQUEST, type PickerPlacement };
+export { CONFIG_FILE_NAME, KEY_CTRL_C, KEY_ENTER, type PickerPlacement, PLUGIN_ID, READ_REQUEST };
 export const KEY_ESCAPE = ESCAPE_KEY_SEQUENCE;
 export const OWNERSHIP_DATABASE_NAME = DATABASE_NAME;
 // The smoke lists every owner row rather than one session, which the plugin never does.

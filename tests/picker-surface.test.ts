@@ -19,12 +19,18 @@ describe("picker surface lifecycle", () => {
     const terminal = new FakeTerminal([]);
     let closes = 0;
 
-    const result = await withPickerSurface(POPUP_SURFACE, undefined, terminal, async surface => {
-      draw(surface);
-      return "selected";
-    }, async () => {
-      closes += 1;
-    });
+    const result = await withPickerSurface(
+      POPUP_SURFACE,
+      undefined,
+      terminal,
+      async (surface) => {
+        draw(surface);
+        return "selected";
+      },
+      async () => {
+        closes += 1;
+      },
+    );
 
     expect(result).toBe("selected");
     expect(closes).toBe(1);
@@ -34,7 +40,17 @@ describe("picker surface lifecycle", () => {
     const pickerError = new Error("picker failed");
     const terminal = new FakeTerminal([]);
 
-    await expect(withPickerSurface(POPUP_SURFACE, undefined, terminal, async () => { throw pickerError; }, async () => {})).rejects.toBe(pickerError);
+    await expect(
+      withPickerSurface(
+        POPUP_SURFACE,
+        undefined,
+        terminal,
+        async () => {
+          throw pickerError;
+        },
+        async () => {},
+      ),
+    ).rejects.toBe(pickerError);
   });
 
   test("aggregates picker and close failures", async () => {
@@ -43,7 +59,17 @@ describe("picker surface lifecycle", () => {
     const terminal = new FakeTerminal([]);
 
     try {
-      await withPickerSurface(POPUP_SURFACE, undefined, terminal, async () => { throw pickerError; }, async () => { throw closeError; });
+      await withPickerSurface(
+        POPUP_SURFACE,
+        undefined,
+        terminal,
+        async () => {
+          throw pickerError;
+        },
+        async () => {
+          throw closeError;
+        },
+      );
       throw new Error("expected failure");
     } catch (error) {
       expect(error).toBeInstanceOf(AggregateError);
@@ -56,10 +82,18 @@ describe("picker surface lifecycle", () => {
     const terminal = new FakeTerminal([]);
     let closes = 0;
 
-    await expect(withPickerSurface(POPUP_SURFACE, undefined, terminal, async () => "selected", async () => {
-      closes += 1;
-      throw new Error("close failed");
-    })).rejects.toThrow("close failed");
+    await expect(
+      withPickerSurface(
+        POPUP_SURFACE,
+        undefined,
+        terminal,
+        async () => "selected",
+        async () => {
+          closes += 1;
+          throw new Error("close failed");
+        },
+      ),
+    ).rejects.toThrow("close failed");
 
     expect(closes).toBe(1);
   });
@@ -67,30 +101,46 @@ describe("picker surface lifecycle", () => {
   test("restores the terminal after picker and close failures", async () => {
     const terminal = new FakeTerminal([]);
 
-    await expect(withPickerSurface(POPUP_SURFACE, undefined, terminal, async surface => {
-      draw(surface);
-      throw new Error("picker failed");
-    }, async () => { throw new Error("close failed"); })).rejects.toThrow(COMBINED_FAILURE);
+    await expect(
+      withPickerSurface(
+        POPUP_SURFACE,
+        undefined,
+        terminal,
+        async (surface) => {
+          draw(surface);
+          throw new Error("picker failed");
+        },
+        async () => {
+          throw new Error("close failed");
+        },
+      ),
+    ).rejects.toThrow(COMBINED_FAILURE);
 
     expect(terminal.rawModes).toEqual([true, false]);
-    expect(terminal.writes.filter(write => write.includes(STOP_SCREEN))).toHaveLength(1);
+    expect(terminal.writes.filter((write) => write.includes(STOP_SCREEN))).toHaveLength(1);
     expect(terminal.inputReturned).toBe(true);
   });
 
   test("dismisses before restoring the terminal", async () => {
     const terminal = new FakeTerminal([]);
 
-    await withPickerSurface(POPUP_SURFACE, undefined, terminal, async surface => {
-      draw(surface);
-    }, async () => {
-      expect(terminal.writes.join("")).not.toContain(STOP_SCREEN);
-    });
+    await withPickerSurface(
+      POPUP_SURFACE,
+      undefined,
+      terminal,
+      async (surface) => {
+        draw(surface);
+      },
+      async () => {
+        expect(terminal.writes.join("")).not.toContain(STOP_SCREEN);
+      },
+    );
 
     expect(terminal.writes.at(-1)).toContain(STOP_SCREEN);
   });
 
   test("aggregate failure messages stay bounded and control-free", () => {
-    const noisy = new Error("\u001B]0;pwned\u0007" + "x".repeat(5000));
+    const noisy = new Error(`\u001B]0;pwned\u0007${"x".repeat(5000)}`);
     const error = new AggregateError([noisy, new Error("close \u2066failed")], "combined \u202Efailure");
 
     const formatted = formatErrorBlock(error);
@@ -107,7 +157,9 @@ describe("popup surface close", () => {
   test("closing a popup never writes to the socket", async () => {
     const writes: string[] = [];
 
-    await closePickerSurface(POPUP_SURFACE, "/tmp/herdr.sock", async (_path, payload) => { writes.push(payload); });
+    await closePickerSurface(POPUP_SURFACE, "/tmp/herdr.sock", async (_path, payload) => {
+      writes.push(payload);
+    });
 
     expect(writes).toEqual([]);
   });

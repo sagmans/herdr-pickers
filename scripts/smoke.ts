@@ -8,15 +8,15 @@ import { join } from "node:path";
 
 import { runPickerLifecycleSmoke } from "./smoke-picker-lifecycle.ts";
 import {
+  type CliResult,
   CONFIG_FILE_NAME,
   KEY_CTRL_C,
   KEY_ENTER,
   KEY_ESCAPE,
   PICKER_PANE_LABEL,
   PLUGIN_ID,
-  WORKSPACES_PICKER_PROMPT,
-  type CliResult,
   type SmokeSession,
+  WORKSPACES_PICKER_PROMPT,
 } from "./smoke-support.ts";
 import {
   POLL_BACKOFF_FACTOR,
@@ -77,8 +77,15 @@ const OVERLAY_CONFIG_PREFIX = 'placement = "overlay"\n\n';
 const PLUGIN_COMMAND_PENDING_STATUSES: ReadonlySet<string> = new Set(["running", "queued"]);
 const PLUGIN_COMMAND_SUCCEEDED = "succeeded";
 const ACTION_IDS = [
-  "all", "projects", "workspaces", "repo-workspaces", "worktrees",
-  "repo-worktrees", "agents", "repo-agents", "last-workspace",
+  "all",
+  "projects",
+  "workspaces",
+  "repo-workspaces",
+  "worktrees",
+  "repo-worktrees",
+  "agents",
+  "repo-agents",
+  "last-workspace",
 ] as const;
 // A terminal escape sequence in the client stream proves a real TUI frame was
 // painted; the raw PTY file exists as soon as the bridge starts.
@@ -124,7 +131,11 @@ const clientRawPath = join(root, "client.raw");
 const secondClientRawPath = join(root, "client-second.raw");
 
 function clientBytes(): number {
-  try { return statSync(clientRawPath).size; } catch { return 0; }
+  try {
+    return statSync(clientRawPath).size;
+  } catch {
+    return 0;
+  }
 }
 
 // Environment that routes every herdr invocation into the isolated config.
@@ -202,7 +213,11 @@ async function poll(
       probeError = error instanceof Error ? error.message : String(error);
     }
     if (Date.now() > deadline) {
-      check(label, false, `timed out after ${timeoutMs} ms${probeError === undefined ? "" : ` (last probe error: ${probeError})`}`);
+      check(
+        label,
+        false,
+        `timed out after ${timeoutMs} ms${probeError === undefined ? "" : ` (last probe error: ${probeError})`}`,
+      );
       return "";
     }
     await Bun.sleep(interval);
@@ -213,10 +228,15 @@ async function poll(
 const isolatedSessions = new Set<string>();
 
 async function verifySessionIsolation(sessionName: string, label: string): Promise<void> {
-  await poll(`${label}server becomes ready`, () => cliFor(sessionName, ["pane", "list"]).code === 0 ? "ready" : undefined);
+  await poll(`${label}server becomes ready`, () =>
+    cliFor(sessionName, ["pane", "list"]).code === 0 ? "ready" : undefined,
+  );
   const status = cliFor(sessionName, ["status", "server"]);
-  check(`${label}runtime is isolated under temp config`, status.code === 0 && status.stdout.includes(`${root}/`),
-    `unexpected socket path in: ${status.stdout.trim()}`);
+  check(
+    `${label}runtime is isolated under temp config`,
+    status.code === 0 && status.stdout.includes(`${root}/`),
+    `unexpected socket path in: ${status.stdout.trim()}`,
+  );
   isolatedSessions.add(sessionName);
 }
 
@@ -245,7 +265,11 @@ function finish(code: number): never {
   }
   for (const proc of [server, secondServer]) {
     if (!proc) continue;
-    try { proc.kill(); } catch { /* already gone */ }
+    try {
+      proc.kill();
+    } catch {
+      /* already gone */
+    }
   }
   // Attached TUI clients exit once their session disappears. Signalling them
   // first wedged them in exit on macOS, and their PTY bridges then waited
@@ -253,10 +277,18 @@ function finish(code: number): never {
   Bun.sleepSync(CLIENT_EXIT_GRACE_MS);
   for (const proc of [attach, secondAttach]) {
     if (!proc) continue;
-    try { proc.kill(); } catch { /* already gone */ }
+    try {
+      proc.kill();
+    } catch {
+      /* already gone */
+    }
   }
   if (code === 0) {
-    try { rmSync(root, { recursive: true, force: true }); } catch { /* best effort */ }
+    try {
+      rmSync(root, { recursive: true, force: true });
+    } catch {
+      /* best effort */
+    }
   }
   process.exit(code);
 }
@@ -269,7 +301,9 @@ function listPanes(): Array<{ pane_id: string; label?: string; focused?: boolean
   const result = cli(["pane", "list"]);
   if (result.code !== 0) return undefined;
   try {
-    const parsed = JSON.parse(result.stdout) as { result?: { panes?: Array<{ pane_id: string; label?: string; focused?: boolean }> } };
+    const parsed = JSON.parse(result.stdout) as {
+      result?: { panes?: Array<{ pane_id: string; label?: string; focused?: boolean }> };
+    };
     const panes = parsed.result?.panes;
     if (!Array.isArray(panes) || panes.some((pane) => !pane || typeof pane.pane_id !== "string")) return undefined;
     return panes;
@@ -281,26 +315,31 @@ function listPanes(): Array<{ pane_id: string; label?: string; focused?: boolean
 async function waitForOverlayPicker(): Promise<string> {
   // Other panes can redraw before the picker exists, so client byte counts
   // cannot prove that cancellation input will reach the picker.
-  return poll("overlay picker renders", () => {
-    const panes = listPanes();
-    if (panes === undefined) return undefined;
-    const pane = panes.find((candidate) => candidate.label === PICKER_PANE_LABEL && candidate.focused === true);
-    if (!pane) {
-      // A picker pane that exists but never takes focus is the interesting
-      // timeout, so the failure detail reports it instead of "no pane".
-      const unfocused = panes.filter((candidate) => candidate.label === PICKER_PANE_LABEL);
-      if (unfocused.length > 0) throw new Error(`picker pane exists without focus: ${JSON.stringify(unfocused)}`);
-      return undefined;
-    }
-    const text = visiblePaneText(pane.pane_id);
-    if (text === undefined) throw new Error(`pane read failed for ${pane.pane_id}`);
-    if (!text.includes(WORKSPACES_PICKER_PROMPT)) throw new Error(`pane ${pane.pane_id} shows: ${JSON.stringify(text.slice(0, 160))}`);
-    return pane.pane_id;
-  }, POLL_TIMEOUT_EXTENDED_MS);
+  return poll(
+    "overlay picker renders",
+    () => {
+      const panes = listPanes();
+      if (panes === undefined) return undefined;
+      const pane = panes.find((candidate) => candidate.label === PICKER_PANE_LABEL && candidate.focused === true);
+      if (!pane) {
+        // A picker pane that exists but never takes focus is the interesting
+        // timeout, so the failure detail reports it instead of "no pane".
+        const unfocused = panes.filter((candidate) => candidate.label === PICKER_PANE_LABEL);
+        if (unfocused.length > 0) throw new Error(`picker pane exists without focus: ${JSON.stringify(unfocused)}`);
+        return undefined;
+      }
+      const text = visiblePaneText(pane.pane_id);
+      if (text === undefined) throw new Error(`pane read failed for ${pane.pane_id}`);
+      if (!text.includes(WORKSPACES_PICKER_PROMPT))
+        throw new Error(`pane ${pane.pane_id} shows: ${JSON.stringify(text.slice(0, 160))}`);
+      return pane.pane_id;
+    },
+    POLL_TIMEOUT_EXTENDED_MS,
+  );
 }
 
 async function waitForPaneRemoval(label: string, paneId: string): Promise<void> {
-  await poll(label, () => listPanes()?.some((pane) => pane.pane_id === paneId) === false ? paneId : undefined);
+  await poll(label, () => (listPanes()?.some((pane) => pane.pane_id === paneId) === false ? paneId : undefined));
   check(label, true);
 }
 
@@ -310,7 +349,11 @@ function visiblePaneText(paneId: string): string | undefined {
 }
 
 function readClientOutput(path: string): string {
-  try { return readFileSync(path, CLIENT_OUTPUT_ENCODING); } catch { return ""; }
+  try {
+    return readFileSync(path, CLIENT_OUTPUT_ENCODING);
+  } catch {
+    return "";
+  }
 }
 
 interface WorkspaceListRow {
@@ -342,12 +385,20 @@ function workspaceIdForLabel(label: string): string | undefined {
 // longer than any sleep to connect and paint, and keystrokes sent before the
 // first frame land in the shell instead of the picker.
 async function waitForClientPaint(label: string, rawOutputPath: string): Promise<void> {
-  await poll(label, () => readClientOutput(rawOutputPath).includes(CLIENT_PAINT_MARKER) ? "painted" : undefined, POLL_TIMEOUT_EXTENDED_MS);
+  await poll(
+    label,
+    () => (readClientOutput(rawOutputPath).includes(CLIENT_PAINT_MARKER) ? "painted" : undefined),
+    POLL_TIMEOUT_EXTENDED_MS,
+  );
   check(label, true);
 }
 
 async function waitForPickerPrompt(label: string, rawOutputPath: string): Promise<void> {
-  await poll(label, () => readClientOutput(rawOutputPath).includes(WORKSPACES_PICKER_PROMPT) ? "rendered" : undefined, POLL_TIMEOUT_EXTENDED_MS);
+  await poll(
+    label,
+    () => (readClientOutput(rawOutputPath).includes(WORKSPACES_PICKER_PROMPT) ? "rendered" : undefined),
+    POLL_TIMEOUT_EXTENDED_MS,
+  );
   check(label, true);
 }
 
@@ -362,12 +413,16 @@ let pluginStatePath: string | undefined;
 // must not run until the transition it depends on is persisted; polling the
 // file is the only observable the smoke has for that write.
 async function waitForLastWorkspaceState(label: string, current: string, previous?: string): Promise<void> {
-  await poll(label, () => {
-    const state = readLastWorkspaceState();
-    if (state?.current !== current) return undefined;
-    if (previous !== undefined && state.previous !== previous) return undefined;
-    return state.previous ?? current;
-  }, POLL_TIMEOUT_EXTENDED_MS);
+  await poll(
+    label,
+    () => {
+      const state = readLastWorkspaceState();
+      if (state?.current !== current) return undefined;
+      if (previous !== undefined && state.previous !== previous) return undefined;
+      return state.previous ?? current;
+    },
+    POLL_TIMEOUT_EXTENDED_MS,
+  );
   check(label, true);
 }
 
@@ -429,7 +484,7 @@ function visibleRowOf(text: string, marker: string): number | undefined {
 
 function lineHasPointer(text: string, marker: string): boolean {
   const line = text.split("\n").find((row) => row.includes(marker));
-  return line !== undefined && line.trimStart().startsWith(POINTER_GLYPH);
+  return line?.trimStart().startsWith(POINTER_GLYPH) ?? false;
 }
 
 function visibleScrollFixtureLabels(text: string): string[] {
@@ -449,13 +504,17 @@ function sameLabels(left: readonly string[], right: readonly string[]): boolean 
 // consecutive reads makes every later assertion act on a quiesced screen.
 async function waitForSettledFrame(label: string, paneId: string): Promise<string> {
   let previous = MOUSE_SETTLE_FRAME_INITIAL;
-  return poll(label, () => {
-    const text = visiblePaneText(paneId);
-    if (text === undefined) return undefined;
-    const settled = text === previous ? text : undefined;
-    previous = text;
-    return settled;
-  }, POLL_TIMEOUT_EXTENDED_MS);
+  return poll(
+    label,
+    () => {
+      const text = visiblePaneText(paneId);
+      if (text === undefined) return undefined;
+      const settled = text === previous ? text : undefined;
+      previous = text;
+      return settled;
+    },
+    POLL_TIMEOUT_EXTENDED_MS,
+  );
 }
 
 async function sendPaneInput(paneId: string, label: string, text: string): Promise<void> {
@@ -492,7 +551,11 @@ async function runOverlayMouseSmoke(repo: string): Promise<void> {
   // The picker opens scrolled to the current workspace, and wheel deltas clamp
   // at the list edges, so normalize to the list top before measuring single
   // steps; only then is one step down and one step up a true round trip.
-  await sendPaneInput(paneId, "overlay wheel input reaches the picker", sgrMouseWheel(SGR_BUTTON_WHEEL_UP, MOUSE_WHEEL_NORMALIZE_EVENTS));
+  await sendPaneInput(
+    paneId,
+    "overlay wheel input reaches the picker",
+    sgrMouseWheel(SGR_BUTTON_WHEEL_UP, MOUSE_WHEEL_NORMALIZE_EVENTS),
+  );
   const normalizedFrame = await waitForSettledFrame("overlay wheel normalizes to the list top", paneId);
   const normalizedLabels = visibleScrollFixtureLabels(normalizedFrame);
 
@@ -544,8 +607,14 @@ async function runOverlayMouseSmoke(repo: string): Promise<void> {
   // before sending the dispatch pair; both presses then travel in one pane
   // write, far inside the picker's own window even on a loaded runner.
   await Bun.sleep(MOUSE_DOUBLE_CLICK_GAP_MILLISECONDS);
-  await sendPaneInput(paneId, `overlay double click reaches the picker (${clickLabel})`, sgrMouseClick(clickRow) + sgrMouseClick(clickRow));
-  await poll(`overlay double click dispatches ${clickLabel}`, () => focusedWorkspaceId() === clickedWorkspaceId ? clickedWorkspaceId : undefined);
+  await sendPaneInput(
+    paneId,
+    `overlay double click reaches the picker (${clickLabel})`,
+    sgrMouseClick(clickRow) + sgrMouseClick(clickRow),
+  );
+  await poll(`overlay double click dispatches ${clickLabel}`, () =>
+    focusedWorkspaceId() === clickedWorkspaceId ? clickedWorkspaceId : undefined,
+  );
   check(`overlay double click dispatches ${clickLabel}`, true);
   await waitForPaneRemoval("overlay double click closes the picker pane", paneId);
   check("client stays attached after overlay mouse input", attach?.exitCode === null);
@@ -576,14 +645,15 @@ function spawnServer(sessionName: string, logPath: string): Bun.Subprocess<"igno
 // A real PTY is required because popup input routes through the attached client.
 function spawnClient(sessionName: string, rawOutputPath: string): Bun.Subprocess<"pipe", number, "ignore"> {
   const rawOutput = openSync(rawOutputPath, "a");
-  return Bun.spawn([
-    PYTHON_COMMAND, join(import.meta.dir, PTY_BRIDGE_SCRIPT), HERDR_COMMAND, "--session", sessionName,
-  ], {
-    env: { ...isolatedEnv(), HERDR_SESSION: sessionName, TERM: CLIENT_TERM },
-    stdin: "pipe",
-    stdout: rawOutput,
-    stderr: "ignore",
-  });
+  return Bun.spawn(
+    [PYTHON_COMMAND, join(import.meta.dir, PTY_BRIDGE_SCRIPT), HERDR_COMMAND, "--session", sessionName],
+    {
+      env: { ...isolatedEnv(), HERDR_SESSION: sessionName, TERM: CLIENT_TERM },
+      stdin: "pipe",
+      stdout: rawOutput,
+      stderr: "ignore",
+    },
+  );
 }
 
 async function startPrimaryServer(): Promise<void> {
@@ -615,9 +685,25 @@ function createFixtureRepository(): string {
 function createFixtureWorkspaces(repo: string): void {
   const created = cli(["workspace", "create", "--cwd", repo, "--label", FIRST_WORKSPACE_LABEL, "--no-focus"]);
   check("workspace create succeeds", created.code === 0, created.stderr.trim());
-  const createdTwo = cli(["workspace", "create", "--cwd", join(fixtureRoot, FIXTURE_WORKTREE_DIR), "--label", ADVERSARIAL_WORKSPACE_LABEL, "--no-focus"]);
+  const createdTwo = cli([
+    "workspace",
+    "create",
+    "--cwd",
+    join(fixtureRoot, FIXTURE_WORKTREE_DIR),
+    "--label",
+    ADVERSARIAL_WORKSPACE_LABEL,
+    "--no-focus",
+  ]);
   check("adversarial workspace create succeeds", createdTwo.code === 0, createdTwo.stderr.trim());
-  const createdThree = cli(["workspace", "create", "--cwd", repo, "--label", DISPATCH_TARGET_WORKSPACE_LABEL, "--no-focus"]);
+  const createdThree = cli([
+    "workspace",
+    "create",
+    "--cwd",
+    repo,
+    "--label",
+    DISPATCH_TARGET_WORKSPACE_LABEL,
+    "--no-focus",
+  ]);
   check("dispatch-target workspace create succeeds", createdThree.code === 0, createdThree.stderr.trim());
 }
 
@@ -637,9 +723,14 @@ function linkPlugin(): string {
   try {
     const parsed = JSON.parse(actions.stdout) as { result?: { actions?: Array<{ action_id?: string }> } };
     registered = (parsed.result?.actions ?? []).map((action) => action.action_id ?? "").sort();
-  } catch { /* handled by check */ }
-  check("all nine actions register", JSON.stringify(registered) === JSON.stringify([...ACTION_IDS].sort()),
-    `registered: ${registered.join(", ")}`);
+  } catch {
+    /* handled by check */
+  }
+  check(
+    "all nine actions register",
+    JSON.stringify(registered) === JSON.stringify([...ACTION_IDS].sort()),
+    `registered: ${registered.join(", ")}`,
+  );
   return pluginConfigDir;
 }
 
@@ -681,7 +772,11 @@ async function runConfiguredKeymapCase(): Promise<string | undefined> {
 async function runLastWorkspaceToggleCase(before: string | undefined): Promise<void> {
   // The toggle restores whatever the event process recorded last, so the
   // dispatched transition must be persisted before the action reads it.
-  await waitForLastWorkspaceState("last-workspace memory records the dispatched focus", DISPATCH_TARGET_WORKSPACE_ID, before);
+  await waitForLastWorkspaceState(
+    "last-workspace memory records the dispatched focus",
+    DISPATCH_TARGET_WORKSPACE_ID,
+    before,
+  );
   const toggled = invokeAction("last-workspace");
   check("last-workspace action exits cleanly", toggled.code === 0, toggled.stderr.trim());
   await poll("last-workspace restores the previous focus", () => {
@@ -694,7 +789,7 @@ async function runPopupCancelAndReloadCases(): Promise<void> {
   const bytesBeforeProjects = clientBytes();
   const projects = invokeAction("projects");
   check("projects action exits cleanly", projects.code === 0, projects.stderr.trim());
-  await poll("projects picker renders", () => clientBytes() > bytesBeforeProjects ? "rendered" : undefined);
+  await poll("projects picker renders", () => (clientBytes() > bytesBeforeProjects ? "rendered" : undefined));
   sendInput(attach, KEY_CTRL_C);
   await Bun.sleep(CANCEL_SETTLE_MS);
 
@@ -703,8 +798,7 @@ async function runPopupCancelAndReloadCases(): Promise<void> {
   const bytesBeforeReload = clientBytes();
   sendInput(attach, KEY_CTRL_R);
   await Bun.sleep(RELOAD_REDRAW_MS);
-  check("ctrl-r redraws the picker", clientBytes() > bytesBeforeReload,
-    "client output did not grow after ctrl-r");
+  check("ctrl-r redraws the picker", clientBytes() > bytesBeforeReload, "client output did not grow after ctrl-r");
   sendInput(attach, KEY_ESCAPE);
   await Bun.sleep(CANCEL_SETTLE_MS);
 }
@@ -715,9 +809,11 @@ async function runPopupCancelAndReloadCases(): Promise<void> {
 // terminal would execute it.
 function checkAdversarialLabelSanitized(): void {
   const rendered = readClientOutput(clientRawPath);
-  check("adversarial label is sanitized in render",
+  check(
+    "adversarial label is sanitized in render",
     ADVERSARIAL_RENDER_FRAGMENTS.every((fragment) => !rendered.includes(fragment)),
-    "raw OSC payload from the adversarial label reached the client");
+    "raw OSC payload from the adversarial label reached the client",
+  );
 }
 
 async function runPopupEscapeCase(): Promise<void> {
@@ -727,8 +823,11 @@ async function runPopupEscapeCase(): Promise<void> {
   sendInput(attach, KEY_ESCAPE);
   await Bun.sleep(ESCAPE_SETTLE_MS);
   const afterEscape = focusedWorkspaceId();
-  check("escape closes without dispatching", afterEscape === stableFocus,
-    "focus moved from " + String(stableFocus) + " to " + String(afterEscape));
+  check(
+    "escape closes without dispatching",
+    afterEscape === stableFocus,
+    `focus moved from ${String(stableFocus)} to ${String(afterEscape)}`,
+  );
 }
 
 async function runOverlayCancelCase(openLabel: string, name: string, key: string): Promise<void> {
@@ -742,13 +841,16 @@ async function runOverlayCancelCase(openLabel: string, name: string, key: string
   check(
     `overlay ${name} closes without dispatching`,
     focusAfter === focusBefore,
-    "focus moved from " + String(focusBefore) + " to " + String(focusAfter),
+    `focus moved from ${String(focusBefore)} to ${String(focusAfter)}`,
   );
 }
 
 async function runOverlayCancelCases(pluginConfigDir: string): Promise<void> {
   writeFileSync(join(pluginConfigDir, CONFIG_FILE_NAME), `${OVERLAY_CONFIG_PREFIX}${SMOKE_CONFIG}`, "utf8");
-  check("no overlay picker exists before opening", listPanes()?.every((pane) => pane.label !== PICKER_PANE_LABEL) === true);
+  check(
+    "no overlay picker exists before opening",
+    listPanes()?.every((pane) => pane.label !== PICKER_PANE_LABEL) === true,
+  );
   await runOverlayCancelCase("overlay workspaces action exits cleanly", "ctrl-c", KEY_CTRL_C);
   await runOverlayCancelCase("overlay escape action exits cleanly", "escape", KEY_ESCAPE);
 }
@@ -758,7 +860,13 @@ async function startSecondSession(repo: string): Promise<void> {
   // The second session gets the same isolation gate before any mutation.
   await verifySessionIsolation(SECOND_SESSION_NAME, SECOND_SESSION_CHECK_PREFIX);
   const secondWorkspace = cliFor(SECOND_SESSION_NAME, [
-    "workspace", "create", "--cwd", repo, "--label", SECOND_SESSION_WORKSPACE_LABEL, "--no-focus",
+    "workspace",
+    "create",
+    "--cwd",
+    repo,
+    "--label",
+    SECOND_SESSION_WORKSPACE_LABEL,
+    "--no-focus",
   ]);
   check("second-session workspace creates", secondWorkspace.code === 0, secondWorkspace.stderr.trim());
   secondAttach = spawnClient(SECOND_SESSION_NAME, secondClientRawPath);
@@ -797,16 +905,27 @@ async function runLifecycleCases(repo: string, pluginConfigDir: string): Promise
 }
 
 async function checkPluginCommandsSucceeded(): Promise<void> {
-  for (const [label, sessionName] of [["primary", SESSION_NAME], ["secondary", SECOND_SESSION_NAME]] as const) {
+  for (const [label, sessionName] of [
+    ["primary", SESSION_NAME],
+    ["secondary", SECOND_SESSION_NAME],
+  ] as const) {
     let pluginEntries: Array<Record<string, unknown> & { status?: string }> = [];
     // Focus events can outlive picker teardown; running hooks are not failed commands.
     await poll(`${label} plugin commands settle`, () => {
       const logs = cliFor(sessionName, ["plugin", "log", "list"]);
       try {
-        const parsed = JSON.parse(logs.stdout) as { result?: { logs?: Array<Record<string, unknown> & { status?: string }> } };
+        const parsed = JSON.parse(logs.stdout) as {
+          result?: { logs?: Array<Record<string, unknown> & { status?: string }> };
+        };
         pluginEntries = parsed.result?.logs ?? [];
-      } catch { pluginEntries = [{ error: "invalid plugin log response" }]; }
-      return pluginEntries.some(entry => entry.status !== undefined && PLUGIN_COMMAND_PENDING_STATUSES.has(entry.status)) ? undefined : "settled";
+      } catch {
+        pluginEntries = [{ error: "invalid plugin log response" }];
+      }
+      return pluginEntries.some(
+        (entry) => entry.status !== undefined && PLUGIN_COMMAND_PENDING_STATUSES.has(entry.status),
+      )
+        ? undefined
+        : "settled";
     });
     const failedEntries = pluginEntries.filter((entry) => entry.status !== PLUGIN_COMMAND_SUCCEEDED);
     check(`every ${label} plugin command succeeded`, failedEntries.length === 0, JSON.stringify(failedEntries));
@@ -840,7 +959,11 @@ async function main(): Promise<void> {
 process.on("exit", () => {
   // Belt and braces if finish() was bypassed: only clean up on success.
   if (process.exitCode === 0 || process.exitCode === undefined) {
-    try { rmSync(root, { recursive: true, force: true }); } catch { /* best effort */ }
+    try {
+      rmSync(root, { recursive: true, force: true });
+    } catch {
+      /* best effort */
+    }
   }
 });
 

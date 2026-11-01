@@ -2,11 +2,11 @@ import { expect, test } from "bun:test";
 import { Herdr } from "../src/client/herdr.ts";
 import { POPUP_SURFACE } from "../src/client/popup.ts";
 import { DEFAULT_PICKER_KEYMAP, type HerdrPickersConfig } from "../src/config/config.ts";
-import { runPickerLoop } from "../src/picker-loop.ts";
 import type { PickerOutcome } from "../src/picker.ts";
+import { runPickerLoop } from "../src/picker-loop.ts";
+import type { PickerRequest } from "../src/picker-request.ts";
 import { withPickerSurface } from "../src/picker-surface.ts";
 import { runTerminalPicker } from "../src/terminal-picker.ts";
-import type { PickerRequest } from "../src/picker-request.ts";
 import { FakeTerminal, VIEWPORT } from "./terminal-picker-test-support.ts";
 
 const OWNER = "owner";
@@ -27,7 +27,10 @@ const CONFIG: HerdrPickersConfig = { placement: "popup", keymap: DEFAULT_PICKER_
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (error: unknown) => void;
-  const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
+  const promise = new Promise<T>((done, fail) => {
+    resolve = done;
+    reject = fail;
+  });
   return { promise, resolve, reject };
 }
 async function until(probe: () => boolean): Promise<void> {
@@ -48,7 +51,10 @@ function mailbox() {
       acknowledgements.push(token);
       return true;
     },
-    replace: (next = SECOND) => { request = next; }, acknowledgements,
+    replace: (next = SECOND) => {
+      request = next;
+    },
+    acknowledgements,
   };
 }
 
@@ -58,7 +64,9 @@ function runLoop(
   terminal: FakeTerminal,
   options: Parameters<typeof runPickerLoop>[3],
 ): Promise<PickerOutcome> {
-  return withPickerSurface(POPUP_SURFACE, undefined, terminal, owner => runPickerLoop(session, OWNER, owner, options));
+  return withPickerSurface(POPUP_SURFACE, undefined, terminal, (owner) =>
+    runPickerLoop(session, OWNER, owner, options),
+  );
 }
 
 test("replacement interrupts discovery and reuses the surface without stale output", async () => {
@@ -69,15 +77,24 @@ test("replacement interrupts discovery and reuses the surface without stale outp
   let loads = 0;
   const dispatched: string[][] = [];
   const run = runLoop(session, terminal, {
-    createRuntime: signal => ({ config: CONFIG, herdr: new Herdr({ signal, runner: async argv => {
-      if (argv.includes("focus")) { dispatched.push([...argv]); return { stdout: OK, stderr: "", exitCode: 0 }; }
-      const stdout = ++loads === 1 ? await firstLoad.promise : argv.includes("agent") ? AGENTS : WORKSPACES;
-      return { stdout, stderr: "", exitCode: 0 };
-    } }) }),
+    createRuntime: (signal) => ({
+      config: CONFIG,
+      herdr: new Herdr({
+        signal,
+        runner: async (argv) => {
+          if (argv.includes("focus")) {
+            dispatched.push([...argv]);
+            return { stdout: OK, stderr: "", exitCode: 0 };
+          }
+          const stdout = ++loads === 1 ? await firstLoad.promise : argv.includes("agent") ? AGENTS : WORKSPACES;
+          return { stdout, stderr: "", exitCode: 0 };
+        },
+      }),
+    }),
   });
   await until(() => loads > 0);
   session.replace();
-  await until(() => terminal.writes.some(write => write.includes("agents ›")));
+  await until(() => terminal.writes.some((write) => write.includes("agents ›")));
   expect(terminal.writes.join("")).not.toContain(STOP);
   input.resolve(ENTER);
   expect(await run).toBe("dispatched");
@@ -102,29 +119,39 @@ for (const operation of ["ranking", "refresh"] as const) {
     let blocked = false;
     let loads = 0;
     const run = runLoop(session, terminal, {
-      createRuntime: signal => {
+      createRuntime: (signal) => {
         signals.push(signal);
         return {
           config: CONFIG,
-          herdr: new Herdr({ signal, runner: async argv => {
-            if (operation === "refresh" && signals.length === 1 && ++loads > 1) {
-              blocked = true;
-              await obsolete.promise;
-            }
-            return { stdout: argv.includes("agent") ? AGENTS : WORKSPACES, stderr: "", exitCode: 0 };
-          } }),
-          pickerRunner: options => runTerminalPicker({ ...options, ranker: async (query, items) => {
-            if (query === QUERY) { blocked = true; await obsolete.promise; }
-            return [...items];
-          } }),
+          herdr: new Herdr({
+            signal,
+            runner: async (argv) => {
+              if (operation === "refresh" && signals.length === 1 && ++loads > 1) {
+                blocked = true;
+                await obsolete.promise;
+              }
+              return { stdout: argv.includes("agent") ? AGENTS : WORKSPACES, stderr: "", exitCode: 0 };
+            },
+          }),
+          pickerRunner: (options) =>
+            runTerminalPicker({
+              ...options,
+              ranker: async (query, items) => {
+                if (query === QUERY) {
+                  blocked = true;
+                  await obsolete.promise;
+                }
+                return [...items];
+              },
+            }),
         };
       },
     });
-    await until(() => terminal.writes.some(write => write.includes("one")));
+    await until(() => terminal.writes.some((write) => write.includes("one")));
     oldInput.resolve(operation === "ranking" ? QUERY : RELOAD);
     await until(() => blocked);
     session.replace();
-    await until(() => terminal.writes.some(write => write.includes("agents ›")));
+    await until(() => terminal.writes.some((write) => write.includes("agents ›")));
     expect(signals[0]?.aborted).toBe(true);
     const writes = terminal.writes.length;
     obsolete.reject(OLD_FAILURE);
@@ -144,16 +171,26 @@ test("an obsolete error before the mailbox tick does not close the surface", asy
   const terminal = new FakeTerminal([input.promise], VIEWPORT, true);
   let loads = 0;
   const run = runLoop(session, terminal, {
-    createRuntime: signal => ({ config: CONFIG, herdr: new Herdr({ signal, runner: async argv => ({
-      stdout: ++loads === 1 ? await obsolete.promise : argv.includes("agent") ? AGENTS : WORKSPACES,
-      stderr: "", exitCode: 0,
-    }) }) }),
+    createRuntime: (signal) => ({
+      config: CONFIG,
+      herdr: new Herdr({
+        signal,
+        runner: async (argv) => ({
+          stdout: ++loads === 1 ? await obsolete.promise : argv.includes("agent") ? AGENTS : WORKSPACES,
+          stderr: "",
+          exitCode: 0,
+        }),
+      }),
+    }),
   });
-  const outcome = run.then(value => value, error => error);
+  const outcome = run.then(
+    (value) => value,
+    (error) => error,
+  );
   await until(() => loads > 0);
   session.replace();
   obsolete.reject(OLD_FAILURE);
-  await until(() => terminal.writes.some(write => write.includes("agents ›")));
+  await until(() => terminal.writes.some((write) => write.includes("agents ›")));
   expect(terminal.writes.join("")).not.toContain(STOP);
   input.resolve(ENTER);
   expect(await outcome).toBe("dispatched");
@@ -167,12 +204,21 @@ test("requests after dispatch submission remain unacknowledged for a successor",
   const terminal = new FakeTerminal([input.promise], VIEWPORT, true);
   let submitted = false;
   const run = runLoop(session, terminal, {
-    createRuntime: signal => ({ config: CONFIG, herdr: new Herdr({ signal, runner: async argv => {
-      if (argv.includes("focus")) { submitted = true; await submission.promise; }
-      return { stdout: WORKSPACES, stderr: "", exitCode: 0 };
-    } }) }),
+    createRuntime: (signal) => ({
+      config: CONFIG,
+      herdr: new Herdr({
+        signal,
+        runner: async (argv) => {
+          if (argv.includes("focus")) {
+            submitted = true;
+            await submission.promise;
+          }
+          return { stdout: WORKSPACES, stderr: "", exitCode: 0 };
+        },
+      }),
+    }),
   });
-  await until(() => terminal.writes.some(write => write.includes("one")));
+  await until(() => terminal.writes.some((write) => write.includes("one")));
   input.resolve(ENTER);
   await until(() => submitted);
   session.replace();
@@ -193,13 +239,24 @@ test("Ctrl-C cancels agent replacement while discovery never resolves", async ()
   let settled = false;
   const run = runLoop(session, terminal, {
     signal: lifecycle.signal,
-    createRuntime: signal => ({ config: CONFIG, herdr: new Herdr({ signal, runner: async argv => {
-      if (argv.includes("agent")) { loading = true; await load.promise; }
-      return { stdout: WORKSPACES, stderr: "", exitCode: 0 };
-    } }) }),
-  }).finally(() => { settled = true; });
+    createRuntime: (signal) => ({
+      config: CONFIG,
+      herdr: new Herdr({
+        signal,
+        runner: async (argv) => {
+          if (argv.includes("agent")) {
+            loading = true;
+            await load.promise;
+          }
+          return { stdout: WORKSPACES, stderr: "", exitCode: 0 };
+        },
+      }),
+    }),
+  }).finally(() => {
+    settled = true;
+  });
   try {
-    await until(() => terminal.writes.some(write => write.includes("one")));
+    await until(() => terminal.writes.some((write) => write.includes("one")));
     session.replace();
     await until(() => loading);
     input.resolve(CLOSE);
@@ -218,10 +275,17 @@ test("an empty initial agent load dismisses the shared terminal", async () => {
   session.replace();
   const terminal = new FakeTerminal([], VIEWPORT, true);
   const outcome = await runLoop(session, terminal, {
-    createRuntime: signal => ({ config: CONFIG, herdr: new Herdr({ signal, runner: async argv => ({
-      stdout: argv.includes("agent") ? JSON.stringify({ result: { agents: [] } }) : WORKSPACES,
-      stderr: "", exitCode: 0,
-    }) }) }),
+    createRuntime: (signal) => ({
+      config: CONFIG,
+      herdr: new Herdr({
+        signal,
+        runner: async (argv) => ({
+          stdout: argv.includes("agent") ? JSON.stringify({ result: { agents: [] } }) : WORKSPACES,
+          stderr: "",
+          exitCode: 0,
+        }),
+      }),
+    }),
   });
   expect(outcome).toBe("no-agents");
   expect(terminal.rawModes).toEqual([true, false]);
@@ -231,17 +295,26 @@ test("replacement failure restores the shared terminal", async () => {
   const session = mailbox();
   const terminal = new FakeTerminal([], VIEWPORT, true);
   const run = runLoop(session, terminal, {
-    createRuntime: signal => ({ config: CONFIG, herdr: new Herdr({ signal, runner: async argv => {
-      if (argv.includes("agent")) throw OLD_FAILURE;
-      return { stdout: WORKSPACES, stderr: "", exitCode: 0 };
-    } }) }),
+    createRuntime: (signal) => ({
+      config: CONFIG,
+      herdr: new Herdr({
+        signal,
+        runner: async (argv) => {
+          if (argv.includes("agent")) throw OLD_FAILURE;
+          return { stdout: WORKSPACES, stderr: "", exitCode: 0 };
+        },
+      }),
+    }),
   });
-  const outcome = run.then(() => undefined, error => error);
-  await until(() => terminal.writes.some(write => write.includes("one")));
+  const outcome = run.then(
+    () => undefined,
+    (error) => error,
+  );
+  await until(() => terminal.writes.some((write) => write.includes("one")));
   session.replace();
   expect(await outcome).toBe(OLD_FAILURE);
   expect(terminal.rawModes).toEqual([true, false]);
-  expect(terminal.writes.filter(write => write.includes(STOP))).toHaveLength(1);
+  expect(terminal.writes.filter((write) => write.includes(STOP))).toHaveLength(1);
 });
 
 test("repeating a mode resets the query and terminal cancellation still closes", async () => {
@@ -250,11 +323,14 @@ test("repeating a mode resets the query and terminal cancellation still closes",
   const newInput = deferred<string>();
   const terminal = new FakeTerminal([oldInput.promise, newInput.promise], VIEWPORT, true);
   const run = runLoop(session, terminal, {
-    createRuntime: signal => ({ config: CONFIG, herdr: new Herdr({ signal, runner: async () => ({ stdout: WORKSPACES, stderr: "", exitCode: 0 }) }) }),
+    createRuntime: (signal) => ({
+      config: CONFIG,
+      herdr: new Herdr({ signal, runner: async () => ({ stdout: WORKSPACES, stderr: "", exitCode: 0 }) }),
+    }),
   });
-  await until(() => terminal.writes.some(write => write.includes("one")));
+  await until(() => terminal.writes.some((write) => write.includes("one")));
   oldInput.resolve(QUERY);
-  await until(() => terminal.writes.some(write => write.includes(QUERY)));
+  await until(() => terminal.writes.some((write) => write.includes(QUERY)));
   const offset = terminal.writes.length;
   session.replace({ ...SECOND, mode: FIRST.mode });
   await until(() => terminal.writes.length > offset);
@@ -272,14 +348,22 @@ test("replacement during focus confirmation cannot dispatch an old selection", a
   let confirming = false;
   const dispatched: string[][] = [];
   const run = runLoop(session, terminal, {
-    createRuntime: signal => ({
+    createRuntime: (signal) => ({
       config: CONFIG,
-      herdr: new Herdr({ signal, runner: async argv => {
-        if (argv.includes("focus")) dispatched.push([...argv]);
-        return { stdout: argv.includes("agent") ? AGENTS : WORKSPACES, stderr: "", exitCode: 0 };
-      } }),
-      beforeDispatch: async () => { if (!confirming) { confirming = true; await confirmation.promise; } },
-      pickerRunner: async options => {
+      herdr: new Herdr({
+        signal,
+        runner: async (argv) => {
+          if (argv.includes("focus")) dispatched.push([...argv]);
+          return { stdout: argv.includes("agent") ? AGENTS : WORKSPACES, stderr: "", exitCode: 0 };
+        },
+      }),
+      beforeDispatch: async () => {
+        if (!confirming) {
+          confirming = true;
+          await confirmation.promise;
+        }
+      },
+      pickerRunner: async (options) => {
         const rows = options.loadOnStart ? await options.reload!() : options;
         return runTerminalPicker({ ...options, ...rows, loadOnStart: false });
       },
@@ -287,7 +371,7 @@ test("replacement during focus confirmation cannot dispatch an old selection", a
   });
   await until(() => confirming);
   session.replace();
-  await until(() => terminal.writes.some(write => write.includes("agents ›")));
+  await until(() => terminal.writes.some((write) => write.includes("agents ›")));
   confirmation.resolve();
   await Bun.sleep(POLL_MS);
   expect(dispatched).toEqual([]);

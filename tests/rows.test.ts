@@ -19,13 +19,15 @@ const TOKYO_NIGHT = {
   worktree: "\x1b[38;2;255;158;100m",
 } as const;
 
-function agent(partial: Partial<AgentTarget> & { readonly id: string; readonly agentTarget: string; readonly agentLabel: string }): AgentTarget {
+function agent(
+  partial: Partial<AgentTarget> & { readonly id: string; readonly agentTarget: string; readonly agentLabel: string },
+): AgentTarget {
   return {
     kind: "agent",
     focused: false,
     boardLabel: partial.agentLabel,
     label: partial.agentLabel,
-    repoKey: partial.repo === undefined ? undefined : partial.repoKey ?? `/repo/${partial.repo}`,
+    repoKey: partial.repo === undefined ? undefined : (partial.repoKey ?? `/repo/${partial.repo}`),
     ...partial,
   };
 }
@@ -47,19 +49,28 @@ describe("agent row rendering", () => {
 
   test("keeps relation muted and agent label neutral", () => {
     const { items } = renderAgentRows([
-      agent({ id: "a1", agentTarget: "pane-1", agentLabel: "pi", repo: "sample-repo", worktree: "main", status: "blocked" }),
+      agent({
+        id: "a1",
+        agentTarget: "pane-1",
+        agentLabel: "pi",
+        repo: "sample-repo",
+        worktree: "main",
+        status: "blocked",
+      }),
     ]);
 
     expect(items[0]?.group?.display).toBe(`\x1b[1m${TOKYO_NIGHT.group}▾ sample-repo${RESET}${RESET}`);
-    expect(items[0]?.display).toBe(`  ${TOKYO_NIGHT.blocked}●${RESET} ${TOKYO_NIGHT.muted}main ▸ ${RESET}${TOKYO_NIGHT.identity}pi${RESET}`);
-    expect(items[0]?.selectedDisplay).toBe(`  ${TOKYO_NIGHT.blocked}●${RESET} \x1b[1m${TOKYO_NIGHT.blocked}main ▸ pi${RESET}${RESET}`);
+    expect(items[0]?.display).toBe(
+      `  ${TOKYO_NIGHT.blocked}●${RESET} ${TOKYO_NIGHT.muted}main ▸ ${RESET}${TOKYO_NIGHT.identity}pi${RESET}`,
+    );
+    expect(items[0]?.selectedDisplay).toBe(
+      `  ${TOKYO_NIGHT.blocked}●${RESET} \x1b[1m${TOKYO_NIGHT.blocked}main ▸ pi${RESET}${RESET}`,
+    );
     expect(items[0]?.selectionColor).toEqual({ red: 247, green: 118, blue: 142 });
   });
 
   test("falls back to the agent label alone when no workspace relation exists", () => {
-    const { items } = renderAgentRows([
-      agent({ id: "a1", agentTarget: "pane-1", agentLabel: "Codex" }),
-    ]);
+    const { items } = renderAgentRows([agent({ id: "a1", agentTarget: "pane-1", agentLabel: "Codex" })]);
 
     expect(items[0]?.display).toBe(`  ${TOKYO_NIGHT.muted}·${RESET} ${TOKYO_NIGHT.identity}Codex${RESET}`);
   });
@@ -74,8 +85,20 @@ describe("agent row rendering", () => {
 
   test("qualifies duplicate repository names with the shortest unique parent", () => {
     const { items } = renderAgentRows([
-      agent({ id: "a1", agentTarget: "pane-1", agentLabel: "pi", repo: "sample-repo", repoKey: "/home/dev/sample-repo" }),
-      agent({ id: "a2", agentTarget: "pane-2", agentLabel: "pi", repo: "sample-repo", repoKey: "/home/alice/sample-repo" }),
+      agent({
+        id: "a1",
+        agentTarget: "pane-1",
+        agentLabel: "pi",
+        repo: "sample-repo",
+        repoKey: "/home/dev/sample-repo",
+      }),
+      agent({
+        id: "a2",
+        agentTarget: "pane-2",
+        agentLabel: "pi",
+        repo: "sample-repo",
+        repoKey: "/home/alice/sample-repo",
+      }),
     ]);
 
     expect(items[0]?.group?.display).toBe(`\x1b[1m${TOKYO_NIGHT.group}▾ sample-repo · alice${RESET}${RESET}`);
@@ -92,9 +115,7 @@ describe("agent row rendering", () => {
   });
 
   test("reports no focused line when no agent is focused", () => {
-    const { focusedId } = renderAgentRows([
-      agent({ id: "a1", agentTarget: "pane-1", agentLabel: "alpha" }),
-    ]);
+    const { focusedId } = renderAgentRows([agent({ id: "a1", agentTarget: "pane-1", agentLabel: "alpha" })]);
 
     expect(focusedId).toBeUndefined();
   });
@@ -104,7 +125,9 @@ describe("agent row rendering", () => {
       agent({ id: "a1", agentTarget: "pane-1", agentLabel: "pi\x1b[31mred\x1b[0m", worktree: "main\tjunk" }),
     ]);
 
-    expect(items[0]?.display).toBe(`  ${TOKYO_NIGHT.muted}·${RESET} ${TOKYO_NIGHT.muted}main junk ▸ ${RESET}${TOKYO_NIGHT.identity}pired${RESET}`);
+    expect(items[0]?.display).toBe(
+      `  ${TOKYO_NIGHT.muted}·${RESET} ${TOKYO_NIGHT.muted}main junk ▸ ${RESET}${TOKYO_NIGHT.identity}pired${RESET}`,
+    );
   });
 
   test("treats repository and agent text as one searchable entity", async () => {
@@ -138,7 +161,16 @@ describe("agent row rendering", () => {
 
 describe("navigation row rendering", () => {
   function project(path: string, repo: string): PickerTarget {
-    return { kind: "project", id: `project:${path}`, path, current: false, repo, repoKey: path, boardLabel: repo, label: repo };
+    return {
+      kind: "project",
+      id: `project:${path}`,
+      path,
+      current: false,
+      repo,
+      repoKey: path,
+      boardLabel: repo,
+      label: repo,
+    };
   }
 
   function workspace(id: string, repo: string, name: string): Extract<PickerTarget, { readonly kind: "workspace" }> {
@@ -217,10 +249,7 @@ describe("navigation row rendering", () => {
     ]);
 
     expect(items.map((item) => item.group)).toEqual([undefined, undefined]);
-    expect(items.map((item) => item.searchText)).toEqual([
-      "shared · org-a/team",
-      "shared · org-b/team",
-    ]);
+    expect(items.map((item) => item.searchText)).toEqual(["shared · org-a/team", "shared · org-b/team"]);
   });
 
   test("duplicate repository names gain distinct group qualifiers", () => {
@@ -239,21 +268,20 @@ describe("navigation row rendering", () => {
       { ...workspace("w2", "shared", "preview"), path: "/repos/shared/wt-two" },
     ]);
 
-    expect(items.map((item) => item.searchText)).toEqual([
-      "shared preview · wt-one",
-      "shared preview · wt-two",
-    ]);
+    expect(items.map((item) => item.searchText)).toEqual(["shared preview · wt-one", "shared preview · wt-two"]);
     expect(items.map((item) => item.display).join("\n")).not.toContain("/repos/shared");
   });
 
   test("search corpus contains only visible group, identity, and detail text", () => {
-    const { items } = renderNavigationRows("workspaces", [{
-      ...workspace("secret-id", "shared", "preview"),
-      path: "/private/hidden/worktree",
-      cwd: "/private/hidden/cwd",
-      detail: "feature branch",
-      agentStatus: "agent idle",
-    }]);
+    const { items } = renderNavigationRows("workspaces", [
+      {
+        ...workspace("secret-id", "shared", "preview"),
+        path: "/private/hidden/worktree",
+        cwd: "/private/hidden/cwd",
+        detail: "feature branch",
+        agentStatus: "agent idle",
+      },
+    ]);
 
     expect(items[0]?.searchText).toBe("shared preview feature branch");
     expect(items[0]?.searchText).not.toContain("secret-id");
@@ -270,15 +298,19 @@ describe("navigation row rendering", () => {
     expect(focusedId).toBe("workspace:w1");
     const current = items.find((item) => item.id === "workspace:w1");
     expect(current?.display).toBe(`  ${TOKYO_NIGHT.selected}●${RESET} \x1b[1m${TOKYO_NIGHT.muted}main${RESET}${RESET}`);
-    expect(current?.selectedDisplay).toBe(`  ${TOKYO_NIGHT.selected}●${RESET} \x1b[1m${TOKYO_NIGHT.selected}main${RESET}${RESET}`);
+    expect(current?.selectedDisplay).toBe(
+      `  ${TOKYO_NIGHT.selected}●${RESET} \x1b[1m${TOKYO_NIGHT.selected}main${RESET}${RESET}`,
+    );
     expect(items.find((item) => item.id === "workspace:w2")?.display).not.toContain("●");
   });
 
   test("sanitizes ANSI and controls before display and search", () => {
-    const { items } = renderNavigationRows("workspaces", [{
-      ...workspace("w1", "sample-repo\x1b[31m", "feature\nname"),
-      detail: "feat\tbranch",
-    }]);
+    const { items } = renderNavigationRows("workspaces", [
+      {
+        ...workspace("w1", "sample-repo\x1b[31m", "feature\nname"),
+        detail: "feat\tbranch",
+      },
+    ]);
 
     expect(items[0]?.group?.label).toBe("sample-repo");
     expect(items[0]?.searchText).toBe("sample-repo feature name feat branch");
@@ -289,13 +321,13 @@ describe("navigation row rendering", () => {
 function controlHygieneWorkspace(id: string, repo: string, name: string): PickerTarget {
   return {
     kind: "workspace",
-    id: "workspace:" + id,
+    id: `workspace:${id}`,
     workspaceId: id,
     current: false,
     repo,
-    repoKey: "/repo/" + repo,
+    repoKey: `/repo/${repo}`,
     boardLabel: name,
-    label: repo + " \u25B8 " + name,
+    label: `${repo} \u25B8 ${name}`,
   };
 }
 
@@ -316,7 +348,13 @@ describe("terminal control hygiene in labels", () => {
 
   test("strips OSC and bidi controls from agent rows", () => {
     const { items } = renderAgentRows([
-      agent({ id: "a1", agentTarget: "pane-1", agentLabel: "p\u001B]0;x\u0007i", repo: "r\u2066epo", worktree: "ma\u202Ein" }),
+      agent({
+        id: "a1",
+        agentTarget: "pane-1",
+        agentLabel: "p\u001B]0;x\u0007i",
+        repo: "r\u2066epo",
+        worktree: "ma\u202Ein",
+      }),
     ]);
     const corpus = items.map((item) => [item.group?.label, item.searchText].join(" ")).join(" ");
     expect(corpus).not.toContain("\u001B");
@@ -324,4 +362,3 @@ describe("terminal control hygiene in labels", () => {
     expect(corpus).not.toContain("\u202E");
   });
 });
-

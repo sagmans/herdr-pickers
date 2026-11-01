@@ -1,9 +1,9 @@
+import { describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, test } from "bun:test";
 
 import { watchPickerFocus } from "../src/client/picker-focus.ts";
 import { readPickerSnapshot } from "../src/client/picker-snapshot.ts";
@@ -32,11 +32,7 @@ const SUBSCRIBE_METHOD = "events.subscribe";
 const SNAPSHOT_METHOD = "session.snapshot";
 const PING_METHOD = "ping";
 const PONG_TYPE = "pong";
-const EXPECTED_SUBSCRIPTIONS = [
-  { type: "pane.focused" },
-  { type: "tab.focused" },
-  { type: "workspace.focused" },
-];
+const EXPECTED_SUBSCRIPTIONS = [{ type: "pane.focused" }, { type: "tab.focused" }, { type: "workspace.focused" }];
 
 interface HerdrRuntime {
   readonly version: string;
@@ -51,9 +47,13 @@ const HERDR_RUNTIME: HerdrRuntime = probeHerdrRuntime();
 function probeHerdrRuntime(): HerdrRuntime {
   const binary = process.env.HERDR_BIN_PATH ?? DEFAULT_HERDR_BINARY;
   const stdio = ["ignore", "pipe", "ignore"] as const;
-  const schema = JSON.parse(execFileSync(binary, ["api", "schema", "--json"], { encoding: "utf8", stdio: [...stdio] })) as { protocol?: unknown };
+  const schema = JSON.parse(
+    execFileSync(binary, ["api", "schema", "--json"], { encoding: "utf8", stdio: [...stdio] }),
+  ) as { protocol?: unknown };
   if (typeof schema.protocol !== "number") throw new Error(`Herdr did not report an API protocol: ${binary}`);
-  const version = HERDR_VERSION_PATTERN.exec(execFileSync(binary, ["--version"], { encoding: "utf8", stdio: [...stdio] }))?.[1];
+  const version = HERDR_VERSION_PATTERN.exec(
+    execFileSync(binary, ["--version"], { encoding: "utf8", stdio: [...stdio] }),
+  )?.[1];
   if (!version) throw new Error(`Herdr did not report a version: ${binary}`);
   return { version, protocol: schema.protocol };
 }
@@ -82,25 +82,29 @@ function snapshotResponse(id: unknown, focusedPaneId = PANE_ID, paneCount = 1): 
         focused_workspace_id: focusedPaneId === PANE_ID ? WORKSPACE_ID : OTHER_WORKSPACE_ID,
         focused_tab_id: focusedPaneId === PANE_ID ? TAB_ID : OTHER_TAB_ID,
         focused_pane_id: focusedPaneId,
-        workspaces: [{
-          workspace_id: WORKSPACE_ID,
-          number: 1,
-          label: "Owner workspace",
-          focused: focusedPaneId === PANE_ID,
-          pane_count: paneCount,
-          tab_count: 1,
-          active_tab_id: TAB_ID,
-          agent_status: AGENT_STATUS,
-        }],
-        tabs: [{
-          tab_id: TAB_ID,
-          workspace_id: WORKSPACE_ID,
-          number: 1,
-          label: "Owner tab",
-          focused: focusedPaneId === PANE_ID,
-          pane_count: paneCount,
-          agent_status: AGENT_STATUS,
-        }],
+        workspaces: [
+          {
+            workspace_id: WORKSPACE_ID,
+            number: 1,
+            label: "Owner workspace",
+            focused: focusedPaneId === PANE_ID,
+            pane_count: paneCount,
+            tab_count: 1,
+            active_tab_id: TAB_ID,
+            agent_status: AGENT_STATUS,
+          },
+        ],
+        tabs: [
+          {
+            tab_id: TAB_ID,
+            workspace_id: WORKSPACE_ID,
+            number: 1,
+            label: "Owner tab",
+            focused: focusedPaneId === PANE_ID,
+            pane_count: paneCount,
+            agent_status: AGENT_STATUS,
+          },
+        ],
         panes: Array.from({ length: paneCount }, (_, index) => ({
           pane_id: index === 0 ? PANE_ID : `${OTHER_PANE_ID}-${index}`,
           terminal_id: `terminal-${index}`,
@@ -117,7 +121,10 @@ function snapshotResponse(id: unknown, focusedPaneId = PANE_ID, paneCount = 1): 
   };
 }
 
-function focusEvent(event: "pane_focused" | "tab_focused" | "workspace_focused", values: Record<string, unknown>): string {
+function focusEvent(
+  event: "pane_focused" | "tab_focused" | "workspace_focused",
+  values: Record<string, unknown>,
+): string {
   return line({ event, data: { type: event, ...values } });
 }
 
@@ -145,7 +152,12 @@ async function startServer(onRequest: RequestHandler): Promise<TestServer> {
         const request = JSON.parse(raw) as Record<string, unknown>;
         // The native CLI checks protocol compatibility before requesting a snapshot.
         if (request.method === PING_METHOD) {
-          socket.end(line({ id: request.id, result: { type: PONG_TYPE, version: HERDR_RUNTIME.version, protocol: HERDR_RUNTIME.protocol } }));
+          socket.end(
+            line({
+              id: request.id,
+              result: { type: PONG_TYPE, version: HERDR_RUNTIME.version, protocol: HERDR_RUNTIME.protocol },
+            }),
+          );
           return;
         }
         requests.push(request);
@@ -181,11 +193,13 @@ function listen(server: Server, path: string): Promise<void> {
 
 function closeServer(server: Server): Promise<void> {
   return new Promise((resolve, reject) => {
-    server.close((error) => error ? reject(error) : resolve());
+    server.close((error) => (error ? reject(error) : resolve()));
   });
 }
 
-function standardHandshake(options: { readonly splitAcknowledgement?: boolean; readonly snapshotSuffix?: string } = {}): RequestHandler {
+function standardHandshake(
+  options: { readonly splitAcknowledgement?: boolean; readonly snapshotSuffix?: string } = {},
+): RequestHandler {
   let subscription: Socket;
   return (request, socket) => {
     if (request.method === SUBSCRIBE_METHOD) {
@@ -211,7 +225,9 @@ async function waitForAbort(signal: AbortSignal): Promise<void> {
   if (signal.aborted) return;
   await Promise.race([
     new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true })),
-    Bun.sleep(MAX_ABORT_WAIT_MS).then(() => { throw new Error("focus watcher did not abort"); }),
+    Bun.sleep(MAX_ABORT_WAIT_MS).then(() => {
+      throw new Error("focus watcher did not abort");
+    }),
   ]);
 }
 
@@ -220,12 +236,17 @@ describe("picker focus subscription", () => {
     const server = await startServer(() => {});
     const controller = new AbortController();
     try {
-      const run = watchPickerFocus(server.path, PANE_ID, controller.signal).then(() => false, () => true);
+      const run = watchPickerFocus(server.path, PANE_ID, controller.signal).then(
+        () => false,
+        () => true,
+      );
       await server.connected;
       controller.abort();
       expect(await Promise.race([run, Bun.sleep(ABORT_DEADLINE_MS).then(() => ABORT_TIMED_OUT)])).toBe(true);
       await run;
-    } finally { await server.close(); }
+    } finally {
+      await server.close();
+    }
   });
 
   test("caller cancellation aborts active focus observation", async () => {
@@ -236,14 +257,19 @@ describe("picker focus subscription", () => {
       controller.abort();
       expect(watcher.signal.aborted).toBe(true);
       watcher.stop();
-    } finally { await server.close(); }
+    } finally {
+      await server.close();
+    }
   });
 
   test("subscribes before snapshot and handles split and coalesced messages", async () => {
-    const sameFocusEvents = focusEvent("pane_focused", { pane_id: PANE_ID, workspace_id: WORKSPACE_ID })
-      + focusEvent("tab_focused", { tab_id: TAB_ID, workspace_id: WORKSPACE_ID })
-      + focusEvent("workspace_focused", { workspace_id: WORKSPACE_ID });
-    const server = await startServer(standardHandshake({ splitAcknowledgement: true, snapshotSuffix: sameFocusEvents }));
+    const sameFocusEvents =
+      focusEvent("pane_focused", { pane_id: PANE_ID, workspace_id: WORKSPACE_ID }) +
+      focusEvent("tab_focused", { tab_id: TAB_ID, workspace_id: WORKSPACE_ID }) +
+      focusEvent("workspace_focused", { workspace_id: WORKSPACE_ID });
+    const server = await startServer(
+      standardHandshake({ splitAcknowledgement: true, snapshotSuffix: sameFocusEvents }),
+    );
 
     try {
       const watcher = await watchPickerFocus(server.path, PANE_ID);
@@ -270,7 +296,8 @@ describe("picker focus subscription", () => {
       let departed = false;
       const handshake = standardHandshake();
       const server = await startServer((request, socket) => {
-        if (departed && request.method === SNAPSHOT_METHOD) socket.end(line(snapshotResponse(request.id, OTHER_PANE_ID)));
+        if (departed && request.method === SNAPSHOT_METHOD)
+          socket.end(line(snapshotResponse(request.id, OTHER_PANE_ID)));
         else handshake(request, socket);
       });
       try {
@@ -292,17 +319,22 @@ describe("picker focus subscription", () => {
     const server = await startServer(standardHandshake());
     try {
       const watcher = await watchPickerFocus(server.path, PANE_ID);
-      (await server.connected).write(focusEvent("pane_focused", { pane_id: OTHER_PANE_ID, workspace_id: WORKSPACE_ID }));
+      (await server.connected).write(
+        focusEvent("pane_focused", { pane_id: OTHER_PANE_ID, workspace_id: WORKSPACE_ID }),
+      );
       await Bun.sleep(INPUT_SETTLE_MS);
       expect(watcher.signal.aborted).toBe(false);
-      expect(server.requests.filter(request => request.method === SNAPSHOT_METHOD).length).toBeGreaterThan(1);
+      expect(server.requests.filter((request) => request.method === SNAPSHOT_METHOD).length).toBeGreaterThan(1);
       watcher.stop();
-    } finally { await server.close(); }
+    } finally {
+      await server.close();
+    }
   });
 
   test("rejects setup when the snapshot is not globally focused", async () => {
     const server = await startServer((request, socket) => {
-      if (request.method === SUBSCRIBE_METHOD) socket.write(line({ id: request.id, result: { type: "subscription_started" } }));
+      if (request.method === SUBSCRIBE_METHOD)
+        socket.write(line({ id: request.id, result: { type: "subscription_started" } }));
       if (request.method === SNAPSHOT_METHOD) socket.write(line(snapshotResponse(request.id, OTHER_PANE_ID)));
     });
 
@@ -405,7 +437,8 @@ describe("picker focus subscription", () => {
   test("opens and accepts with a large valid session snapshot", async () => {
     const handshake = standardHandshake();
     const server = await startServer((request, socket) => {
-      if (request.method === SNAPSHOT_METHOD) socket.end(line(snapshotResponse(request.id, PANE_ID, LARGE_SESSION_PANE_COUNT)));
+      if (request.method === SNAPSHOT_METHOD)
+        socket.end(line(snapshotResponse(request.id, PANE_ID, LARGE_SESSION_PANE_COUNT)));
       else handshake(request, socket);
     });
     try {
@@ -413,7 +446,9 @@ describe("picker focus subscription", () => {
       expect(watcher.signal.aborted).toBe(false);
       await watcher.prepareDispatch();
       expect(watcher.signal.aborted).toBe(false);
-    } finally { await server.close(); }
+    } finally {
+      await server.close();
+    }
   });
 
   test("rejects a snapshot exceeding its separate bounded budget", async () => {
@@ -424,13 +459,17 @@ describe("picker focus subscription", () => {
     });
     try {
       await expect(watchPickerFocus(server.path, PANE_ID)).rejects.toThrow();
-    } finally { await server.close(); }
+    } finally {
+      await server.close();
+    }
   });
 
   test("acceptance waits for a pending departure snapshot", async () => {
     let finishSnapshot!: () => void;
     let sawSnapshot!: () => void;
-    const pending = new Promise<void>(resolve => { sawSnapshot = resolve; });
+    const pending = new Promise<void>((resolve) => {
+      sawSnapshot = resolve;
+    });
     let snapshots = 0;
     const handshake = standardHandshake();
     const server = await startServer((request, socket) => {
@@ -441,13 +480,20 @@ describe("picker focus subscription", () => {
     });
     try {
       const watcher = await watchPickerFocus(server.path, PANE_ID);
-      (await server.connected).write(focusEvent("pane_focused", { pane_id: OTHER_PANE_ID, workspace_id: WORKSPACE_ID }));
+      (await server.connected).write(
+        focusEvent("pane_focused", { pane_id: OTHER_PANE_ID, workspace_id: WORKSPACE_ID }),
+      );
       await pending;
-      const acceptance = watcher.prepareDispatch().then(() => false, () => true);
+      const acceptance = watcher.prepareDispatch().then(
+        () => false,
+        () => true,
+      );
       finishSnapshot();
       expect(await Promise.race([acceptance, Bun.sleep(ABORT_DEADLINE_MS).then(() => false)])).toBe(true);
       expect(watcher.signal.aborted).toBe(true);
-    } finally { await server.close(); }
+    } finally {
+      await server.close();
+    }
   });
 
   test("acceptance confirms current focus then disconnects without aborting", async () => {
@@ -455,25 +501,39 @@ describe("picker focus subscription", () => {
     try {
       const watcher = await watchPickerFocus(server.path, PANE_ID);
       await watcher.prepareDispatch();
-      expect(server.requests.filter(request => request.method === SNAPSHOT_METHOD)).toHaveLength(2);
+      expect(server.requests.filter((request) => request.method === SNAPSHOT_METHOD)).toHaveLength(2);
       expect(watcher.signal.aborted).toBe(false);
-    } finally { await server.close(); }
+    } finally {
+      await server.close();
+    }
   });
 
   test("snapshot cancellation closes a blocked native client connection", async () => {
     let received!: () => void;
     let disconnected!: () => void;
-    const pending = new Promise<void>(resolve => { received = resolve; });
-    const closed = new Promise<void>(resolve => { disconnected = resolve; });
-    const server = await startServer((_request, socket) => { socket.once("close", disconnected); received(); });
+    const pending = new Promise<void>((resolve) => {
+      received = resolve;
+    });
+    const closed = new Promise<void>((resolve) => {
+      disconnected = resolve;
+    });
+    const server = await startServer((_request, socket) => {
+      socket.once("close", disconnected);
+      received();
+    });
     const controller = new AbortController();
     try {
-      const run = readPickerSnapshot(server.path, PANE_ID, controller.signal).then(() => false, () => true);
+      const run = readPickerSnapshot(server.path, PANE_ID, controller.signal).then(
+        () => false,
+        () => true,
+      );
       await pending;
       controller.abort();
       expect(await run).toBe(true);
       expect(await Promise.race([closed.then(() => true), Bun.sleep(ABORT_DEADLINE_MS).then(() => false)])).toBe(true);
-    } finally { await server.close(); }
+    } finally {
+      await server.close();
+    }
   });
 
   test("continuous historical replay cannot extend acceptance indefinitely", async () => {
@@ -482,18 +542,34 @@ describe("picker focus subscription", () => {
     let watcher: Awaited<ReturnType<typeof watchPickerFocus>> | undefined;
     try {
       watcher = await watchPickerFocus(server.path, PANE_ID);
-      const rejected = watcher.prepareDispatch().then(() => false, () => true);
+      const rejected = watcher.prepareDispatch().then(
+        () => false,
+        () => true,
+      );
       expect(await Promise.race([rejected, Bun.sleep(MAX_ABORT_WAIT_MS).then(() => false)])).toBe(true);
-      expect(server.requests.filter(request => request.method === SNAPSHOT_METHOD).length).toBeGreaterThan(3);
+      expect(server.requests.filter((request) => request.method === SNAPSHOT_METHOD).length).toBeGreaterThan(3);
       expect(watcher.signal.aborted).toBe(true);
-    } finally { watcher?.stop(); await server.close(); }
+    } finally {
+      watcher?.stop();
+      await server.close();
+    }
   });
 
   test("native snapshot envelopes retain strict focus validation", () => {
-    expect(parsePickerSnapshotResponse(line(snapshotResponse(SNAPSHOT_METHOD)), PANE_ID)).toMatchObject({ kind: "snapshot", globallyFocused: true });
-    expect(parsePickerSnapshotResponse(line(snapshotResponse(SNAPSHOT_METHOD, OTHER_PANE_ID)), PANE_ID)).toMatchObject({ kind: "snapshot", globallyFocused: false });
-    expect(() => parsePickerSnapshotResponse(line({ error: { message: OTHER_PANE_ID } }), PANE_ID)).toThrow("Malformed picker focus lifecycle message");
-    expect(() => parsePickerSnapshotResponse(line({ result: { type: PONG_TYPE } }), PANE_ID)).toThrow("Malformed picker focus lifecycle message");
+    expect(parsePickerSnapshotResponse(line(snapshotResponse(SNAPSHOT_METHOD)), PANE_ID)).toMatchObject({
+      kind: "snapshot",
+      globallyFocused: true,
+    });
+    expect(parsePickerSnapshotResponse(line(snapshotResponse(SNAPSHOT_METHOD, OTHER_PANE_ID)), PANE_ID)).toMatchObject({
+      kind: "snapshot",
+      globallyFocused: false,
+    });
+    expect(() => parsePickerSnapshotResponse(line({ error: { message: OTHER_PANE_ID } }), PANE_ID)).toThrow(
+      "Malformed picker focus lifecycle message",
+    );
+    expect(() => parsePickerSnapshotResponse(line({ result: { type: PONG_TYPE } }), PANE_ID)).toThrow(
+      "Malformed picker focus lifecycle message",
+    );
   });
 
   test("stop disconnects without aborting selection", async () => {

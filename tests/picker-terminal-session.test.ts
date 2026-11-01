@@ -18,7 +18,9 @@ const OPTIONS = { prompt: "picker> ", noun: "targets", items: [ITEM] };
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>(done => { resolve = done; });
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
   return { promise, resolve };
 }
 
@@ -34,7 +36,7 @@ test("replaces a mode with one terminal lifetime and one pending input read", as
   const next = runTerminalPicker({ ...OPTIONS, terminal: surface.lease(), prompt: "worktrees> " });
   input.resolve(ENTER);
   expect(await next).toEqual(ITEM);
-  expect(terminal.writes.filter(write => write.includes(START))).toHaveLength(1);
+  expect(terminal.writes.filter((write) => write.includes(START))).toHaveLength(1);
   expect(terminal.rawModes).toEqual([true]);
   surface.close();
   expect(terminal.rawModes).toEqual([true, false]);
@@ -53,7 +55,13 @@ test("does not replay buffered acceptance into the new mode", async () => {
   oldInput.resolve(ENTER);
   await Bun.sleep(0);
   let accepted = false;
-  const next = runTerminalPicker({ ...OPTIONS, terminal: surface.lease(), onAccept: async () => { accepted = true; } });
+  const next = runTerminalPicker({
+    ...OPTIONS,
+    terminal: surface.lease(),
+    onAccept: async () => {
+      accepted = true;
+    },
+  });
   await Bun.sleep(0);
   expect(accepted).toBe(false);
   newInput.resolve(ENTER);
@@ -65,11 +73,11 @@ test("does not replay buffered acceptance into the new mode", async () => {
 for (const [label, prefix, tail, query] of [
   ["coalesced arrow and text", ESCAPE_PREFIX, ARROW_TAIL + FRESH_TEXT, FRESH_TEXT],
   ["coalesced arrow and Ctrl-C", ESCAPE_PREFIX, ARROW_TAIL + CLOSE, ""],
-  ["unmapped CSI and fresh text", ESCAPE_PREFIX, "9~" + FRESH_TEXT, FRESH_TEXT],
-  ["mouse fragment and fresh text", "\x1b[<0;1;", "1M" + FRESH_TEXT, FRESH_TEXT],
+  ["unmapped CSI and fresh text", ESCAPE_PREFIX, `9~${FRESH_TEXT}`, FRESH_TEXT],
+  ["mouse fragment and fresh text", "\x1b[<0;1;", `1M${FRESH_TEXT}`, FRESH_TEXT],
   ["split UTF-8", UTF8_PREFIX, new Uint8Array([...UTF8_TAIL, ...ENCODER.encode(FRESH_TEXT)]), FRESH_TEXT],
   ["interrupted UTF-8 and fresh text", UTF8_PREFIX, ENCODER.encode(FRESH_TEXT), FRESH_TEXT],
-  ["interrupted UTF-8 and fresh Unicode", UTF8_PREFIX, ENCODER.encode("é" + FRESH_TEXT), "é" + FRESH_TEXT],
+  ["interrupted UTF-8 and fresh Unicode", UTF8_PREFIX, ENCODER.encode(`é${FRESH_TEXT}`), `é${FRESH_TEXT}`],
 ] as const) {
   test(`replacement preserves fresh input after ${label}`, async () => {
     const input = deferred<string | Uint8Array>();
@@ -81,7 +89,14 @@ for (const [label, prefix, tail, query] of [
     first.abort();
     await run;
     const queries: string[] = [];
-    const next = runTerminalPicker({ ...OPTIONS, terminal: surface.lease(), ranker: async query => { queries.push(query); return [ITEM]; } });
+    const next = runTerminalPicker({
+      ...OPTIONS,
+      terminal: surface.lease(),
+      ranker: async (query) => {
+        queries.push(query);
+        return [ITEM];
+      },
+    });
     input.resolve(tail);
     expect(await next).toEqual(tail === ARROW_TAIL + CLOSE ? undefined : ITEM);
     expect(queries.at(-1) ?? "").toBe(query);
@@ -100,7 +115,14 @@ test("discarded fragmented keys cannot become new search text", async () => {
   first.abort();
   await run;
   const queries: string[] = [];
-  const next = runTerminalPicker({ ...OPTIONS, terminal: surface.lease(), ranker: async query => { queries.push(query); return [ITEM]; } });
+  const next = runTerminalPicker({
+    ...OPTIONS,
+    terminal: surface.lease(),
+    ranker: async (query) => {
+      queries.push(query);
+      return [ITEM];
+    },
+  });
   tail.resolve(ARROW_TAIL);
   await Bun.sleep(0);
   finish.resolve(ENTER);

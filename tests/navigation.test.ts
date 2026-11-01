@@ -1,7 +1,7 @@
+import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, test } from "bun:test";
 
 import { Herdr } from "../src/client/herdr.ts";
 import { loadNavigationTargets } from "../src/navigation.ts";
@@ -13,11 +13,13 @@ const SOURCE_PREFIX = "herdr-pickers-source-";
 const SIGNAL = new AbortController().signal;
 
 function herdrWith(handler: (args: readonly string[]) => string, commands: string[][] = []): Herdr {
-  return new Herdr({ runner: async (argv) => {
-    const args = argv.slice(1);
-    commands.push([...args]);
-    return { stdout: handler(args), stderr: "", exitCode: 0 };
-  } });
+  return new Herdr({
+    runner: async (argv) => {
+      const args = argv.slice(1);
+      commands.push([...args]);
+      return { stdout: handler(args), stderr: "", exitCode: 0 };
+    },
+  });
 }
 
 describe("navigation modes", () => {
@@ -26,17 +28,32 @@ describe("navigation modes", () => {
     const current = join(repo, "current");
     const main = join(repo, "main");
     const unopened = join(repo, "unopened");
-    const herdr = herdrWith((args) => args[0] === "workspace"
-      ? JSON.stringify({ result: { workspaces: [
-        { workspace_id: "current", focused: true, worktree: { repo_root: repo, checkout_path: current, is_linked_worktree: true } },
-        { workspace_id: "main", worktree: { repo_root: repo, checkout_path: main, is_linked_worktree: true } },
-      ] } })
-      : JSON.stringify({ result: { source: { repo_root: repo }, worktrees: [
-        { path: repo, is_bare: true },
-        { path: current, branch: "feature/current", open_workspace_id: "current" },
-        { path: main, branch: "main", open_workspace_id: "main" },
-        { path: unopened, branch: "feature/unopened" },
-      ] } }));
+    const herdr = herdrWith((args) =>
+      args[0] === "workspace"
+        ? JSON.stringify({
+            result: {
+              workspaces: [
+                {
+                  workspace_id: "current",
+                  focused: true,
+                  worktree: { repo_root: repo, checkout_path: current, is_linked_worktree: true },
+                },
+                { workspace_id: "main", worktree: { repo_root: repo, checkout_path: main, is_linked_worktree: true } },
+              ],
+            },
+          })
+        : JSON.stringify({
+            result: {
+              source: { repo_root: repo },
+              worktrees: [
+                { path: repo, is_bare: true },
+                { path: current, branch: "feature/current", open_workspace_id: "current" },
+                { path: main, branch: "main", open_workspace_id: "main" },
+                { path: unopened, branch: "feature/unopened" },
+              ],
+            },
+          }),
+    );
 
     const targets = await loadNavigationTargets("repo-worktrees", {
       herdr,
@@ -45,7 +62,11 @@ describe("navigation modes", () => {
       signal: SIGNAL,
     });
 
-    expect(targets.map((target) => target.kind === "worktree" ? [target.branch, target.existingWorkspaceId, target.current] : [])).toEqual([
+    expect(
+      targets.map((target) =>
+        target.kind === "worktree" ? [target.branch, target.existingWorkspaceId, target.current] : [],
+      ),
+    ).toEqual([
       ["feature/current", "current", true],
       ["main", "main", false],
       ["feature/unopened", undefined, false],
@@ -60,14 +81,35 @@ describe("navigation modes", () => {
     mkdirSync(current);
     mkdirSync(other);
     const commands: string[][] = [];
-    const herdr = herdrWith((args) => args[0] === "workspace"
-      ? JSON.stringify({ result: { workspaces: [
-        { workspace_id: "current", focused: true, worktree: { repo_root: repo, checkout_path: current, is_linked_worktree: true } },
-        { workspace_id: "main", worktree: { repo_root: repo, checkout_path: repo, is_linked_worktree: false } },
-        { workspace_id: "other", worktree: { repo_root: repo, checkout_path: other, is_linked_worktree: true } },
-        { workspace_id: "elsewhere", worktree: { repo_root: "/elsewhere", checkout_path: "/elsewhere/main", is_linked_worktree: true } },
-      ] } })
-      : JSON.stringify({ result: { source: { repo_root: repo }, worktrees: [] } }), commands);
+    const herdr = herdrWith(
+      (args) =>
+        args[0] === "workspace"
+          ? JSON.stringify({
+              result: {
+                workspaces: [
+                  {
+                    workspace_id: "current",
+                    focused: true,
+                    worktree: { repo_root: repo, checkout_path: current, is_linked_worktree: true },
+                  },
+                  {
+                    workspace_id: "main",
+                    worktree: { repo_root: repo, checkout_path: repo, is_linked_worktree: false },
+                  },
+                  {
+                    workspace_id: "other",
+                    worktree: { repo_root: repo, checkout_path: other, is_linked_worktree: true },
+                  },
+                  {
+                    workspace_id: "elsewhere",
+                    worktree: { repo_root: "/elsewhere", checkout_path: "/elsewhere/main", is_linked_worktree: true },
+                  },
+                ],
+              },
+            })
+          : JSON.stringify({ result: { source: { repo_root: repo }, worktrees: [] } }),
+      commands,
+    );
 
     const targets = await loadNavigationTargets("repo-workspaces", {
       herdr,
@@ -76,8 +118,14 @@ describe("navigation modes", () => {
       signal: SIGNAL,
     });
 
-    expect(targets.map((target) => target.kind === "workspace" ? target.workspaceId : "")).toEqual(["current", "main", "other"]);
-    expect(targets.find((target) => target.kind === "workspace" && target.workspaceId === "current")?.current).toBe(true);
+    expect(targets.map((target) => (target.kind === "workspace" ? target.workspaceId : ""))).toEqual([
+      "current",
+      "main",
+      "other",
+    ]);
+    expect(targets.find((target) => target.kind === "workspace" && target.workspaceId === "current")?.current).toBe(
+      true,
+    );
     expect(commands).toContainEqual(["worktree", "list", "--workspace", "current", "--json"]);
   });
 
@@ -89,10 +137,20 @@ describe("navigation modes", () => {
     mkdirSync(join(api, ".git"), { recursive: true });
     mkdirSync(join(unopened, ".git"), { recursive: true });
     symlinkSync(api, apiAlias);
-    const herdr = herdrWith(() => JSON.stringify({ result: { workspaces: [
-      { workspace_id: "w1", cwd: api, worktree: { repo_root: api, repo_name: "api", is_linked_worktree: false } },
-      { workspace_id: "w2", cwd: apiAlias, worktree: { repo_root: apiAlias, repo_name: "api", is_linked_worktree: false } },
-    ] } }));
+    const herdr = herdrWith(() =>
+      JSON.stringify({
+        result: {
+          workspaces: [
+            { workspace_id: "w1", cwd: api, worktree: { repo_root: api, repo_name: "api", is_linked_worktree: false } },
+            {
+              workspace_id: "w2",
+              cwd: apiAlias,
+              worktree: { repo_root: apiAlias, repo_name: "api", is_linked_worktree: false },
+            },
+          ],
+        },
+      }),
+    );
 
     const targets = await loadNavigationTargets("projects", { herdr, context: {}, projectRoots: [], signal: SIGNAL });
 
@@ -106,11 +164,22 @@ describe("navigation modes", () => {
     const unopened = join(root, "unopened");
     mkdirSync(join(api, ".git"), { recursive: true });
     mkdirSync(join(unopened, ".git"), { recursive: true });
-    const herdr = herdrWith(() => JSON.stringify({ result: { workspaces: [
-      { workspace_id: "w1", cwd: api, worktree: { repo_root: api, repo_name: "api", is_linked_worktree: false } },
-    ] } }));
+    const herdr = herdrWith(() =>
+      JSON.stringify({
+        result: {
+          workspaces: [
+            { workspace_id: "w1", cwd: api, worktree: { repo_root: api, repo_name: "api", is_linked_worktree: false } },
+          ],
+        },
+      }),
+    );
 
-    const targets = await loadNavigationTargets("projects", { herdr, context: {}, projectRoots: [root], signal: SIGNAL });
+    const targets = await loadNavigationTargets("projects", {
+      herdr,
+      context: {},
+      projectRoots: [root],
+      signal: SIGNAL,
+    });
 
     expect(targets.map((target) => target.label).sort()).toEqual(["api", "unopened"]);
   });
@@ -121,15 +190,26 @@ describe("navigation modes", () => {
     const feature = join(root, "feature");
     mkdirSync(join(project, ".git"), { recursive: true });
     mkdirSync(join(feature, ".git"), { recursive: true });
-    const herdr = herdrWith((args) => args[0] === "workspace"
-      ? JSON.stringify({ result: { workspaces: [
-        { workspace_id: "w1", label: "api", cwd: project },
-        { workspace_id: "w2", label: "feature", cwd: feature },
-      ] } })
-      : JSON.stringify({ result: { source: { repo_root: project }, worktrees: [
-        { path: project, branch: "main" },
-        { path: feature, branch: "feature" },
-      ] } }));
+    const herdr = herdrWith((args) =>
+      args[0] === "workspace"
+        ? JSON.stringify({
+            result: {
+              workspaces: [
+                { workspace_id: "w1", label: "api", cwd: project },
+                { workspace_id: "w2", label: "feature", cwd: feature },
+              ],
+            },
+          })
+        : JSON.stringify({
+            result: {
+              source: { repo_root: project },
+              worktrees: [
+                { path: project, branch: "main" },
+                { path: feature, branch: "feature" },
+              ],
+            },
+          }),
+    );
 
     const targets = await loadNavigationTargets("all", {
       herdr,
@@ -138,13 +218,15 @@ describe("navigation modes", () => {
       signal: SIGNAL,
     });
 
-    expect(targets.map((target) => [target.id, target.current]).sort()).toEqual([
-      [`project:${realpathSync(project)}`, true],
-      ["workspace:w1", true],
-      [`worktree:${project}`, true],
-      [`project:${realpathSync(feature)}`, false],
-      ["workspace:w2", false],
-      [`worktree:${feature}`, false],
-    ].sort());
+    expect(targets.map((target) => [target.id, target.current]).sort()).toEqual(
+      [
+        [`project:${realpathSync(project)}`, true],
+        ["workspace:w1", true],
+        [`worktree:${project}`, true],
+        [`project:${realpathSync(feature)}`, false],
+        ["workspace:w2", false],
+        [`worktree:${feature}`, false],
+      ].sort(),
+    );
   });
 });

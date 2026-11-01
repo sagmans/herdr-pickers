@@ -3,10 +3,10 @@
 // signal handlers, surface close, and session release on every exit path.
 import { Herdr } from "./client/herdr.ts";
 import { closePickerSurface, pickerSurfaceFromEnv } from "./client/popup.ts";
-import { createPickerFocusGuard, PickerFocusFailure } from "./picker-focus-guard.ts";
-import { PICKER_TOKEN_ENV, PickerSession } from "./picker-session.ts";
 import { loadConfig } from "./config/config.ts";
+import { createPickerFocusGuard, PickerFocusFailure } from "./picker-focus-guard.ts";
 import { runPickerLoop } from "./picker-loop.ts";
+import { PICKER_TOKEN_ENV, PickerSession } from "./picker-session.ts";
 import { withPickerSurface } from "./picker-surface.ts";
 import { color, dim } from "./style.ts";
 import { formatErrorBlock } from "./util/errors.ts";
@@ -18,9 +18,12 @@ async function main(): Promise<void> {
   const session = new PickerSession(env);
   const lifecycle = new AbortController();
   let exitSignal: (typeof EXIT_SIGNALS)[number] | undefined;
-  const handlers = EXIT_SIGNALS.map(signal => ({
+  const handlers = EXIT_SIGNALS.map((signal) => ({
     signal,
-    handler: () => { exitSignal ??= signal; lifecycle.abort(); },
+    handler: () => {
+      exitSignal ??= signal;
+      lifecycle.abort();
+    },
   }));
   try {
     const token = env[PICKER_TOKEN_ENV];
@@ -35,17 +38,16 @@ async function main(): Promise<void> {
     }
     for (const { signal, handler } of handlers) process.on(signal, handler);
     const config = loadConfig(env);
-    await withPickerSurface(surface, env.HERDR_SOCKET_PATH, undefined, async terminal => {
+    await withPickerSurface(surface, env.HERDR_SOCKET_PATH, undefined, async (terminal) => {
       const outcome = await runPickerLoop(session, token, terminal, {
         signal: lifecycle.signal,
-        createRuntime: signal => {
-          const guard = createPickerFocusGuard(
-            { socketPath: env.HERDR_SOCKET_PATH, surface },
-            signal,
-            reason => lifecycle.abort(reason),
+        createRuntime: (signal) => {
+          const guard = createPickerFocusGuard({ socketPath: env.HERDR_SOCKET_PATH, surface }, signal, (reason) =>
+            lifecycle.abort(reason),
           );
           return {
-            herdr: new Herdr({ signal }), config,
+            herdr: new Herdr({ signal }),
+            config,
             beforeDispatch: () => guard.checkBeforeDispatch(),
             dispose: () => guard.dispose(),
           };
@@ -54,7 +56,9 @@ async function main(): Promise<void> {
       // Cancellation owns cleanup, but observer failures must still reach the exit boundary.
       if (lifecycle.signal.reason instanceof PickerFocusFailure) throw lifecycle.signal.reason.cause;
       if (outcome === "no-agents") {
-        console.log(dim(session.latestRequest()?.mode === "repo-agents" ? "No repository agents found." : "No agents found."));
+        console.log(
+          dim(session.latestRequest()?.mode === "repo-agents" ? "No repository agents found." : "No agents found."),
+        );
       }
     });
   } finally {

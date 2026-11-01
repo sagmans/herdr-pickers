@@ -41,10 +41,7 @@ export async function closePickerSurface(
   write: SocketWriter = writeSocket,
 ): Promise<void> {
   if (surface.placement === "overlay") {
-    await Promise.race([
-      closeOverlayPane(surface.paneId, socketPath, write),
-      delay(OVERLAY_CLOSE_TIMEOUT_MS),
-    ]);
+    await Promise.race([closeOverlayPane(surface.paneId, socketPath, write), delay(OVERLAY_CLOSE_TIMEOUT_MS)]);
   }
   // Native exit removes a popup; an unqualified close could dismiss its successor.
 }
@@ -85,6 +82,8 @@ async function writeSocket(path: string, payload: string): Promise<void> {
       if (chunk.includes(NEWLINE_BYTE)) finish();
     });
     socket.once("end", () => finish());
-    socket.once("connect", () => { socket.write(payload); });
+    socket.once("connect", () => {
+      socket.write(payload);
+    });
   });
 }

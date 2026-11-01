@@ -3,10 +3,17 @@
 // The picker loop (picker-loop.ts) drives mode replacement around it.
 import { loadAgentTargets } from "./agents.ts";
 import type { Herdr } from "./client/herdr.ts";
-import type { CurrentContext } from "./context.ts";
 import type { HerdrPickersConfig } from "./config/config.ts";
+import type { CurrentContext } from "./context.ts";
 import { dispatchAgent, dispatchNavigationTarget } from "./dispatch.ts";
-import { agentModeSpec, isAgentMode, navigationModeSpec, type AgentMode, type NavigationMode, type PickerMode } from "./modes.ts";
+import {
+  type AgentMode,
+  agentModeSpec,
+  isAgentMode,
+  type NavigationMode,
+  navigationModeSpec,
+  type PickerMode,
+} from "./modes.ts";
 import { loadNavigationTargets, type NavigationTarget } from "./navigation.ts";
 import type { PickerItem } from "./picker-row.ts";
 import { renderAgentRows, renderNavigationRows } from "./rows.ts";
@@ -77,7 +84,7 @@ export async function runAgentPicker(mode: AgentMode, runtime: PickerRuntime): P
         return renderAgentRows(targets);
       },
       refreshIntervalMilliseconds: AGENT_REFRESH_INTERVAL_MILLISECONDS,
-      onAccept: async selection => {
+      onAccept: async (selection) => {
         if (runtime.signal.aborted) return;
         await runtime.beforeDispatch?.();
         if (runtime.signal.aborted) return;
@@ -120,7 +127,7 @@ async function runNavigationPicker(mode: NavigationMode, runtime: PickerRuntime)
     loadOnStart: true,
     keymap: runtime.config.keymap,
     reload: loadRows,
-    onAccept: async selection => {
+    onAccept: async (selection) => {
       if (runtime.signal.aborted) return;
       const target = targets.find((candidate) => candidate.id === selection.target);
       if (!target) throw new Error(`Selected navigation target '${selection.target}' is no longer available.`);

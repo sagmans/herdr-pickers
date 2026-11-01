@@ -1,11 +1,11 @@
+import { Database } from "bun:sqlite";
+import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Database } from "bun:sqlite";
-import { describe, expect, test } from "bun:test";
 
 import { EMPTY_MEMORY, type WorkspaceMemory } from "../src/last-workspace/memory.ts";
-import { StateStore, readPersistedStateRaw } from "../src/last-workspace/store.ts";
+import { readPersistedStateRaw, StateStore } from "../src/last-workspace/store.ts";
 
 const TEMP_PREFIX = "herdr-pickers-last-ws-";
 const CURRENT_W2_LAST_W1: WorkspaceMemory = { kind: "current", current: "w2", last: "w1" };

@@ -3,9 +3,9 @@
 // paths, and sanitizes every untrusted string before it reaches a row.
 import { dirname, parse, sep } from "node:path";
 
-import { parseAgentStatus, statusColor, statusGlyph, type AgentState } from "./agent-status.ts";
+import { type AgentState, parseAgentStatus, statusColor, statusGlyph } from "./agent-status.ts";
 import type { AgentTarget, PickerTarget, TargetKind } from "./catalog.ts";
-import { navigationModeSpec, type NavigationMode, type NavigationModeSpec } from "./modes.ts";
+import { type NavigationMode, type NavigationModeSpec, navigationModeSpec } from "./modes.ts";
 import { PICKER_PALETTE } from "./palette.ts";
 import type { PickerGroup, PickerItem, PickerRows } from "./picker-row.ts";
 import { bold, dim, trueColor } from "./style.ts";
@@ -71,7 +71,13 @@ export function renderAgentRows(targets: readonly AgentTarget[]): PickerRows {
     const display = renderTargetLine(target, state, false);
     items.push({
       id: target.id,
-      searchText: [group?.label, target.worktree ? sanitizeTerminalText(target.worktree) : undefined, sanitizeTerminalText(target.agentLabel)].filter(Boolean).join(SEARCH_FIELD_SEPARATOR),
+      searchText: [
+        group?.label,
+        target.worktree ? sanitizeTerminalText(target.worktree) : undefined,
+        sanitizeTerminalText(target.agentLabel),
+      ]
+        .filter(Boolean)
+        .join(SEARCH_FIELD_SEPARATOR),
       display,
       selectedDisplay: renderTargetLine(target, state, true),
       selectionColor: statusColor(state),
@@ -85,10 +91,7 @@ export function renderAgentRows(targets: readonly AgentTarget[]): PickerRows {
 }
 
 /** Navigation rows shaped by the mode spec (grouping, kind badges); preselects the narrowest current target. */
-export function renderNavigationRows(
-  mode: NavigationMode,
-  targets: readonly PickerTarget[],
-): PickerRows {
+export function renderNavigationRows(mode: NavigationMode, targets: readonly PickerTarget[]): PickerRows {
   const spec = navigationModeSpec(mode);
   const ordered = orderNavigationTargets(spec, targets);
   const qualifiers: NavigationQualifiers = {
@@ -117,8 +120,11 @@ function preselectedTarget(ordered: readonly PickerTarget[]): PickerTarget | und
   // Ties keep display order so a single-kind list still preselects its first current row.
   return ordered
     .filter((target) => target.current)
-    .reduce<PickerTarget | undefined>((best, target) =>
-      best === undefined || PRESELECT_PRIORITY[target.kind] < PRESELECT_PRIORITY[best.kind] ? target : best, undefined);
+    .reduce<PickerTarget | undefined>(
+      (best, target) =>
+        best === undefined || PRESELECT_PRIORITY[target.kind] < PRESELECT_PRIORITY[best.kind] ? target : best,
+      undefined,
+    );
 }
 
 function renderGroup(label: string, unknown: boolean): string {
@@ -137,10 +143,7 @@ function renderTargetLine(target: AgentTarget, state: AgentState, selected: bool
   return `${ROW_INDENT}${glyph} ${identity}`;
 }
 
-function navigationGroup(
-  target: PickerTarget,
-  qualifiers: ReadonlyMap<string, string>,
-): PickerGroup {
+function navigationGroup(target: PickerTarget, qualifiers: ReadonlyMap<string, string>): PickerGroup {
   const label = repoLabel(target, qualifiers);
   const unknown = target.repo === undefined;
   return {
@@ -164,20 +167,12 @@ function renderNavigationTarget(
 ): string {
   const kindColor = PICKER_PALETTE.kind[target.kind];
   const badge = spec.kindBadges ? `${trueColor(kindColor, `[${target.kind}]`)} ` : "";
-  const primaryColor = selected
-    ? PICKER_PALETTE.selected
-    : spec.kindBadges
-      ? kindColor
-      : PICKER_PALETTE.muted;
+  const primaryColor = selected ? PICKER_PALETTE.selected : spec.kindBadges ? kindColor : PICKER_PALETTE.muted;
   const primary = bold(trueColor(primaryColor, identity));
   return `${ROW_INDENT}${marker}${badge}${primary}${detail ? ` ${trueColor(PICKER_PALETTE.muted, detail)}` : ""}`;
 }
 
-function navigationIdentity(
-  spec: NavigationModeSpec,
-  target: PickerTarget,
-  qualifiers: NavigationQualifiers,
-): string {
+function navigationIdentity(spec: NavigationModeSpec, target: PickerTarget, qualifiers: NavigationQualifiers): string {
   const label = navigationDisplayLabel(target);
   // Without a group header, the repository qualifier must ride on the row itself.
   const qualifier = !spec.grouped
@@ -207,7 +202,9 @@ function repositoryQualifiers(targets: readonly RepositoryTarget[]): ReadonlyMap
   for (const [label, keys] of keysByLabel) {
     if (keys.size < 2) continue;
     const partsByKey = new Map([...keys].map((key) => [key, repositoryParentParts(key, label)]));
-    shortestUniqueSuffixes(partsByKey).forEach((qualifier, key) => result.set(key, qualifier));
+    shortestUniqueSuffixes(partsByKey).forEach((qualifier, key) => {
+      result.set(key, qualifier);
+    });
   }
   return result;
 }
@@ -228,7 +225,9 @@ function pathParts(path: string): string[] {
 function shortestUniqueSuffixes(partsByKey: ReadonlyMap<string, readonly string[]>): ReadonlyMap<string, string> {
   const depths = new Map([...partsByKey.keys()].map((key) => [key, 1]));
   while (true) {
-    const candidates = new Map([...partsByKey].map(([key, parts]) => [key, parts.slice(-(depths.get(key) ?? 1)).join("/")]));
+    const candidates = new Map(
+      [...partsByKey].map(([key, parts]) => [key, parts.slice(-(depths.get(key) ?? 1)).join("/")]),
+    );
     const keysByCandidate = new Map<string, string[]>();
     candidates.forEach((candidate, key) => {
       keysByCandidate.set(candidate, [...(keysByCandidate.get(candidate) ?? []), key]);
@@ -281,7 +280,11 @@ function workspaceQualifiers(targets: readonly PickerTarget[]): ReadonlyMap<stri
   const groups = new Map<string, Extract<PickerTarget, { readonly kind: "workspace" }>[]>();
   for (const target of targets) {
     if (target.kind !== "workspace") continue;
-    const signature = [repositoryKey(target), navigationDisplayLabel(target), sanitizeTerminalText(target.detail ?? "")].join("\0");
+    const signature = [
+      repositoryKey(target),
+      navigationDisplayLabel(target),
+      sanitizeTerminalText(target.detail ?? ""),
+    ].join("\0");
     const group = groups.get(signature) ?? [];
     group.push(target);
     groups.set(signature, group);
@@ -296,7 +299,9 @@ function workspaceQualifiers(targets: readonly PickerTarget[]): ReadonlyMap<stri
       if (path) partsById.set(target.id, pathParts(path));
     }
     if (partsById.size !== group.length) continue;
-    shortestUniqueSuffixes(partsById).forEach((qualifier, id) => result.set(id, qualifier));
+    shortestUniqueSuffixes(partsById).forEach((qualifier, id) => {
+      result.set(id, qualifier);
+    });
   }
   return result;
 }

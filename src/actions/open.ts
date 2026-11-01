@@ -3,15 +3,20 @@
 // repeated action switches mode instead of stacking popups (see picker-session.ts).
 import { Herdr, HerdrCommandError, HerdrSpawnError } from "../client/herdr.ts";
 import { readPickerPaneIds } from "../client/types.ts";
-import {
-  PICKER_REQUEST_POLL_MS, PICKER_REQUEST_TIMEOUT_MS, PICKER_TOKEN_ENV, PickerSession, PickerStartupUncertainError,
-} from "../picker-session.ts";
-import { currentContextFromEnv } from "../context.ts";
 import { loadConfig, type PickerPlacement } from "../config/config.ts";
-import { parseMode, type PickerMode } from "../modes.ts";
+import { currentContextFromEnv } from "../context.ts";
+import { type PickerMode, parseMode } from "../modes.ts";
+import {
+  PICKER_REQUEST_POLL_MS,
+  PICKER_REQUEST_TIMEOUT_MS,
+  PICKER_TOKEN_ENV,
+  PickerSession,
+  PickerStartupUncertainError,
+} from "../picker-session.ts";
 import { formatErrorBlock } from "../util/errors.ts";
 
-const DELIVERY_FAILURE = "Picker request could not be delivered before the deadline. Reopen after the current picker closes.";
+const DELIVERY_FAILURE =
+  "Picker request could not be delivered before the deadline. Reopen after the current picker closes.";
 
 /** Herdr argv for spawning the picker entrypoint; the token is the only state passed through the pane env. */
 export function buildPaneOpenArgs(options: {
@@ -81,15 +86,21 @@ export async function openPicker(
     // Delivery ends when a picker acknowledges this request or a newer one supersedes it.
     while (isUndelivered(session, request.token)) {
       if (!launched) {
-        const token = await untilAborted(session.reserve(config.placement, paneExists).then(reserved => {
-          startupUncertain = false;
-          return reserved;
-        }, error => {
-          // A submitted child can claim after its opener exits; waiting never authorizes a duplicate.
-          if (!(error instanceof PickerStartupUncertainError)) throw error;
-          startupUncertain = true;
-          return undefined;
-        }), signal);
+        const token = await untilAborted(
+          session.reserve(config.placement, paneExists).then(
+            (reserved) => {
+              startupUncertain = false;
+              return reserved;
+            },
+            (error) => {
+              // A submitted child can claim after its opener exits; waiting never authorizes a duplicate.
+              if (!(error instanceof PickerStartupUncertainError)) throw error;
+              startupUncertain = true;
+              return undefined;
+            },
+          ),
+          signal,
+        );
         if (token) {
           // Even a superseded opener must launch its reserved child; the child reads the newest request.
           launched = true;
@@ -125,8 +136,10 @@ function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
 }
 
 if (import.meta.main) {
-  Promise.resolve().then(() => openPicker(parseMode(process.argv[2]))).catch((error: unknown) => {
-    console.error(formatErrorBlock(error));
-    process.exit(1);
-  });
+  Promise.resolve()
+    .then(() => openPicker(parseMode(process.argv[2])))
+    .catch((error: unknown) => {
+      console.error(formatErrorBlock(error));
+      process.exit(1);
+    });
 }

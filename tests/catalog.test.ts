@@ -1,14 +1,9 @@
+import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, test } from "bun:test";
 
-import {
-  buildAgentTargets,
-  buildProjectTargets,
-  buildWorkspaceTargets,
-  buildWorktreeTargets,
-} from "../src/catalog.ts";
+import { buildAgentTargets, buildProjectTargets, buildWorkspaceTargets, buildWorktreeTargets } from "../src/catalog.ts";
 
 const CATALOG_TEMP_PREFIX = "herdr-pickers-catalog-";
 const BARE_TEMP_PREFIX = "herdr-pickers-bare-workspace-";
@@ -23,10 +18,14 @@ describe("navigation target builders", () => {
     mkdirSync(otherProject);
     symlinkSync(realProject, linkedProject);
 
-    const targets = buildProjectTargets([realProject, otherProject], [
-      { workspaceId: "source", cwd: linkedProject },
-      { workspaceId: "other", cwd: otherProject },
-    ], { workspaceId: "source" });
+    const targets = buildProjectTargets(
+      [realProject, otherProject],
+      [
+        { workspaceId: "source", cwd: linkedProject },
+        { workspaceId: "other", cwd: otherProject },
+      ],
+      { workspaceId: "source" },
+    );
 
     expect(targets.map((target) => [target.path, target.existingWorkspaceId, target.current])).toEqual([
       [otherProject, "other", false],
@@ -51,27 +50,38 @@ describe("navigation target builders", () => {
   });
 
   test("project targets do not match linked worktree repository roots", () => {
-    const [target] = buildProjectTargets(["/repo/main"], [{
-      workspaceId: "wt",
-      worktree: { repoRoot: "/repo/main", checkoutPath: "/repo/wt" },
-    }]);
+    const [target] = buildProjectTargets(
+      ["/repo/main"],
+      [
+        {
+          workspaceId: "wt",
+          worktree: { repoRoot: "/repo/main", checkoutPath: "/repo/wt" },
+        },
+      ],
+    );
 
     expect(target?.existingWorkspaceId).toBeUndefined();
   });
 
   test("workspace targets expose visible relation and detail but mark source", () => {
-    const targets = buildWorkspaceTargets([{
-      workspaceId: "source",
-      label: "main",
-      cwd: "/repo/sample-repo/main",
-      worktree: { repoName: "sample-repo", branch: "main", isLinkedWorktree: true },
-    }, {
-      workspaceId: "feature",
-      label: "herdr",
-      cwd: "/repo/sample-repo/herdr",
-      agentStatus: "idle",
-      worktree: { repoName: "sample-repo", branch: "feat/herdr", isLinkedWorktree: true },
-    }], { workspaceId: "source" });
+    const targets = buildWorkspaceTargets(
+      [
+        {
+          workspaceId: "source",
+          label: "main",
+          cwd: "/repo/sample-repo/main",
+          worktree: { repoName: "sample-repo", branch: "main", isLinkedWorktree: true },
+        },
+        {
+          workspaceId: "feature",
+          label: "herdr",
+          cwd: "/repo/sample-repo/herdr",
+          agentStatus: "idle",
+          worktree: { repoName: "sample-repo", branch: "feat/herdr", isLinkedWorktree: true },
+        },
+      ],
+      { workspaceId: "source" },
+    );
 
     expect(targets.map((target) => target.workspaceId)).toEqual(["source", "feature"]);
     expect(targets[0]).toMatchObject({ current: true });
@@ -103,12 +113,46 @@ describe("navigation target builders", () => {
   });
 
   test("worktree targets exclude bare and prunable rows and mark source", () => {
-    const targets = buildWorktreeTargets([
-      { path: "/repo/current", repoRoot: "/repo", openWorkspaceId: "source", isBare: false, isDetached: false, isLinkedWorktree: true, isPrunable: false },
-      { path: "/repo/main", repoRoot: "/repo", branch: "main", isBare: false, isDetached: false, isLinkedWorktree: false, isPrunable: false },
-      { path: "/repo/bare", repoRoot: "/repo", isBare: true, isDetached: false, isLinkedWorktree: false, isPrunable: false },
-      { path: "/repo/prunable", repoRoot: "/repo", isBare: false, isDetached: false, isLinkedWorktree: true, isPrunable: true },
-    ], [], { workspaceId: "source" });
+    const targets = buildWorktreeTargets(
+      [
+        {
+          path: "/repo/current",
+          repoRoot: "/repo",
+          openWorkspaceId: "source",
+          isBare: false,
+          isDetached: false,
+          isLinkedWorktree: true,
+          isPrunable: false,
+        },
+        {
+          path: "/repo/main",
+          repoRoot: "/repo",
+          branch: "main",
+          isBare: false,
+          isDetached: false,
+          isLinkedWorktree: false,
+          isPrunable: false,
+        },
+        {
+          path: "/repo/bare",
+          repoRoot: "/repo",
+          isBare: true,
+          isDetached: false,
+          isLinkedWorktree: false,
+          isPrunable: false,
+        },
+        {
+          path: "/repo/prunable",
+          repoRoot: "/repo",
+          isBare: false,
+          isDetached: false,
+          isLinkedWorktree: true,
+          isPrunable: true,
+        },
+      ],
+      [],
+      { workspaceId: "source" },
+    );
 
     expect(targets.map((target) => [target.path, target.current])).toEqual([
       ["/repo/current", true],
@@ -118,14 +162,39 @@ describe("navigation target builders", () => {
   });
 
   test("worktree targets resolve already-open workspaces by id and canonical path", () => {
-    const targets = buildWorktreeTargets([
-      { path: "/repo/open-id", repoRoot: "/repo", openWorkspaceId: "w1", isBare: false, isDetached: false, isLinkedWorktree: true, isPrunable: false },
-      { path: "/repo/open-path", repoRoot: "/repo", isBare: false, isDetached: false, isLinkedWorktree: true, isPrunable: false },
-      { path: "/repo/unopened", repoRoot: "/repo", isBare: false, isDetached: true, isLinkedWorktree: true, isPrunable: false },
-    ], [
-      { workspaceId: "w1", worktree: { checkoutPath: "/repo/other", isLinkedWorktree: true } },
-      { workspaceId: "w2", cwd: "/repo/open-path" },
-    ]);
+    const targets = buildWorktreeTargets(
+      [
+        {
+          path: "/repo/open-id",
+          repoRoot: "/repo",
+          openWorkspaceId: "w1",
+          isBare: false,
+          isDetached: false,
+          isLinkedWorktree: true,
+          isPrunable: false,
+        },
+        {
+          path: "/repo/open-path",
+          repoRoot: "/repo",
+          isBare: false,
+          isDetached: false,
+          isLinkedWorktree: true,
+          isPrunable: false,
+        },
+        {
+          path: "/repo/unopened",
+          repoRoot: "/repo",
+          isBare: false,
+          isDetached: true,
+          isLinkedWorktree: true,
+          isPrunable: false,
+        },
+      ],
+      [
+        { workspaceId: "w1", worktree: { checkoutPath: "/repo/other", isLinkedWorktree: true } },
+        { workspaceId: "w2", cwd: "/repo/open-path" },
+      ],
+    );
 
     expect(targets.map((target) => [target.path, target.existingWorkspaceId])).toEqual([
       ["/repo/open-id", "w1"],
@@ -136,56 +205,75 @@ describe("navigation target builders", () => {
   });
 
   test("agent targets trust the source pane id over stale focused flags", () => {
-    const targets = buildAgentTargets([
-      { target: "p1", paneId: "w:p1", label: "pi", focused: true },
-      { target: "p2", paneId: "w:p2", label: "codex" },
-    ], [], { paneId: "w:p2" });
+    const targets = buildAgentTargets(
+      [
+        { target: "p1", paneId: "w:p1", label: "pi", focused: true },
+        { target: "p2", paneId: "w:p2", label: "codex" },
+      ],
+      [],
+      { paneId: "w:p2" },
+    );
 
     expect(targets.filter((target) => target.focused).map((target) => target.agentTarget)).toEqual(["p2"]);
   });
 
   test("agent targets fall back to focused flags without pane context", () => {
-    const targets = buildAgentTargets([
-      { target: "p1", paneId: "w:p1", label: "pi", focused: true },
-      { target: "p2", paneId: "w:p2", label: "codex" },
-    ], [], {});
+    const targets = buildAgentTargets(
+      [
+        { target: "p1", paneId: "w:p1", label: "pi", focused: true },
+        { target: "p2", paneId: "w:p2", label: "codex" },
+      ],
+      [],
+      {},
+    );
 
     expect(targets.filter((target) => target.focused).map((target) => target.agentTarget)).toEqual(["p1"]);
   });
 
   test("agent targets fall back to the source workspace when the pane agent is not listed", () => {
-    const targets = buildAgentTargets([
-      { target: "p1", paneId: "w:p1", workspaceId: "source", label: "pi" },
-      { target: "p2", paneId: "w:p2", workspaceId: "source", label: "codex", focused: true },
-      { target: "p3", paneId: "w:p3", workspaceId: "other", label: "pi" },
-    ], [], { paneId: "w:missing", workspaceId: "source" });
+    const targets = buildAgentTargets(
+      [
+        { target: "p1", paneId: "w:p1", workspaceId: "source", label: "pi" },
+        { target: "p2", paneId: "w:p2", workspaceId: "source", label: "codex", focused: true },
+        { target: "p3", paneId: "w:p3", workspaceId: "other", label: "pi" },
+      ],
+      [],
+      { paneId: "w:missing", workspaceId: "source" },
+    );
 
     expect(targets.filter((target) => target.focused).map((target) => target.agentTarget)).toEqual(["p2"]);
   });
 
   test("agent targets prefer the source workspace over unrelated focused agents", () => {
-    const targets = buildAgentTargets([
-      { target: "p1", paneId: "w:p1", workspaceId: "source", label: "pi" },
-      { target: "p2", paneId: "w:p2", workspaceId: "other", label: "pi", focused: true },
-    ], [], { paneId: "w:missing", workspaceId: "source" });
+    const targets = buildAgentTargets(
+      [
+        { target: "p1", paneId: "w:p1", workspaceId: "source", label: "pi" },
+        { target: "p2", paneId: "w:p2", workspaceId: "other", label: "pi", focused: true },
+      ],
+      [],
+      { paneId: "w:missing", workspaceId: "source" },
+    );
 
     expect(targets.filter((target) => target.focused).map((target) => target.agentTarget)).toEqual(["p1"]);
   });
 
   test("agent targets fall back to focused flags when the pane and workspace are unknown", () => {
-    const targets = buildAgentTargets([
-      { target: "p1", paneId: "w:p1", label: "pi", focused: true },
-      { target: "p2", paneId: "w:p2", label: "codex" },
-    ], [], { paneId: "w:missing" });
+    const targets = buildAgentTargets(
+      [
+        { target: "p1", paneId: "w:p1", label: "pi", focused: true },
+        { target: "p2", paneId: "w:p2", label: "codex" },
+      ],
+      [],
+      { paneId: "w:missing" },
+    );
 
     expect(targets.filter((target) => target.focused).map((target) => target.agentTarget)).toEqual(["p1"]);
   });
 
   test("workspace targets trust the source workspace id over stale focused flags", () => {
-    const targets = buildWorkspaceTargets([
-      { workspaceId: "stale", focused: true },
-      { workspaceId: "source" },
-    ], { workspaceId: "source" });
+    const targets = buildWorkspaceTargets([{ workspaceId: "stale", focused: true }, { workspaceId: "source" }], {
+      workspaceId: "source",
+    });
 
     expect(targets.filter((target) => target.current).map((target) => target.workspaceId)).toEqual(["source"]);
   });

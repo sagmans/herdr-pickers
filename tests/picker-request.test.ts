@@ -5,13 +5,23 @@ const VALID = { token: "generation", mode: "worktrees", context: '{"cwd":"/sourc
 const TOO_LARGE = "x".repeat(64 * 1024);
 const PRIVATE_VALUE = "must-not-persist";
 const INVALID = [
-  null, {}, { ...VALID, token: "" }, { ...VALID, mode: "unknown" },
-  { ...VALID, context: "[]" }, { ...VALID, context: '{"paneId":1}' },
-  { ...VALID, context: TOO_LARGE }, { ...VALID, acknowledged: true },
+  null,
+  {},
+  { ...VALID, token: "" },
+  { ...VALID, mode: "unknown" },
+  { ...VALID, context: "[]" },
+  { ...VALID, context: '{"paneId":1}' },
+  { ...VALID, context: TOO_LARGE },
+  { ...VALID, acknowledged: true },
 ];
 
 test("request parser validates the bounded mode and context boundary", () => {
-  expect(readPickerRequest(VALID)).toEqual({ token: VALID.token, mode: VALID.mode, context: { cwd: "/source" }, acknowledgedBy: null });
+  expect(readPickerRequest(VALID)).toEqual({
+    token: VALID.token,
+    mode: VALID.mode,
+    context: { cwd: "/source" },
+    acknowledgedBy: null,
+  });
   for (const value of INVALID) expect(() => readPickerRequest(value)).toThrow();
 });
 

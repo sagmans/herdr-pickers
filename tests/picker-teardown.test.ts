@@ -4,7 +4,7 @@ import { Herdr } from "../src/client/herdr.ts";
 import { DEFAULT_PICKER_KEYMAP, type HerdrPickersConfig } from "../src/config/config.ts";
 import type { PickerMode } from "../src/modes.ts";
 import { runPicker } from "../src/picker.ts";
-import { FakeTerminal, FakeTimers, VIEWPORT, runAdapterPicker } from "./terminal-picker-test-support.ts";
+import { FakeTerminal, FakeTimers, runAdapterPicker, VIEWPORT } from "./terminal-picker-test-support.ts";
 
 const STOP_SCREEN = "\x1b[?1049l";
 const CANCEL = "\x03";
@@ -26,7 +26,10 @@ for (const key of [CANCEL, ESCAPE, ENTER]) {
     const timers = new FakeTimers();
     let closed = false;
     await runAdapterPicker({
-      ...OPTIONS, terminal, timers, refreshIntervalMilliseconds: INTERVAL_MS,
+      ...OPTIONS,
+      terminal,
+      timers,
+      refreshIntervalMilliseconds: INTERVAL_MS,
       reload: async () => ({ items: [] }),
       dismiss: async () => {
         expect(terminal.writes.join("")).not.toContain(STOP_SCREEN);
@@ -50,7 +53,9 @@ test("focus cancellation closes the surface before restoring the terminal", asyn
   const controller = new AbortController();
   let closed = false;
   const run = runAdapterPicker({
-    ...OPTIONS, terminal, signal: controller.signal,
+    ...OPTIONS,
+    terminal,
+    signal: controller.signal,
     dismiss: async () => {
       expect(terminal.writes.join("")).not.toContain(STOP_SCREEN);
       closed = true;
@@ -66,11 +71,18 @@ test("focus cancellation closes the surface before restoring the terminal", asyn
 test("surface close failure still restores every terminal resource", async () => {
   const terminal = new FakeTerminal([CANCEL]);
   const timers = new FakeTimers();
-  await expect(runAdapterPicker({
-    ...OPTIONS, terminal, timers, refreshIntervalMilliseconds: INTERVAL_MS,
-    reload: async () => ({ items: [ITEM] }),
-    dismiss: async () => { throw FAILURE; },
-  })).rejects.toBe(FAILURE);
+  await expect(
+    runAdapterPicker({
+      ...OPTIONS,
+      terminal,
+      timers,
+      refreshIntervalMilliseconds: INTERVAL_MS,
+      reload: async () => ({ items: [ITEM] }),
+      dismiss: async () => {
+        throw FAILURE;
+      },
+    }),
+  ).rejects.toBe(FAILURE);
   expect(terminal.rawModes).toEqual([true, false]);
   expect(terminal.writes.at(-1)).toContain(STOP_SCREEN);
   expect(timers.activeCount()).toBe(0);
@@ -81,18 +93,27 @@ for (const mode of MODES) {
   test(`${mode} cancellation keeps the frame through its surface lifecycle`, async () => {
     const terminal = new FakeTerminal([CANCEL]);
     let closed = false;
-    const herdr = new Herdr({ runner: async argv => ({
-      stdout: argv.includes("workspace") ? WORKSPACES : AGENTS, stderr: "", exitCode: 0,
-    }) });
-    const result = await runPicker(mode, {
-      herdr, signal: SIGNAL, context: {}, config: CONFIG,
-      pickerRunner: options => runAdapterPicker({
-        ...options, terminal,
-        dismiss: async () => {
-          expect(terminal.writes.join("")).not.toContain(STOP_SCREEN);
-          closed = true;
-        },
+    const herdr = new Herdr({
+      runner: async (argv) => ({
+        stdout: argv.includes("workspace") ? WORKSPACES : AGENTS,
+        stderr: "",
+        exitCode: 0,
       }),
+    });
+    const result = await runPicker(mode, {
+      herdr,
+      signal: SIGNAL,
+      context: {},
+      config: CONFIG,
+      pickerRunner: (options) =>
+        runAdapterPicker({
+          ...options,
+          terminal,
+          dismiss: async () => {
+            expect(terminal.writes.join("")).not.toContain(STOP_SCREEN);
+            closed = true;
+          },
+        }),
     });
     expect(result).toBe("cancelled");
     expect(closed).toBe(true);

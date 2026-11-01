@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 
 import type { WorkspaceRecord } from "../src/client/types.ts";
 import {
-  EMPTY_MEMORY,
   applyClosed,
   applyFocused,
   containsWorkspace,
@@ -68,7 +67,9 @@ describe("persisted workspace memory", () => {
       current_workspace_id: "w1",
       last_workspace_id: "w2",
     });
-    expect(parsePersistedState({ current_workspace_id: 5, last_workspace_id: "w2" })).toEqual({ last_workspace_id: "w2" });
+    expect(parsePersistedState({ current_workspace_id: 5, last_workspace_id: "w2" })).toEqual({
+      last_workspace_id: "w2",
+    });
   });
 });
 

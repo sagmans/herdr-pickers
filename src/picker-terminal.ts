@@ -72,10 +72,11 @@ export class PickerTerminal {
         next: async () => {
           this.start();
           while (true) {
-            const pending = this.pending ??= this.input.next().then(result => ({
+            this.pending ??= this.input.next().then((result) => ({
               result: result.done ? result : { done: false as const, value: this.decode(result.value) },
               generation: this.generation,
             }));
+            const pending = this.pending;
             const chunk = await pending;
             // An abandoned waiter cannot consume input intended for the new mode.
             if (signal?.aborted || generation !== this.generation) return { done: true, value: undefined };
@@ -90,13 +91,13 @@ export class PickerTerminal {
     return {
       input,
       inputState: this.inputState,
-      write: value => {
+      write: (value) => {
         // Deferred until first output so a mode cancelled before drawing never touches the device.
         this.start();
         this.terminal.write(value);
       },
       getViewport: () => this.terminal.getViewport(),
-      onResize: listener => this.terminal.onResize(listener),
+      onResize: (listener) => this.terminal.onResize(listener),
     };
   }
 
@@ -108,9 +109,15 @@ export class PickerTerminal {
     }
     this.state = "closed";
     this.generation++;
-    try { this.terminal.write(TERMINAL_STOP); } catch {}
-    try { this.terminal.setRawMode(false); } catch {}
-    try { void this.input.return?.(); } catch {}
+    try {
+      this.terminal.write(TERMINAL_STOP);
+    } catch {}
+    try {
+      this.terminal.setRawMode(false);
+    } catch {}
+    try {
+      void this.input.return?.();
+    } catch {}
   }
 
   private start(): void {

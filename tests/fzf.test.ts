@@ -17,10 +17,7 @@ describe("fzf ranking", () => {
   test("returns full rows ranked by visible fields", async () => {
     const lines = [item("beta", "pane-b"), item("alphabet", "pane-a2"), item("alpha", "pane-a1")];
 
-    expect(await rankRows("alpha", lines)).toEqual([
-      lines[2]!,
-      lines[1]!,
-    ]);
+    expect(await rankRows("alpha", lines)).toEqual([lines[2]!, lines[1]!]);
   });
 
   test("preserves exact ANSI styling from source rows", async () => {
@@ -29,10 +26,7 @@ describe("fzf ranking", () => {
       item("alpha", "pane-a1", "\x1b[36malpha\x1b[0m"),
     ];
 
-    expect(await rankRows("alpha", lines)).toEqual([
-      lines[1]!,
-      lines[0]!,
-    ]);
+    expect(await rankRows("alpha", lines)).toEqual([lines[1]!, lines[0]!]);
   });
 
   test("does not search hidden agent targets", async () => {

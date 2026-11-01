@@ -12,8 +12,8 @@ import {
   resolveToggle,
 } from "../last-workspace/memory.ts";
 import { StateStore } from "../last-workspace/store.ts";
-import { isRecord } from "../util/objects.ts";
 import { formatEventFailure } from "../util/errors.ts";
+import { isRecord } from "../util/objects.ts";
 
 type Subcommand = "toggle" | "focused" | "closed";
 
@@ -72,12 +72,7 @@ async function runClosed(runtime: LastWorkspaceRuntime): Promise<void> {
   const workspaces = await listWorkspaces(runtime.herdr);
   const liveFocus = focusedWorkspaceId(workspaces);
   const target = runtime.store.update((memory) => {
-    const jumpTarget = resolveClosedJump(
-      memory,
-      closedId,
-      liveFocus,
-      (id) => containsWorkspace(workspaces, id),
-    );
+    const jumpTarget = resolveClosedJump(memory, closedId, liveFocus, (id) => containsWorkspace(workspaces, id));
     return {
       memory: applyClosed(memory, closedId, liveFocus),
       value: jumpTarget,
@@ -140,7 +135,9 @@ export function parseSubcommand(value: string | undefined): Subcommand {
     case "closed":
       return value;
     default:
-      throw new Error(`Unknown last-workspace subcommand '${value ?? ""}'. Usage: last-workspace <toggle|focused|closed>`);
+      throw new Error(
+        `Unknown last-workspace subcommand '${value ?? ""}'. Usage: last-workspace <toggle|focused|closed>`,
+      );
   }
 }
 

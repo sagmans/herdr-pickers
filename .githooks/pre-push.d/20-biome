@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Formatting and lint must hold for every commit that leaves the machine,
+# including commits made with hooks off or partly staged. `biome ci` reads
+# the whole tree and never writes, so it judges exactly the pushed commit.
+set -euo pipefail
+# shellcheck disable=SC1090,SC1091  # path exported by .githooks/lib/run-local.sh
+. "${HOOK_HELPERS:?run from .githooks (scripts/setup-hooks)}"
+
+# Runs inside the commit's tree (in place or in at_sha's temporary worktree).
+biome_ci() {
+	local git_dir common_dir
+	git_dir=$(git rev-parse --path-format=absolute --git-dir)
+	common_dir=$(git rev-parse --path-format=absolute --git-common-dir)
+	# A linked worktree without node_modules is at_sha's fresh checkout:
+	# install Biome there from the committed lockfile only. The main clone's
+	# own node_modules is never installed into or replaced; scripts/biome
+	# fails with a hint when it is missing or stale.
+	if [ "$git_dir" != "$common_dir" ] && [ ! -d node_modules ]; then
+		echo "pre-push: bun install --frozen-lockfile --ignore-scripts"
+		scripts/run-tool bun install --frozen-lockfile --ignore-scripts
+	fi
+	echo "pre-push: bun run lint (biome ci)"
+	scripts/run-tool bun run lint
+}
+
+# for loop, not `| while`: a failure must exit this script (fail closed).
+shas=$(pushed_shas <"$HOOK_STDIN_FILE") || exit 1
+shas=$(printf '%s\n' "$shas" | sort -u)
+# shellcheck disable=SC2086  # one SHA per word
+for sha in $shas; do
+	echo "pre-push: biome ci on $(git rev-parse --short "$sha")"
+	at_sha "$sha" biome_ci || exit 1
+done

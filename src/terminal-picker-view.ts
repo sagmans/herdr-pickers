@@ -2,11 +2,7 @@
 // prompt rail. Shared by drawing and mouse hit-testing so both agree on
 // where each row sits.
 import { PICKER_PALETTE } from "./palette.ts";
-import {
-  expandPickerItems,
-  type PickerDisplayRow,
-  type PickerItem,
-} from "./picker-row.ts";
+import { expandPickerItems, type PickerDisplayRow, type PickerItem } from "./picker-row.ts";
 import { trueColor } from "./style.ts";
 import type { MouseEvent } from "./terminal-picker-input.ts";
 
@@ -78,13 +74,15 @@ export function renderFrame(state: PickerState, viewport: Viewport): readonly st
     const row = list.rows[list.firstIndex + offset];
     if (row === undefined) break;
     const selected = row.type === "item" && row.itemIndex === state.selected;
-    const selectionColor = row.type === "item" ? row.item.selectionColor ?? PICKER_PALETTE.selected : PICKER_PALETTE.selected;
+    const selectionColor =
+      row.type === "item" ? (row.item.selectionColor ?? PICKER_PALETTE.selected) : PICKER_PALETTE.selected;
     const pointer = selected ? trueColor(selectionColor, POINTER) : " ";
-    const display = row.type === "group"
-      ? row.group.display
-      : selected
-        ? row.item.selectedDisplay ?? row.item.display
-        : row.item.display;
+    const display =
+      row.type === "group"
+        ? row.group.display
+        : selected
+          ? (row.item.selectedDisplay ?? row.item.display)
+          : row.item.display;
     frame[list.firstRow - 1 + offset] = `${pointer} ${display}`;
   }
   if (state.items.length === 0 && state.emptyMessage !== undefined && resultCapacity(viewport) > 0) {
@@ -120,10 +118,13 @@ export function initialSelection(items: readonly PickerItem[], focusedId?: strin
 /** Clamps at list ends instead of wrapping, keeping the selection visible. */
 export function moveSelection(state: PickerState, delta: number, viewport: Viewport): PickerState {
   if (state.items.length === 0) return state;
-  return fitSelection({
-    ...state,
-    selected: Math.min(state.items.length - 1, Math.max(0, state.selected + delta)),
-  }, viewport);
+  return fitSelection(
+    {
+      ...state,
+      selected: Math.min(state.items.length - 1, Math.max(0, state.selected + delta)),
+    },
+    viewport,
+  );
 }
 
 /** Wheel scrolling; the selection follows only when it would leave the visible window. */
@@ -135,11 +136,12 @@ export function scrollRows(state: PickerState, delta: number, viewport: Viewport
   const scrollTop = Math.min(maxScroll, Math.max(0, state.scrollTop + delta));
   const selectedRow = rows.findIndex((row) => row.type === "item" && row.itemIndex === state.selected);
   const visibleItems = rows.slice(scrollTop, scrollTop + capacity).filter((row) => row.type === "item");
-  const selected = selectedRow < scrollTop
-    ? visibleItems[0]?.itemIndex ?? state.selected
-    : selectedRow >= scrollTop + capacity
-      ? visibleItems.at(-1)?.itemIndex ?? state.selected
-      : state.selected;
+  const selected =
+    selectedRow < scrollTop
+      ? (visibleItems[0]?.itemIndex ?? state.selected)
+      : selectedRow >= scrollTop + capacity
+        ? (visibleItems.at(-1)?.itemIndex ?? state.selected)
+        : state.selected;
   return { ...state, selected, scrollTop };
 }
 

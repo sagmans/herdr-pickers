@@ -4,7 +4,7 @@ import { Herdr } from "../src/client/herdr.ts";
 import { DEFAULT_PICKER_KEYMAP, type HerdrPickersConfig } from "../src/config/config.ts";
 import type { PickerMode } from "../src/modes.ts";
 import { runPicker } from "../src/picker.ts";
-import { FakeTerminal, FakeTimers, VIEWPORT, runAdapterPicker } from "./terminal-picker-test-support.ts";
+import { FakeTerminal, FakeTimers, runAdapterPicker, VIEWPORT } from "./terminal-picker-test-support.ts";
 
 const STOP_SCREEN = "\x1b[?1049l";
 const ENTER = "\r";
@@ -25,18 +25,25 @@ for (const mode of MODES) {
   test(`${mode} preserves the selected frame through focus confirmation and dispatch`, async () => {
     const terminal = new FakeTerminal([ENTER]);
     let dispatched = false;
-    const herdr = new Herdr({ runner: async argv => {
-      if (argv.includes("focus")) {
-        expect(terminal.writes.join("")).not.toContain(STOP_SCREEN);
-        dispatched = true;
-        return { stdout: RESULT, stderr: "", exitCode: 0 };
-      }
-      return { stdout: argv.includes("workspace") ? WORKSPACES : AGENTS, stderr: "", exitCode: 0 };
-    }});
+    const herdr = new Herdr({
+      runner: async (argv) => {
+        if (argv.includes("focus")) {
+          expect(terminal.writes.join("")).not.toContain(STOP_SCREEN);
+          dispatched = true;
+          return { stdout: RESULT, stderr: "", exitCode: 0 };
+        }
+        return { stdout: argv.includes("workspace") ? WORKSPACES : AGENTS, stderr: "", exitCode: 0 };
+      },
+    });
     const result = await runPicker(mode, {
-      herdr, signal: SIGNAL, context: {}, config: CONFIG,
-      beforeDispatch: async () => { expect(terminal.writes.join("")).not.toContain(STOP_SCREEN); },
-      pickerRunner: async options => {
+      herdr,
+      signal: SIGNAL,
+      context: {},
+      config: CONFIG,
+      beforeDispatch: async () => {
+        expect(terminal.writes.join("")).not.toContain(STOP_SCREEN);
+      },
+      pickerRunner: async (options) => {
         const rows = options.loadOnStart ? await options.reload!() : options;
         return runAdapterPicker({ ...options, ...rows, loadOnStart: false, terminal });
       },
@@ -54,8 +61,14 @@ test("acceptance freezes live refresh until handoff finishes", async () => {
   let accepted = 0;
   let reloads = 0;
   const selection = await runAdapterPicker({
-    ...OPTIONS, terminal, timers, refreshIntervalMilliseconds: INTERVAL_MS,
-    reload: async () => { reloads++; return { items: [ITEM] }; },
+    ...OPTIONS,
+    terminal,
+    timers,
+    refreshIntervalMilliseconds: INTERVAL_MS,
+    reload: async () => {
+      reloads++;
+      return { items: [ITEM] };
+    },
     onAccept: async () => {
       accepted++;
       const writes = terminal.writes.length;
@@ -73,7 +86,15 @@ test("acceptance freezes live refresh until handoff finishes", async () => {
 
 test("rejected handoff restores terminal state", async () => {
   const terminal = new FakeTerminal([ENTER]);
-  await expect(runAdapterPicker({ ...OPTIONS, terminal, onAccept: async () => { throw FAILURE; } })).rejects.toBe(FAILURE);
+  await expect(
+    runAdapterPicker({
+      ...OPTIONS,
+      terminal,
+      onAccept: async () => {
+        throw FAILURE;
+      },
+    }),
+  ).rejects.toBe(FAILURE);
   expect(terminal.rawModes).toEqual([true, false]);
   expect(terminal.writes.at(-1)).toContain(STOP_SCREEN);
 });
@@ -83,10 +104,19 @@ test("aborted handoff restores promptly without late output", async () => {
   const controller = new AbortController();
   let finish!: () => void;
   let started!: () => void;
-  const ready = new Promise<void>(resolve => { started = resolve; });
+  const ready = new Promise<void>((resolve) => {
+    started = resolve;
+  });
   const run = runAdapterPicker({
-    ...OPTIONS, terminal, signal: controller.signal,
-    onAccept: () => { started(); return new Promise<void>(resolve => { finish = resolve; }); },
+    ...OPTIONS,
+    terminal,
+    signal: controller.signal,
+    onAccept: () => {
+      started();
+      return new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+    },
   });
   const phase = await Promise.race([ready.then(() => true), run.then(() => false)]);
   expect(phase).toBe(true);

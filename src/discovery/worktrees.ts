@@ -1,11 +1,18 @@
 // Worktree discovery for navigation catalogs and agent scoping. Herdr is the
 // primary source; `git worktree list` is the fallback when Herdr rejects a project.
-import { Herdr, HerdrCommandError } from "../client/herdr.ts";
-import { readWorktrees, readWorktreeScope, type WorkspaceRecord, type WorktreeListResult, type WorktreeRecord } from "../client/types.ts";
+
 import { workspaceProvenanceRepoKey } from "../catalog.ts";
+import { type Herdr, HerdrCommandError } from "../client/herdr.ts";
+import {
+  readWorktreeScope,
+  readWorktrees,
+  type WorkspaceRecord,
+  type WorktreeListResult,
+  type WorktreeRecord,
+} from "../client/types.ts";
 import type { CurrentContext } from "../context.ts";
 import { canonicalPathKey } from "../util/paths.ts";
-import { runCommand, type CommandRunner } from "../util/subprocess.ts";
+import { type CommandResult, type CommandRunner, runCommand } from "../util/subprocess.ts";
 
 const GIT_COMMAND = "git";
 const MISSING_WORKTREE_SOURCE = "Cannot open repository worktrees without a source workspace or cwd.";
@@ -129,7 +136,7 @@ export async function listGitWorktrees(
   signal?: AbortSignal,
 ): Promise<WorktreeRecord[]> {
   signal?.throwIfAborted();
-  let result;
+  let result: CommandResult;
   try {
     result = await runner([GIT_COMMAND, "-C", project, "worktree", "list", "--porcelain"], signal);
   } catch (error) {

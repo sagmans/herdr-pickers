@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
 import { Herdr } from "../src/client/herdr.ts";
-import { type CommandRunner } from "../src/util/subprocess.ts";
 import { dispatchAgent, dispatchNavigationTarget } from "../src/dispatch.ts";
+import type { CommandRunner } from "../src/util/subprocess.ts";
 
 function recordingHerdr(commands: string[][], failures: readonly string[] = [], stderr = "failed"): Herdr {
   const runner: CommandRunner = async (argv) => {
@@ -29,13 +29,16 @@ describe("navigation dispatch", () => {
   test("focuses workspace targets", async () => {
     const commands: string[][] = [];
 
-    await dispatchNavigationTarget({
-      kind: "workspace",
-      id: "workspace:w1",
-      workspaceId: "w1",
-      current: false,
-      label: "api",
-    }, recordingHerdr(commands));
+    await dispatchNavigationTarget(
+      {
+        kind: "workspace",
+        id: "workspace:w1",
+        workspaceId: "w1",
+        current: false,
+        label: "api",
+      },
+      recordingHerdr(commands),
+    );
 
     expect(commands).toEqual([["workspace", "focus", "w1"]]);
   });
@@ -43,14 +46,17 @@ describe("navigation dispatch", () => {
   test("projects focus existing workspaces before creating", async () => {
     const commands: string[][] = [];
 
-    await dispatchNavigationTarget({
-      kind: "project",
-      id: "project:/repo/api",
-      path: "/repo/api",
-      current: false,
-      existingWorkspaceId: "w1",
-      label: "api",
-    }, recordingHerdr(commands));
+    await dispatchNavigationTarget(
+      {
+        kind: "project",
+        id: "project:/repo/api",
+        path: "/repo/api",
+        current: false,
+        existingWorkspaceId: "w1",
+        label: "api",
+      },
+      recordingHerdr(commands),
+    );
 
     expect(commands).toEqual([["workspace", "focus", "w1"]]);
   });
@@ -58,13 +64,16 @@ describe("navigation dispatch", () => {
   test("projects create focused workspaces when unopened", async () => {
     const commands: string[][] = [];
 
-    await dispatchNavigationTarget({
-      kind: "project",
-      id: "project:/repo/api",
-      path: "/repo/api",
-      current: false,
-      label: "api",
-    }, recordingHerdr(commands));
+    await dispatchNavigationTarget(
+      {
+        kind: "project",
+        id: "project:/repo/api",
+        path: "/repo/api",
+        current: false,
+        label: "api",
+      },
+      recordingHerdr(commands),
+    );
 
     expect(commands).toEqual([["workspace", "create", "--cwd", "/repo/api", "--label", "api", "--focus"]]);
   });
@@ -72,16 +81,19 @@ describe("navigation dispatch", () => {
   test("worktrees focus existing workspaces", async () => {
     const commands: string[][] = [];
 
-    await dispatchNavigationTarget({
-      kind: "worktree",
-      id: "worktree:/repo/main",
-      path: "/repo/main",
-      current: false,
-      repoRoot: "/repo",
-      branch: "main",
-      existingWorkspaceId: "w1",
-      label: "main",
-    }, recordingHerdr(commands));
+    await dispatchNavigationTarget(
+      {
+        kind: "worktree",
+        id: "worktree:/repo/main",
+        path: "/repo/main",
+        current: false,
+        repoRoot: "/repo",
+        branch: "main",
+        existingWorkspaceId: "w1",
+        label: "main",
+      },
+      recordingHerdr(commands),
+    );
 
     expect(commands).toEqual([["workspace", "focus", "w1"]]);
   });
@@ -89,15 +101,18 @@ describe("navigation dispatch", () => {
   test("worktrees use Herdr open when linked", async () => {
     const commands: string[][] = [];
 
-    await dispatchNavigationTarget({
-      kind: "worktree",
-      id: "worktree:/repo/wt",
-      path: "/repo/wt",
-      current: false,
-      repoRoot: "/repo",
-      branch: "feat/x",
-      label: "feat/x",
-    }, recordingHerdr(commands));
+    await dispatchNavigationTarget(
+      {
+        kind: "worktree",
+        id: "worktree:/repo/wt",
+        path: "/repo/wt",
+        current: false,
+        repoRoot: "/repo",
+        branch: "feat/x",
+        label: "feat/x",
+      },
+      recordingHerdr(commands),
+    );
 
     expect(commands).toEqual([["worktree", "open", "--cwd", "/repo", "--path", "/repo/wt", "--json", "--focus"]]);
   });
@@ -118,7 +133,7 @@ describe("navigation dispatch", () => {
 
     expect(commands[1]).toEqual(["workspace", "create", "--cwd", "/repo/wt", "--label", "feat/x", "--focus"]);
 
-const deniedCommands: string[][] = [];
+    const deniedCommands: string[][] = [];
     // Permission failures must stay fail-closed: the generic message no longer
     // carries stderr, so the sanitized stderr field is the classification source.
     const denied = dispatchNavigationTarget(

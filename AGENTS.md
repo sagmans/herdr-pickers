@@ -36,7 +36,7 @@ After cloning, run `scripts/setup-hooks` once. It sets `core.hooksPath=.githooks
 
 All checks must pass before a push. Never bypass them with `--no-verify`. The generic files in `.githooks/` and `scripts/setup-hooks` are copies of the dotf template (`templates/githooks/`); change them there, not here.
 
-`pre-commit` runs the type check; `pre-push` runs the full gate below on every pushed commit.
+`pre-commit` runs the type check and Biome (format and lint) on the staged files; `pre-push` runs the full gate below on every pushed commit. Biome is a pinned devDependency; `scripts/biome` refuses a missing binary or one that differs from the `package.json` pin, so run `bun install --frozen-lockfile` first. Fix formatting with `bun run format`.
 
 The pre-push gate:
 
@@ -44,7 +44,10 @@ The pre-push gate:
 bun test
 bun run typecheck
 bun audit
+bun run lint
 ```
+
+Lint and format rules live in `biome.jsonc`. Every relaxed rule there carries its reason; keep it that way.
 
 Run `bun run smoke` for changes to plugin registration, Herdr commands or JSON, popup/TTY behavior, discovery, dispatch, events, or persisted workspace state. It requires the tools in `mise.toml` plus `python3`.
 

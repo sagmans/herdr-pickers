@@ -1,12 +1,12 @@
+import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, test } from "bun:test";
 
 import { Herdr, HerdrJsonError } from "../src/client/herdr.ts";
-import { type CommandRunner } from "../src/util/subprocess.ts";
 import { listProjects } from "../src/discovery/projects.ts";
 import { listGitWorktrees, listWorktreesForContext, listWorktreesForProject } from "../src/discovery/worktrees.ts";
+import type { CommandRunner } from "../src/util/subprocess.ts";
 
 const TEMP_PREFIX = "herdr-pickers-discovery-";
 
@@ -41,14 +41,17 @@ describe("project discovery", () => {
 describe("worktree discovery", () => {
   test("loads only source repository without Git fallback", async () => {
     const commands: string[][] = [];
-    const herdr = new Herdr({ runner: async (argv) => {
-      commands.push(argv.slice(1));
-      return {
-        stdout: '{"result":{"source":{"repo_root":"/repo","source_workspace_id":"w1"},"worktrees":[{"path":"/repo/main","open_workspace_id":"w1"},{"path":"/repo/wt"}]}}',
-        stderr: "",
-        exitCode: 0,
-      };
-    } });
+    const herdr = new Herdr({
+      runner: async (argv) => {
+        commands.push(argv.slice(1));
+        return {
+          stdout:
+            '{"result":{"source":{"repo_root":"/repo","source_workspace_id":"w1"},"worktrees":[{"path":"/repo/main","open_workspace_id":"w1"},{"path":"/repo/wt"}]}}',
+          stderr: "",
+          exitCode: 0,
+        };
+      },
+    });
 
     const result = await listWorktreesForContext({ workspaceId: "w1", cwd: "/repo/wt" }, herdr);
 
@@ -58,7 +61,11 @@ describe("worktree discovery", () => {
   });
 
   test("rejects unscoped lookup", async () => {
-    const herdr = new Herdr({ runner: async () => { throw new Error("must not run"); } });
+    const herdr = new Herdr({
+      runner: async () => {
+        throw new Error("must not run");
+      },
+    });
 
     await expect(listWorktreesForContext({}, herdr)).rejects.toThrow(/source workspace or cwd/);
   });
@@ -77,11 +84,13 @@ describe("worktree discovery", () => {
   });
 
   test("uses Herdr worktree list when available", async () => {
-    const herdr = new Herdr({ runner: async () => ({
-      stdout: '{"result":{"source":{"repo_root":"/repo"},"worktrees":[{"path":"/repo/wt","branch":"feat/x"}]}}',
-      stderr: "",
-      exitCode: 0,
-    }) });
+    const herdr = new Herdr({
+      runner: async () => ({
+        stdout: '{"result":{"source":{"repo_root":"/repo"},"worktrees":[{"path":"/repo/wt","branch":"feat/x"}]}}',
+        stderr: "",
+        exitCode: 0,
+      }),
+    });
 
     const rows = await listWorktreesForProject("/repo", herdr);
 
@@ -102,10 +111,12 @@ describe("worktree discovery", () => {
   test("does not hide malformed Herdr JSON", async () => {
     const herdr = new Herdr({ runner: async () => ({ stdout: "not json", stderr: "", exitCode: 0 }) });
 
-    await expect(listWorktreesForProject("/repo/main", herdr, async () => ({
-      stdout: "worktree /repo/main\nbranch refs/heads/main\n",
-      stderr: "",
-      exitCode: 0,
-    }))).rejects.toThrow(HerdrJsonError);
+    await expect(
+      listWorktreesForProject("/repo/main", herdr, async () => ({
+        stdout: "worktree /repo/main\nbranch refs/heads/main\n",
+        stderr: "",
+        exitCode: 0,
+      })),
+    ).rejects.toThrow(HerdrJsonError);
   });
 });

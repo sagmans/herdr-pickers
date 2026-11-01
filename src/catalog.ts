@@ -140,24 +140,29 @@ export function buildProjectTargets(
   const workspaceByPath = indexWorkspacesByPath(workspaces);
   const paths = uniqueSorted(projects);
   const matched = paths.map((path) => workspaceByPath.get(canonicalPathKey(path)));
-  const currentFlags = mostSpecificCurrent(paths.map((path, index) => ({
-    identity: isCurrentWorkspace(matched[index], current),
-    path,
-  })), current.cwd);
+  const currentFlags = mostSpecificCurrent(
+    paths.map((path, index) => ({
+      identity: isCurrentWorkspace(matched[index], current),
+      path,
+    })),
+    current.cwd,
+  );
   return paths.flatMap((path, index): ProjectTarget[] => {
     const workspace = matched[index];
     const label = basename(path);
-    return [{
-      kind: "project",
-      id: `project:${path}`,
-      path,
-      existingWorkspaceId: workspace?.workspaceId,
-      current: currentFlags[index] === true,
-      repo: label,
-      repoKey: canonicalPathKey(path),
-      boardLabel: label,
-      label,
-    }];
+    return [
+      {
+        kind: "project",
+        id: `project:${path}`,
+        path,
+        existingWorkspaceId: workspace?.workspaceId,
+        current: currentFlags[index] === true,
+        repo: label,
+        repoKey: canonicalPathKey(path),
+        boardLabel: label,
+        label,
+      },
+    ];
   });
 }
 
@@ -168,17 +173,24 @@ export function buildWorktreeTargets(
   current: CurrentContext = {},
 ): WorktreeTarget[] {
   const workspaceByPath = indexWorkspacesByPath(workspaces);
-  const visible = uniqueBy(worktrees.filter((worktree) => !worktree.isBare && !worktree.isPrunable), (worktree) => worktree.path);
+  const visible = uniqueBy(
+    worktrees.filter((worktree) => !worktree.isBare && !worktree.isPrunable),
+    (worktree) => worktree.path,
+  );
   const matched = visible.map((worktree) => workspaceByPath.get(canonicalPathKey(worktree.path)));
-  const currentFlags = mostSpecificCurrent(visible.map((worktree, index) => ({
-    identity: (!!current.workspaceId && worktree.openWorkspaceId === current.workspaceId)
-      || isCurrentWorkspace(matched[index], current),
-    path: worktree.path,
-  })), current.cwd);
-  return visible
-    .flatMap((worktree, index): WorktreeTarget[] => {
-      const workspace = matched[index];
-      return [{
+  const currentFlags = mostSpecificCurrent(
+    visible.map((worktree, index) => ({
+      identity:
+        (!!current.workspaceId && worktree.openWorkspaceId === current.workspaceId) ||
+        isCurrentWorkspace(matched[index], current),
+      path: worktree.path,
+    })),
+    current.cwd,
+  );
+  return visible.flatMap((worktree, index): WorktreeTarget[] => {
+    const workspace = matched[index];
+    return [
+      {
         kind: "worktree",
         id: `worktree:${worktree.path}`,
         path: worktree.path,
@@ -191,8 +203,9 @@ export function buildWorktreeTargets(
         boardLabel: worktreeBoardLabel(worktree),
         label: worktreeLabel(worktree),
         detail: worktreeDetail(worktree),
-      }];
-    });
+      },
+    ];
+  });
 }
 
 function indexWorkspacesById(workspaces: readonly WorkspaceRecord[]): Map<string, WorkspaceRecord> {
@@ -232,10 +245,11 @@ function indexWorkspacesByPath(workspaces: readonly WorkspaceRecord[]): Map<stri
 }
 
 function isBareRootWorkspace(workspace: WorkspaceRecord): boolean {
-  const checkoutPath = workspace.worktree?.checkoutPath
-    ?? workspace.worktree?.path
-    ?? (workspace.worktree?.isLinkedWorktree === false ? workspace.worktree.repoRoot : undefined)
-    ?? workspace.cwd;
+  const checkoutPath =
+    workspace.worktree?.checkoutPath ??
+    workspace.worktree?.path ??
+    (workspace.worktree?.isLinkedWorktree === false ? workspace.worktree.repoRoot : undefined) ??
+    workspace.cwd;
   return checkoutPath !== undefined && isBareRepository(checkoutPath);
 }
 
@@ -244,7 +258,9 @@ function workspaceBoardLabel(workspace: WorkspaceRecord): string {
 }
 
 function workspaceRepoName(workspace: WorkspaceRecord): string | undefined {
-  return workspace.worktree?.repoName ?? (workspace.worktree?.repoRoot ? basename(workspace.worktree.repoRoot) : undefined);
+  return (
+    workspace.worktree?.repoName ?? (workspace.worktree?.repoRoot ? basename(workspace.worktree.repoRoot) : undefined)
+  );
 }
 
 /**
@@ -267,7 +283,9 @@ function workspaceLabelWithRelation(workspace: WorkspaceRecord): string {
   const repo = workspace.worktree?.repoName;
   const linked = workspace.worktree?.isLinkedWorktree;
   if (repo && linked === true) {
-    const checkoutName = basename(workspace.worktree?.checkoutPath ?? workspace.worktree?.path ?? workspace.cwd ?? name);
+    const checkoutName = basename(
+      workspace.worktree?.checkoutPath ?? workspace.worktree?.path ?? workspace.cwd ?? name,
+    );
     const worktreeName = name !== repo ? name : checkoutName;
     return worktreeName && worktreeName !== repo ? `${repo} ▸ ${worktreeName}` : `${repo} ▸ worktree`;
   }
@@ -310,14 +328,13 @@ function agentFocusSelector(
     return (agent) => agent.paneId === paneId;
   }
   const workspaceId = current.workspaceId;
-  const inSourceWorkspace = (agent: AgentRecord): boolean => workspaceId !== undefined && agent.workspaceId === workspaceId;
+  const inSourceWorkspace = (agent: AgentRecord): boolean =>
+    workspaceId !== undefined && agent.workspaceId === workspaceId;
   if (workspaceId && agents.some(inSourceWorkspace)) {
     // A flagged sibling inside the source workspace stays closer to the live
     // focus than an arbitrary agent flagged by an older focus change.
     const flaggedSibling = agents.some((agent) => inSourceWorkspace(agent) && agent.focused === true);
-    return flaggedSibling
-      ? (agent) => inSourceWorkspace(agent) && agent.focused === true
-      : inSourceWorkspace;
+    return flaggedSibling ? (agent) => inSourceWorkspace(agent) && agent.focused === true : inSourceWorkspace;
   }
   return (agent, workspace) => agent.focused === true || workspace?.focused === true;
 }
@@ -341,7 +358,9 @@ interface CurrentCandidate {
 function mostSpecificCurrent(candidates: readonly CurrentCandidate[], cwd: string | undefined): boolean[] {
   if (candidates.some((candidate) => candidate.identity)) return candidates.map((candidate) => candidate.identity);
   if (!cwd) return candidates.map(() => false);
-  const enclosing = candidates.map((candidate) => isPathWithin(candidate.path, cwd) ? canonicalPathKey(candidate.path) : undefined);
+  const enclosing = candidates.map((candidate) =>
+    isPathWithin(candidate.path, cwd) ? canonicalPathKey(candidate.path) : undefined,
+  );
   // Every enclosing key is an ancestor of the same cwd, so the longest is the deepest.
   const deepest = Math.max(NO_PATH_DEPTH, ...enclosing.map((key) => key?.length ?? NO_PATH_DEPTH));
   return enclosing.map((key) => key !== undefined && key.length === deepest);
@@ -373,7 +392,7 @@ function agentRepoKey(agent: AgentRecord, workspace: WorkspaceRecord | undefined
 }
 
 function agentLabel(agent: AgentRecord, workspace: WorkspaceRecord | undefined): string {
-  const where = workspace ? workspaceLabel(workspace) : (agent.cwd ? basename(agent.cwd) : undefined);
+  const where = workspace ? workspaceLabel(workspace) : agent.cwd ? basename(agent.cwd) : undefined;
   return where ? `${where} ▸ ${agent.label}` : agent.label;
 }
 

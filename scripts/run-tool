@@ -1,0 +1,17 @@
+#!/bin/sh
+# Runs a repo tool (bun, tsc through bun) on the toolchain pinned in
+# mise.toml and checksummed in mise.lock, so git hooks check with the same
+# versions contributors and the smoke workflow use. Without mise the tool on
+# PATH runs, so the hooks still work on a plain machine.
+# Usage: scripts/run-tool <command> [args...]
+set -eu
+
+if [ "$#" -eq 0 ]; then
+	echo "run-tool: usage: scripts/run-tool <command> [args...]" >&2
+	exit 2
+fi
+
+if command -v mise >/dev/null 2>&1; then
+	exec mise exec -- "$@"
+fi
+exec "$@"

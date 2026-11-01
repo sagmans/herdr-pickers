@@ -49,7 +49,11 @@ export interface ParsedInput {
  * Never emits events for unknown escape sequences. Events from the first
  * `stalePrefixLength` characters are dropped as leftovers of a previous mode.
  */
-export function parseInput(data: string, keymap: PickerKeymap = DEFAULT_PICKER_KEYMAP, stalePrefixLength = 0): ParsedInput {
+export function parseInput(
+  data: string,
+  keymap: PickerKeymap = DEFAULT_PICKER_KEYMAP,
+  stalePrefixLength = 0,
+): ParsedInput {
   const events: InputEvent[] = [];
   let sequenceStart = 0;
   const emit = (event: InputEvent): void => {
@@ -179,7 +183,10 @@ export class InputFramer {
   private pending: string;
   private discardFragment: boolean;
 
-  constructor(private readonly shared: { remainder: string }, private readonly keymap: PickerKeymap) {
+  constructor(
+    private readonly shared: { remainder: string },
+    private readonly keymap: PickerKeymap,
+  ) {
     this.pending = shared.remainder;
     this.discardFragment = this.pending.length > 0;
   }

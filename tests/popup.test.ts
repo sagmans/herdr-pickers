@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { join } from "node:path";
 
-import { closePickerSurface, POPUP_SURFACE, type PickerSurface } from "../src/client/popup.ts";
+import { closePickerSurface, type PickerSurface, POPUP_SURFACE } from "../src/client/popup.ts";
 
 const SOCKET_PATH = "/tmp/herdr.sock";
 const PANE_ID = "w1:p1";
@@ -17,7 +17,9 @@ const REPLY_PAUSE_MS = 10;
 describe("picker dismissal", () => {
   test("leaves an unidentified popup to native process-exit cleanup", async () => {
     const writes: string[] = [];
-    await closePickerSurface(POPUP_SURFACE, SOCKET_PATH, async (_path, payload) => { writes.push(payload); });
+    await closePickerSurface(POPUP_SURFACE, SOCKET_PATH, async (_path, payload) => {
+      writes.push(payload);
+    });
     expect(writes).toEqual([]);
   });
 
@@ -33,7 +35,9 @@ describe("picker dismissal", () => {
     expect(writes).toHaveLength(1);
     expect(writes[0]?.path).toBe(SOCKET_PATH);
     expect(JSON.parse(writes[0]?.payload.trim() ?? "{}")).toEqual({
-      id: "herdr-pickers:overlay-close", method: "plugin.pane.close", params: { pane_id: PANE_ID },
+      id: "herdr-pickers:overlay-close",
+      method: "plugin.pane.close",
+      params: { pane_id: PANE_ID },
     });
   });
 
@@ -42,10 +46,12 @@ describe("picker dismissal", () => {
     const path = join(root, "api.sock");
     const server = createServer({ allowHalfOpen: true });
     let received!: () => void;
-    const requestReceived = new Promise<void>(resolve => { received = resolve; });
+    const requestReceived = new Promise<void>((resolve) => {
+      received = resolve;
+    });
     let reply!: () => void;
     let disconnect = () => {};
-    server.on("connection", socket => {
+    server.on("connection", (socket) => {
       disconnect = () => socket.destroy();
       socket.on("error", () => {});
       socket.once("data", () => {
@@ -55,10 +61,11 @@ describe("picker dismissal", () => {
       });
     });
     try {
-      await new Promise<void>(resolve => server.listen(path, resolve));
+      await new Promise<void>((resolve) => server.listen(path, resolve));
       let completed = false;
-      const close = closePickerSurface(OVERLAY_SURFACE, path)
-        .then(() => { completed = true; });
+      const close = closePickerSurface(OVERLAY_SURFACE, path).then(() => {
+        completed = true;
+      });
       await requestReceived;
       await Bun.sleep(REPLY_PAUSE_MS);
       expect(completed).toBe(false);

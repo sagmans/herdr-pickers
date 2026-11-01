@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Formatting and lint drift is cheapest to fix before it is committed, and
+# Biome on a few files takes milliseconds. The check reads the staged blobs,
+# not the working tree, so `commit -a`, `commit <paths>` and partly staged
+# files are judged by exactly what the commit will hold, and an unstaged
+# work-in-progress file never blocks the commit. The staged biome.jsonc is
+# used, so a config change is checked together with the code it governs.
+set -euo pipefail
+# shellcheck disable=SC1090,SC1091  # path exported by .githooks/lib/run-local.sh
+. "${HOOK_HELPERS:?run from .githooks (scripts/setup-hooks)}"
+
+CONFIG_FILE=biome.jsonc
+# Added, copied, modified and renamed paths; deletions have no content to check.
+DIFF_FILTER=ACMR
+
+top=$(git rev-parse --show-toplevel)
+cd "$top"
+
+files=()
+while IFS= read -r -d '' path; do
+	files+=("$path")
+done < <(staged_git diff --cached --name-only -z --diff-filter="$DIFF_FILTER")
+if [ "${#files[@]}" -eq 0 ]; then
+	exit 0
+fi
+
+if ! staged_git cat-file -e ":$CONFIG_FILE" 2>/dev/null; then
+	echo "pre-commit: $CONFIG_FILE is not in the index; Biome cannot check without it" >&2
+	exit 1
+fi
+
+snapshot=$(mktemp -d "${TMPDIR:-/tmp}/biome-staged.XXXXXX")
+# Only the mktemp directory made above, never a computed parent.
+trap 'case "$snapshot" in */biome-staged.*) rm -rf -- "$snapshot" ;; esac' EXIT
+# Biome matches override paths against canonical file paths; through a
+# symlinked temp dir (macOS /tmp, /var) the overrides would silently not apply.
+snapshot=$(cd "$snapshot" && pwd -P)
+
+# Write the staged blobs (and the staged config) into the snapshot.
+{
+	printf '%s\0' "${files[@]}"
+	printf '%s\0' "$CONFIG_FILE"
+} | staged_git checkout-index -z --stdin --force --prefix="$snapshot/"
+
+echo "pre-commit: biome check (${#files[@]} staged file(s))"
+# The snapshot has no .git, so VCS integration is off; the file list is
+# already exactly the staged set. Unknown file types (Markdown, TOML) are
+# not Biome's to judge, so they are skipped instead of failing.
+cd "$snapshot"
+"$top/scripts/biome" check \
+	--config-path="$snapshot/$CONFIG_FILE" \
+	--vcs-enabled=false \
+	--files-ignore-unknown=true \
+	--no-errors-on-unmatched \
+	--error-on-warnings \
+	-- "${files[@]}"

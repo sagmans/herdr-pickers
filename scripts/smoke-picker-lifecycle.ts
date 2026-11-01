@@ -9,13 +9,13 @@ import {
   OWNER_QUERY,
   OWNERSHIP_DATABASE_NAME,
   PICKER_PANE_LABEL,
+  type PickerLifecycleSmokeOptions,
+  type PickerPlacement,
   PLUGIN_ID,
   processAlive,
   READ_REQUEST,
-  WORKSPACES_PICKER_PROMPT,
-  type PickerLifecycleSmokeOptions,
-  type PickerPlacement,
   type SmokeSession,
+  WORKSPACES_PICKER_PROMPT,
 } from "./smoke-support.ts";
 import { POLL_TIMEOUT_EXTENDED_MS } from "./smoke-timing.ts";
 
@@ -64,10 +64,21 @@ export async function runPickerLifecycleSmoke(options: PickerLifecycleSmokeOptio
     () => findFile(options.root, OWNERSHIP_DATABASE_NAME),
     POLL_TIMEOUT_EXTENDED_MS,
   );
-  const largeWorkspace = options.primary.run(["workspace", "create", "--cwd", options.repo, "--label", LARGE_SESSION_LABEL, "--no-focus"]);
+  const largeWorkspace = options.primary.run([
+    "workspace",
+    "create",
+    "--cwd",
+    options.repo,
+    "--label",
+    LARGE_SESSION_LABEL,
+    "--no-focus",
+  ]);
   options.check("large-session fixture creates", largeWorkspace.code === 0);
   const snapshot = options.primary.run(["api", "snapshot"]);
-  options.check("session snapshot exceeds focus-event budget", snapshot.code === 0 && Buffer.byteLength(snapshot.stdout) > FOCUS_EVENT_BUDGET_BYTES);
+  options.check(
+    "session snapshot exceeds focus-event budget",
+    snapshot.code === 0 && Buffer.byteLength(snapshot.stdout) > FOCUS_EVENT_BUDGET_BYTES,
+  );
   await runSingletonCase(options, databasePath, "popup");
   await runSingletonCase(options, databasePath, "overlay");
   await runOverlayNavigationCases(options, databasePath);
@@ -87,20 +98,33 @@ async function runSingletonCase(
   options.primary.input(options.dispatchWorkspaceLabel);
   await Bun.sleep(INPUT_SETTLE_MS);
 
-  const previousLogs = new Set(resultRows(options.primary.run(["plugin", "log", "list"]).stdout, "logs").map(row => row.log_id));
-  const burst = await Promise.all(Array.from({ length: BURST_SIZE }, (_, index) => {
-    const action = BURST_ACTIONS[index % BURST_ACTIONS.length]!;
-    return options.primary.runAsync(["plugin", "action", "invoke", `${PLUGIN_ID}.${action}`]);
-  }));
+  const previousLogs = new Set(
+    resultRows(options.primary.run(["plugin", "log", "list"]).stdout, "logs").map((row) => row.log_id),
+  );
+  const burst = await Promise.all(
+    Array.from({ length: BURST_SIZE }, (_, index) => {
+      const action = BURST_ACTIONS[index % BURST_ACTIONS.length]!;
+      return options.primary.runAsync(["plugin", "action", "invoke", `${PLUGIN_ID}.${action}`]);
+    }),
+  );
   const failed = burst.filter((result) => result.code !== 0);
-  options.check(`${placement} burst opens exit cleanly`, failed.length === 0, failed.map((result) => result.stderr.trim()).join("; "));
+  options.check(
+    `${placement} burst opens exit cleanly`,
+    failed.length === 0,
+    failed.map((result) => result.stderr.trim()).join("; "),
+  );
 
   // Invocation acknowledgement precedes action completion; Enter must not race queued opens.
-  await options.poll(`${placement} burst actions complete`, () => {
-    const logs = resultRows(options.primary.run(["plugin", "log", "list"]).stdout, "logs")
-      .filter(row => !previousLogs.has(row.log_id) && typeof row.action_id === "string" && row.status === "succeeded");
-    return logs.length === BURST_SIZE ? "completed" : undefined;
-  }, POLL_TIMEOUT_EXTENDED_MS);
+  await options.poll(
+    `${placement} burst actions complete`,
+    () => {
+      const logs = resultRows(options.primary.run(["plugin", "log", "list"]).stdout, "logs").filter(
+        (row) => !previousLogs.has(row.log_id) && typeof row.action_id === "string" && row.status === "succeeded",
+      );
+      return logs.length === BURST_SIZE ? "completed" : undefined;
+    },
+    POLL_TIMEOUT_EXTENDED_MS,
+  );
   const retained = ownerForSession(databasePath, opened.owner.session);
   options.check(
     `${placement} burst retains one picker owner`,
@@ -121,22 +145,36 @@ async function runSingletonCase(
   options.check(`${placement} final replacement action starts`, lastAction.code === 0);
   await options.poll(`${placement} final replacement is acknowledged`, () => {
     const row = readRequest(databasePath, opened.owner.session);
-    return row?.mode === "workspaces" && row.token !== previousRequest && row.acknowledged === opened.owner.token ? row.mode : undefined;
+    return row?.mode === "workspaces" && row.token !== previousRequest && row.acknowledged === opened.owner.token
+      ? row.mode
+      : undefined;
   });
   // Request acknowledgement precedes catalog readiness; this fixture's load must finish before Enter.
   await Bun.sleep(INPUT_SETTLE_MS);
   options.primary.input(KEY_ENTER);
-  await waitForWorkspaceFocus(options, options.primary, options.firstWorkspaceId, `${placement} replacement clears the previous query`);
+  await waitForWorkspaceFocus(
+    options,
+    options.primary,
+    options.firstWorkspaceId,
+    `${placement} replacement clears the previous query`,
+  );
   await waitForPickerExit(options, opened.owner, `${placement} burst picker child exits`);
-  if (opened.paneId) await waitForPaneRemoval(options, options.primary, opened.paneId, "overlay burst picker pane closes");
+  if (opened.paneId)
+    await waitForPaneRemoval(options, options.primary, opened.paneId, "overlay burst picker pane closes");
 
   const reopened = await openPicker(options, databasePath, options.primary, placement, opened.owner.session);
   options.primary.input(options.firstWorkspaceLabel);
   await Bun.sleep(INPUT_SETTLE_MS);
   options.primary.input(KEY_ENTER);
-  await waitForWorkspaceFocus(options, options.primary, options.firstWorkspaceId, `${placement} reopened picker dispatches`);
+  await waitForWorkspaceFocus(
+    options,
+    options.primary,
+    options.firstWorkspaceId,
+    `${placement} reopened picker dispatches`,
+  );
   await waitForPickerExit(options, reopened.owner, `${placement} reopened picker child exits`);
-  if (reopened.paneId) await waitForPaneRemoval(options, options.primary, reopened.paneId, "overlay reopened picker pane closes");
+  if (reopened.paneId)
+    await waitForPaneRemoval(options, options.primary, reopened.paneId, "overlay reopened picker pane closes");
 }
 
 async function runOverlayNavigationCases(options: PickerLifecycleSmokeOptions, databasePath: string): Promise<void> {
@@ -146,9 +184,10 @@ async function runOverlayNavigationCases(options: PickerLifecycleSmokeOptions, d
   const paneDestination = focusedPaneId(options.primary);
   options.check("pane navigation destination resolves", paneDestination !== undefined, "no focused pane");
   const panePicker = await openPicker(options, databasePath, options.primary, "overlay", sessionKey);
-  const direction = panePicker.paneId && paneDestination
-    ? directionToPane(options.primary, panePicker.paneId, paneDestination)
-    : undefined;
+  const direction =
+    panePicker.paneId && paneDestination
+      ? directionToPane(options.primary, panePicker.paneId, paneDestination)
+      : undefined;
   options.check("picker pane has the opener as a neighbor", direction !== undefined, "no destination direction");
   const paneFocused = options.primary.run(["pane", "focus", "--direction", direction!, "--pane", panePicker.paneId!]);
   options.check("pane navigation succeeds", paneFocused.code === 0, paneFocused.stderr.trim());
@@ -159,8 +198,15 @@ async function runOverlayNavigationCases(options: PickerLifecycleSmokeOptions, d
   const focusedWorkspace = focusedWorkspaceId(options.primary);
   const beforeTabs = new Set(listTabs(options.primary, focusedWorkspace).map((tab) => tab.tabId));
   const createdTab = options.primary.run([
-    "tab", "create", "--workspace", focusedWorkspace!, "--cwd", options.repo,
-    "--label", TAB_DESTINATION_LABEL, "--no-focus",
+    "tab",
+    "create",
+    "--workspace",
+    focusedWorkspace!,
+    "--cwd",
+    options.repo,
+    "--label",
+    TAB_DESTINATION_LABEL,
+    "--no-focus",
   ]);
   options.check("tab navigation destination creates", createdTab.code === 0, createdTab.stderr.trim());
   const tabDestination = await options.poll("tab navigation destination resolves", () => {
@@ -178,13 +224,25 @@ async function runOverlayNavigationCases(options: PickerLifecycleSmokeOptions, d
   });
   options.check("tab navigation keeps destination focused", true);
 
-  const workspaceDestination = listWorkspaceIds(options.primary).find((workspaceId) => workspaceId !== focusedWorkspaceId(options.primary));
+  const workspaceDestination = listWorkspaceIds(options.primary).find(
+    (workspaceId) => workspaceId !== focusedWorkspaceId(options.primary),
+  );
   options.check("workspace navigation destination resolves", workspaceDestination !== undefined, "no other workspace");
   const workspacePicker = await openPicker(options, databasePath, options.primary, "overlay", sessionKey);
   focusWorkspace(options.primary, workspaceDestination!, options.check);
   await waitForPickerExit(options, workspacePicker.owner, "workspace navigation exits picker child");
-  await waitForPaneRemoval(options, options.primary, workspacePicker.paneId!, "workspace navigation closes picker pane");
-  await waitForWorkspaceFocus(options, options.primary, workspaceDestination!, "workspace navigation keeps destination focused");
+  await waitForPaneRemoval(
+    options,
+    options.primary,
+    workspacePicker.paneId!,
+    "workspace navigation closes picker pane",
+  );
+  await waitForWorkspaceFocus(
+    options,
+    options.primary,
+    workspaceDestination!,
+    "workspace navigation keeps destination focused",
+  );
 
   const reopened = await openPicker(options, databasePath, options.primary, "overlay", sessionKey);
   options.primary.input(options.firstWorkspaceLabel);
@@ -200,9 +258,10 @@ async function runIndependentSessionsCase(options: PickerLifecycleSmokeOptions, 
   const secondaryConfig = options.secondary.run(["plugin", "config-dir", PLUGIN_ID]);
   options.check(
     "two sessions share the isolated plugin registry",
-    primaryConfig.code === 0 && secondaryConfig.code === 0
-      && primaryConfig.stdout.trim() === secondaryConfig.stdout.trim()
-      && primaryConfig.stdout.trim() === options.pluginConfigDir,
+    primaryConfig.code === 0 &&
+      secondaryConfig.code === 0 &&
+      primaryConfig.stdout.trim() === secondaryConfig.stdout.trim() &&
+      primaryConfig.stdout.trim() === options.pluginConfigDir,
     `${primaryConfig.stdout.trim()} / ${secondaryConfig.stdout.trim()}`,
   );
 
@@ -211,13 +270,20 @@ async function runIndependentSessionsCase(options: PickerLifecycleSmokeOptions, 
   const primary = await openPicker(options, databasePath, options.primary, "overlay", primarySessionKey);
 
   writePlacement(options, "popup");
-  const secondary = await openPicker(options, databasePath, options.secondary, "popup", undefined, new Set([primary.owner.session]));
+  const secondary = await openPicker(
+    options,
+    databasePath,
+    options.secondary,
+    "popup",
+    undefined,
+    new Set([primary.owner.session]),
+  );
   const activeOwners = readOwners(databasePath).filter((owner) => pickerAlive(owner));
   options.check(
     "shared registry sessions have independent live owners",
-    activeOwners.length === 2
-      && primary.owner.session !== secondary.owner.session
-      && primary.owner.picker !== secondary.owner.picker,
+    activeOwners.length === 2 &&
+      primary.owner.session !== secondary.owner.session &&
+      primary.owner.picker !== secondary.owner.picker,
     activeOwners.map((owner) => `${owner.placement}:${String(owner.picker)}`).join(", "),
   );
 
@@ -243,33 +309,45 @@ async function openPicker(
   const invoked = session.run(["plugin", "action", "invoke", `${PLUGIN_ID}.workspaces`]);
   options.check(`${session.label} ${placement} picker opens`, invoked.code === 0, invoked.stderr.trim());
 
-  const serialized = await options.poll(`${session.label} ${placement} picker claims ownership`, () => {
-    const owner = readOwners(databasePath).find((candidate) => {
-      if (candidate.picker === null || !pickerAlive(candidate) || candidate.placement !== placement) return false;
-      if (sessionKey) return candidate.session === sessionKey && candidate.token !== previousToken;
-      return !excludedSessions.has(candidate.session);
-    });
-    return owner ? JSON.stringify(owner) : undefined;
-  }, POLL_TIMEOUT_EXTENDED_MS);
+  const serialized = await options.poll(
+    `${session.label} ${placement} picker claims ownership`,
+    () => {
+      const owner = readOwners(databasePath).find((candidate) => {
+        if (candidate.picker === null || !pickerAlive(candidate) || candidate.placement !== placement) return false;
+        if (sessionKey) return candidate.session === sessionKey && candidate.token !== previousToken;
+        return !excludedSessions.has(candidate.session);
+      });
+      return owner ? JSON.stringify(owner) : undefined;
+    },
+    POLL_TIMEOUT_EXTENDED_MS,
+  );
   const owner = parseOwner(JSON.parse(serialized) as unknown);
-  await options.poll(`${session.label} ${placement} picker renders`, () => {
-    // Herdr paints client diffs, so a reopened overlay whose prompt row is
-    // already on screen can leave the prompt out of the raw stream; the pane
-    // buffer is the authoritative frame for the placement the probe can read.
-    if (placement === "overlay") {
-      if (owner.pane === null) return undefined;
-      const frame = session.run(["pane", "read", owner.pane, "--source", "visible", "--format", "text"]);
-      return frame.code === 0 && frame.stdout.includes(WORKSPACES_PICKER_PROMPT) ? "rendered" : undefined;
-    }
-    const output = readFileSync(session.rawOutputPath).subarray(outputOffset).toString("utf8");
-    return output.includes(WORKSPACES_PICKER_PROMPT) ? "rendered" : undefined;
-  }, POLL_TIMEOUT_EXTENDED_MS);
+  await options.poll(
+    `${session.label} ${placement} picker renders`,
+    () => {
+      // Herdr paints client diffs, so a reopened overlay whose prompt row is
+      // already on screen can leave the prompt out of the raw stream; the pane
+      // buffer is the authoritative frame for the placement the probe can read.
+      if (placement === "overlay") {
+        if (owner.pane === null) return undefined;
+        const frame = session.run(["pane", "read", owner.pane, "--source", "visible", "--format", "text"]);
+        return frame.code === 0 && frame.stdout.includes(WORKSPACES_PICKER_PROMPT) ? "rendered" : undefined;
+      }
+      const output = readFileSync(session.rawOutputPath).subarray(outputOffset).toString("utf8");
+      return output.includes(WORKSPACES_PICKER_PROMPT) ? "rendered" : undefined;
+    },
+    POLL_TIMEOUT_EXTENDED_MS,
+  );
 
   if (placement === "popup") return { owner };
-  const paneId = await options.poll(`${session.label} overlay picker pane resolves`, () => {
-    const pane = listPanes(session).find((candidate) => candidate.label === PICKER_PANE_LABEL && candidate.focused);
-    return pane?.paneId;
-  }, POLL_TIMEOUT_EXTENDED_MS);
+  const paneId = await options.poll(
+    `${session.label} overlay picker pane resolves`,
+    () => {
+      const pane = listPanes(session).find((candidate) => candidate.label === PICKER_PANE_LABEL && candidate.focused);
+      return pane?.paneId;
+    },
+    POLL_TIMEOUT_EXTENDED_MS,
+  );
   options.check("overlay owner records its pane", owner.pane === paneId, `${String(owner.pane)} / ${paneId}`);
   return { owner, paneId };
 }
@@ -281,22 +359,28 @@ function writePlacement(options: PickerLifecycleSmokeOptions, placement: PickerP
 
 function readRequest(databasePath: string, session: string): RequestRow | null {
   return readOwnershipDatabase(databasePath, (database) =>
-    database.query<RequestRow, [string]>(READ_REQUEST).get(session));
+    database.query<RequestRow, [string]>(READ_REQUEST).get(session),
+  );
 }
 
 function readOwners(databasePath: string): OwnerRow[] {
   return readOwnershipDatabase(databasePath, (database) =>
-    database.query<unknown, []>(OWNER_QUERY).all().map(parseOwner));
+    database.query<unknown, []>(OWNER_QUERY).all().map(parseOwner),
+  );
 }
 
 function parseOwner(value: unknown): OwnerRow {
   if (!value || typeof value !== "object") throw new Error("invalid picker owner row");
   const row = value as Record<string, unknown>;
   const placement = row.placement;
-  if (typeof row.session !== "string" || typeof row.token !== "string"
-    || typeof row.opener !== "number" || (typeof row.picker !== "number" && row.picker !== null)
-    || (placement !== "popup" && placement !== "overlay")
-    || (typeof row.pane !== "string" && row.pane !== null)) {
+  if (
+    typeof row.session !== "string" ||
+    typeof row.token !== "string" ||
+    typeof row.opener !== "number" ||
+    (typeof row.picker !== "number" && row.picker !== null) ||
+    (placement !== "popup" && placement !== "overlay") ||
+    (typeof row.pane !== "string" && row.pane !== null)
+  ) {
     throw new Error("invalid picker owner row");
   }
   return {
@@ -322,7 +406,7 @@ function onlyOwnerSession(databasePath: string): string {
 const pickerAlive = (owner: OwnerRow): boolean => owner.picker !== null && processAlive(owner.picker);
 
 async function waitForPickerExit(options: PickerLifecycleSmokeOptions, owner: OwnerRow, label: string): Promise<void> {
-  await options.poll(label, () => owner.picker !== null && !processAlive(owner.picker) ? owner.token : undefined);
+  await options.poll(label, () => (owner.picker !== null && !processAlive(owner.picker) ? owner.token : undefined));
   options.check(label, true);
 }
 
@@ -332,7 +416,7 @@ async function waitForPaneRemoval(
   paneId: string,
   label: string,
 ): Promise<void> {
-  await options.poll(label, () => listPanes(session).some((pane) => pane.paneId === paneId) ? undefined : paneId);
+  await options.poll(label, () => (listPanes(session).some((pane) => pane.paneId === paneId) ? undefined : paneId));
   options.check(label, true);
 }
 
@@ -342,7 +426,7 @@ async function waitForWorkspaceFocus(
   workspaceId: string,
   label: string,
 ): Promise<void> {
-  await options.poll(label, () => focusedWorkspaceId(session) === workspaceId ? workspaceId : undefined);
+  await options.poll(label, () => (focusedWorkspaceId(session) === workspaceId ? workspaceId : undefined));
   options.check(label, true);
 }
 
@@ -352,7 +436,7 @@ async function waitForPaneFocus(
   paneId: string,
   label: string,
 ): Promise<void> {
-  await options.poll(label, () => focusedPaneId(session) === paneId ? paneId : undefined);
+  await options.poll(label, () => (focusedPaneId(session) === paneId ? paneId : undefined));
   options.check(label, true);
 }
 
@@ -365,14 +449,16 @@ function focusedWorkspaceId(session: SmokeSession): string | undefined {
   const result = session.run(["workspace", "list"]);
   if (result.code !== 0) return undefined;
   const rows = resultRows(result.stdout, "workspaces");
-  return rows.find((row) => row.focused === true && typeof row.workspace_id === "string")?.workspace_id as string | undefined;
+  return rows.find((row) => row.focused === true && typeof row.workspace_id === "string")?.workspace_id as
+    | string
+    | undefined;
 }
 
 function listWorkspaceIds(session: SmokeSession): string[] {
   const result = session.run(["workspace", "list"]);
   if (result.code !== 0) return [];
   return resultRows(result.stdout, "workspaces")
-    .map((row) => typeof row.workspace_id === "string" ? row.workspace_id : undefined)
+    .map((row) => (typeof row.workspace_id === "string" ? row.workspace_id : undefined))
     .filter((value): value is string => value !== undefined);
 }
 
@@ -381,11 +467,13 @@ function listPanes(session: SmokeSession): PaneRow[] {
   if (result.code !== 0) throw new Error("Cannot verify picker pane teardown");
   return resultRows(result.stdout, "panes").flatMap((row) => {
     if (typeof row.pane_id !== "string") throw new Error("Invalid picker pane identity");
-    return [{
-      paneId: row.pane_id,
-      focused: row.focused === true,
-      ...(typeof row.label === "string" ? { label: row.label } : {}),
-    }];
+    return [
+      {
+        paneId: row.pane_id,
+        focused: row.focused === true,
+        ...(typeof row.label === "string" ? { label: row.label } : {}),
+      },
+    ];
   });
 }
 
@@ -402,7 +490,11 @@ function listTabs(session: SmokeSession, workspaceId?: string): TabRow[] {
   });
 }
 
-function directionToPane(session: SmokeSession, sourcePaneId: string, destinationPaneId: string): (typeof PANE_DIRECTIONS)[number] | undefined {
+function directionToPane(
+  session: SmokeSession,
+  sourcePaneId: string,
+  destinationPaneId: string,
+): (typeof PANE_DIRECTIONS)[number] | undefined {
   return PANE_DIRECTIONS.find((direction) => {
     const neighbor = session.run(["pane", "neighbor", "--direction", direction, "--pane", sourcePaneId]);
     return neighbor.code === 0 && findId(neighbor.stdout, "neighbor_pane_id") === destinationPaneId;
@@ -432,7 +524,8 @@ function resultRows(stdout: string, key: string): Array<Record<string, unknown>>
   try {
     const parsed = JSON.parse(stdout) as { result?: Record<string, unknown> };
     const rows = parsed.result?.[key];
-    if (!Array.isArray(rows) || rows.some(row => !row || typeof row !== "object")) throw new Error("Invalid smoke response");
+    if (!Array.isArray(rows) || rows.some((row) => !row || typeof row !== "object"))
+      throw new Error("Invalid smoke response");
     return rows as Array<Record<string, unknown>>;
   } catch {
     throw new Error("Cannot verify smoke response rows");

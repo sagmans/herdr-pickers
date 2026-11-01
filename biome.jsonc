@@ -1,0 +1,42 @@
+// Biome is the formatter and linter for every TypeScript and JSON file here.
+// The git hooks run it with --error-on-warnings, so a warning blocks a commit
+// just like an error; every relaxation below says why it is safe.
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  // Reuse .gitignore so node_modules, coverage and local env files are never read.
+  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
+  // An unknown file type is an error, so a new language cannot slip past unchecked.
+  "files": { "ignoreUnknown": false },
+  // Matches the existing two-space, double-quote style. 120 columns gave the
+  // smallest reformat of the code base when the formatter was introduced.
+  "formatter": { "enabled": true, "indentStyle": "space", "indentWidth": 2, "lineWidth": 120 },
+  "linter": {
+    "enabled": true,
+    // "all" also turns on framework rules for Qwik/React and contradictory
+    // style rules (for example noTernary), so the curated set is the strictest
+    // useful baseline; warnings still fail through --error-on-warnings.
+    "rules": { "preset": "recommended" }
+  },
+  "assist": { "enabled": true, "actions": { "source": { "organizeImports": "on" } } },
+  "overrides": [
+    {
+      // These files exist to find and strip terminal control sequences
+      // (ESC, C0/C1 controls, OSC/CSI), so a control character in a regex is
+      // the intended pattern, not a typo.
+      "includes": [
+        "src/util/terminal-text.ts",
+        "src/terminal-picker-input.ts",
+        "tests/terminal-picker.test.ts",
+        "tests/terminal-picker-view.test.ts"
+      ],
+      "linter": { "rules": { "suspicious": { "noControlCharactersInRegex": "off" } } }
+    },
+    {
+      // tsconfig sets noUncheckedIndexedAccess, so tests and smoke scripts use
+      // `!` on fixtures they just built. A wrong assertion there fails the test
+      // or smoke run at once; guards would only add noise. Source code keeps the rule.
+      "includes": ["tests/**", "scripts/**"],
+      "linter": { "rules": { "style": { "noNonNullAssertion": "off" } } }
+    }
+  ]
+}

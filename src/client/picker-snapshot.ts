@@ -2,14 +2,18 @@
 // event subscription socket in ./picker-focus.ts never multiplexes requests.
 import { runArgv } from "../util/subprocess.ts";
 import { herdrBinary } from "./herdr.ts";
-import { parsePickerSnapshotResponse, type PickerFocusLifecycleMessage } from "./types.ts";
+import { type PickerFocusLifecycleMessage, parsePickerSnapshotResponse } from "./types.ts";
 
 const SNAPSHOT_ARGS = ["api", "snapshot"] as const;
 const MAX_SNAPSHOT_BYTES = 1024 * 1024;
 const SNAPSHOT_FAILURE = "Picker focus snapshot failed";
 
 /** Current focus for `paneId` on the given socket; any Herdr failure or oversized output rejects. */
-export async function readPickerSnapshot(socketPath: string, paneId: string, signal: AbortSignal): Promise<PickerFocusLifecycleMessage> {
+export async function readPickerSnapshot(
+  socketPath: string,
+  paneId: string,
+  signal: AbortSignal,
+): Promise<PickerFocusLifecycleMessage> {
   // The native client writes before Herdr enters its 100 ms initial-read poll.
   const result = await runArgv([herdrBinary(), ...SNAPSHOT_ARGS], {
     signal,

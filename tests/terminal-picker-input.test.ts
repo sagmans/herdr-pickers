@@ -21,8 +21,8 @@ const C1_COLOR_SEQUENCE = "\u009b31m";
 const VIM_KEYMAP_TOML = '[keymap]\nup = ["up", "ctrl-k"]\ndown = ["down", "ctrl-j"]\n';
 const CONTROL_ONLY_KEYMAP_TOML = '[keymap]\nup = ["ctrl-k"]\ndown = ["ctrl-j"]\n';
 const CTRL_H_KEYMAP_TOML = '[keymap]\nup = ["ctrl-h"]\n';
-const CUSTOM_INPUT = KEY_CTRL_K + KEY_CTRL_J + KEY_ENTER + KEY_CTRL_P + KEY_CTRL_N + "x";
-const DEFAULT_INPUT = MOUSE_PRESS + KEY_UP + KEY_CTRL_N + KEY_ENTER + "pi";
+const CUSTOM_INPUT = `${KEY_CTRL_K + KEY_CTRL_J + KEY_ENTER + KEY_CTRL_P + KEY_CTRL_N}x`;
+const DEFAULT_INPUT = `${MOUSE_PRESS + KEY_UP + KEY_CTRL_N + KEY_ENTER}pi`;
 const EXPECTED_CUSTOM_EVENTS = [
   { type: "up" },
   { type: "down" },
