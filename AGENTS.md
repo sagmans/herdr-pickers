@@ -55,6 +55,11 @@ All checks must pass before a push. Never bypass them with `--no-verify`. The
 generic files in `.githooks/` and `scripts/setup-hooks` are copies of the dotf
 template (`templates/githooks/`); change them there, not here.
 
+Commit messages follow `.githooks/GIT_CONVENTION.md`, which `commit-msg` and
+`pre-push` enforce. The generic checks need gitleaks, osv-scanner, semgrep,
+lizard and markdownlint-cli2, plus actionlint and zizmor when a push changes
+workflow files. A missing tool blocks the hook.
+
 `pre-commit` runs the type check and Biome (format and lint) on the staged
 files; `pre-push` runs the full gate below on every pushed commit. Biome is a
 pinned devDependency; `scripts/biome` refuses a missing binary or one that
