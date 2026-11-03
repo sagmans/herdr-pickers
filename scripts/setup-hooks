@@ -4,11 +4,14 @@
 # in, so every contributor runs this once after cloning. It only sets the
 # local core.hooksPath; it needs no other repo or tool to do so.
 # Idempotent: a second run changes nothing and says so.
-# Copied from the dotf template (templates/scripts/setup-hooks).
+# Copied from the shared hook template.
 set -eu
 
 HOOKS_DIR=.githooks
 HOOK_NAMES='pre-commit pre-merge-commit prepare-commit-msg commit-msg pre-push'
+# Scanners the generic checks call; each check blocks when it needs a missing
+# one, so warn now instead of at the first commit or push that needs it.
+SCANNERS='gitleaks markdownlint-cli2 actionlint zizmor osv-scanner semgrep lizard'
 
 top=$(git rev-parse --show-toplevel)
 cd "$top"
@@ -41,9 +44,11 @@ if [ "$(git config --type=bool --get extensions.worktreeConfig 2>/dev/null || tr
 	fi
 fi
 
-if ! command -v gitleaks >/dev/null 2>&1; then
-	echo "setup-hooks: warning: gitleaks not found; commits and pushes will fail the secret scan until it is installed" >&2
-fi
+for scanner in $SCANNERS; do
+	if ! command -v "$scanner" >/dev/null 2>&1; then
+		echo "setup-hooks: warning: $scanner not found; the checks that need it will block until it is installed (see .githooks/lib/checks)" >&2
+	fi
+done
 active=''
 for name in $HOOK_NAMES; do
 	[ -x "$HOOKS_DIR/$name" ] && active="$active $name"

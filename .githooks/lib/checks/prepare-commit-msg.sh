@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Generic check: prepare-commit-msg. Copied from the dotf template (templates/githooks).
+# Generic check: prepare-commit-msg. Copied from the shared hook template.
 # Auto-injects Signed-off-by trailer into every commit message.
 # This ensures -s behavior without requiring the flag.
 

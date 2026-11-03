@@ -1,0 +1,79 @@
+# Vendored rule for the generic pre-push SAST check (lib/checks/sast.sh).
+# Copied from the shared hook template. Own rules instead of the
+# Semgrep registry: the push gate needs no network, gives the same result on
+# every machine, and carries no third-party rule license. Each rule targets a
+# high-signal pattern and skips literal arguments to keep false positives low.
+# Covers: JavaScript and TypeScript code and command injection.
+# Fixtures: tests/semgrep/ in the shared hook template repository.
+rules:
+  - id: js-eval-non-literal
+    languages: [javascript]
+    severity: ERROR
+    message: >-
+      Code built at run time is executed (eval or Function). If any part
+      comes from input, an attacker runs code. Parse data with JSON.parse or
+      use a lookup table instead.
+    metadata:
+      cwe: "CWE-95"
+    pattern-either:
+      - patterns:
+          - pattern-either:
+              - pattern: eval($CODE)
+              - pattern: new Function(..., $CODE)
+              - pattern: Function(..., $CODE)
+          - pattern-not: eval("...")
+          - pattern-not: new Function(..., "...")
+          - pattern-not: Function(..., "...")
+  - id: js-child-process-exec-non-literal
+    languages: [javascript]
+    severity: ERROR
+    message: >-
+      child_process exec runs its argument through a shell. A non-literal
+      command lets input inject shell syntax. Use execFile or spawn with an
+      argument array.
+    metadata:
+      cwe: "CWE-78"
+    patterns:
+      - pattern-either:
+          - pattern: require('child_process').$EXEC($CMD, ...)
+          - pattern: require('node:child_process').$EXEC($CMD, ...)
+          - patterns:
+              - pattern-either:
+                  - pattern-inside: |
+                      $CP = require('child_process');
+                      ...
+                  - pattern-inside: |
+                      $CP = require('node:child_process');
+                      ...
+                  - pattern-inside: |
+                      import * as $CP from 'child_process';
+                      ...
+                  - pattern-inside: |
+                      import * as $CP from 'node:child_process';
+                      ...
+                  - pattern-inside: |
+                      import $CP from 'child_process';
+                      ...
+                  - pattern-inside: |
+                      import $CP from 'node:child_process';
+                      ...
+              - pattern: $CP.$EXEC($CMD, ...)
+          - patterns:
+              - pattern-either:
+                  - pattern-inside: |
+                      const { ..., $EXEC, ... } = require('child_process');
+                      ...
+                  - pattern-inside: |
+                      const { ..., $EXEC, ... } = require('node:child_process');
+                      ...
+                  - pattern-inside: |
+                      import { ..., $EXEC, ... } from 'child_process';
+                      ...
+                  - pattern-inside: |
+                      import { ..., $EXEC, ... } from 'node:child_process';
+                      ...
+              - pattern: $EXEC($CMD, ...)
+      - metavariable-regex:
+          metavariable: $EXEC
+          regex: ^(exec|execSync)$
+      - pattern-not: $F("...", ...)

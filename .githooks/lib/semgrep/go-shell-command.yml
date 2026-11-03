@@ -1,0 +1,25 @@
+# Vendored rule for the generic pre-push SAST check (lib/checks/sast.sh).
+# Copied from the shared hook template. Own rules instead of the
+# Semgrep registry: the push gate needs no network, gives the same result on
+# every machine, and carries no third-party rule license. Each rule targets a
+# high-signal pattern and skips literal arguments to keep false positives low.
+# Covers: Go shell command injection.
+# Fixtures: tests/semgrep/ in the shared hook template repository.
+rules:
+  - id: go-shell-command-non-literal
+    languages: [go]
+    severity: ERROR
+    message: >-
+      A non-literal command runs through 'sh -c', so input can inject shell
+      syntax. Call exec.Command with the program and its arguments directly.
+    metadata:
+      cwe: "CWE-78"
+    patterns:
+      - pattern-either:
+          - pattern: exec.Command($SHELL, "-c", $CMD, ...)
+          - pattern: exec.CommandContext($CTX, $SHELL, "-c", $CMD, ...)
+      - metavariable-regex:
+          metavariable: $SHELL
+          regex: ^"(/usr)?(/bin/)?(sh|bash|zsh|dash|ksh)"$
+      - pattern-not: exec.Command($SHELL, "-c", "...", ...)
+      - pattern-not: exec.CommandContext($CTX, $SHELL, "-c", "...", ...)

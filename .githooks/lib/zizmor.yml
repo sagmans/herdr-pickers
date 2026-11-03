@@ -1,0 +1,12 @@
+# Base zizmor config for the generic pre-push workflow scan
+# (lib/checks/workflows.sh). Copied from the shared hook template.
+# Used only when the repository has no zizmor.yml or .github/zizmor.yml of
+# its own; a repository config replaces this file entirely, so copy these
+# rules into it and add a reason next to each relaxation.
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        # A tag or branch can be moved to new code after review; only a full
+        # commit SHA pins what runs. zizmor's default lets actions/* use tags.
+        "*": hash-pin

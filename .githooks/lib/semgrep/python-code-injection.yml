@@ -1,0 +1,61 @@
+# Vendored rule for the generic pre-push SAST check (lib/checks/sast.sh).
+# Copied from the shared hook template. Own rules instead of the
+# Semgrep registry: the push gate needs no network, gives the same result on
+# every machine, and carries no third-party rule license. Each rule targets a
+# high-signal pattern and skips literal arguments to keep false positives low.
+# Covers: Python code and command injection, unsafe deserialization.
+# Fixtures: tests/semgrep/ in the shared hook template repository.
+rules:
+  - id: python-eval-non-literal
+    languages: [python]
+    severity: ERROR
+    message: >-
+      eval or exec runs code built at run time. If any part comes from
+      input, an attacker runs code. Use ast.literal_eval for literals or a
+      lookup table.
+    metadata:
+      cwe: "CWE-95"
+    patterns:
+      - pattern-either:
+          - pattern: eval($CODE, ...)
+          - pattern: exec($CODE, ...)
+      - pattern-not: eval("...", ...)
+      - pattern-not: exec("...", ...)
+  - id: python-shell-command-non-literal
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A non-literal command runs through a shell (shell=True, os.system,
+      os.popen), so input can inject shell syntax. Pass an argument list to
+      subprocess without shell=True.
+    metadata:
+      cwe: "CWE-78"
+    patterns:
+      - pattern-either:
+          - pattern: subprocess.$FUNC($CMD, ..., shell=True, ...)
+          - pattern: os.system($CMD)
+          - pattern: os.popen($CMD, ...)
+      - pattern-not: subprocess.$FUNC("...", ..., shell=True, ...)
+      - pattern-not: os.system("...")
+      - pattern-not: os.popen("...", ...)
+  - id: python-unsafe-deserialization
+    languages: [python]
+    severity: ERROR
+    message: >-
+      pickle and full YAML loaders build arbitrary objects, so untrusted
+      data runs code on load. Use json, yaml.safe_load, or
+      Loader=yaml.SafeLoader.
+    metadata:
+      cwe: "CWE-502"
+    pattern-either:
+      - pattern: pickle.loads(...)
+      - pattern: pickle.load(...)
+      - pattern: cPickle.loads(...)
+      - pattern: cPickle.load(...)
+      - pattern: yaml.unsafe_load(...)
+      - pattern: yaml.load(..., Loader=yaml.Loader, ...)
+      - pattern: yaml.load(..., Loader=yaml.UnsafeLoader, ...)
+      - pattern: yaml.load(..., Loader=yaml.FullLoader, ...)
+      - patterns:
+          - pattern: yaml.load(...)
+          - pattern-not: yaml.load(..., Loader=$LOADER, ...)

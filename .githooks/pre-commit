@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# pre-commit: generic secret scan, then the repo's .githooks/pre-commit.d/*.
+# pre-commit: generic secret scan, whitespace/conflict-marker check and
+# Markdown lint of the staged change, then the repo's .githooks/pre-commit.d/*.
 # Activated per clone by scripts/setup-hooks (core.hooksPath=.githooks).
 set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=lib/run-local.sh
@@ -12,4 +13,6 @@ case "$index" in /*) ;; *) index="$PWD/$index" ;; esac
 export PROJECT_HOOK_INDEX_FILE="$index"
 
 "$CHECKS_DIR/secrets.sh" staged
+"$CHECKS_DIR/whitespace.sh"
+"$CHECKS_DIR/markdown.sh"
 run_local pre-commit "$@"

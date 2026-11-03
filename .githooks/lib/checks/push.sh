@@ -1,71 +1,34 @@
 #!/usr/bin/env bash
-# Generic check: pre-push. Copied from the dotf template (templates/githooks).
-# Every new commit must carry Signed-off-by (DCO), a signature git can verify,
-# and no secrets. This is the last check before code leaves the machine, and
-# it also catches commits that were made with hooks off.
+# Generic check: pre-push. Copied from the shared hook template.
+# Every new commit must carry one Signed-off-by per person (DCO), a signature
+# git can verify, a message with the structure and convention commit-msg asks
+# for (lib/convention.sh, the same rules, plus no fixup!/squash!/amend!/WIP
+# subjects), and no secrets. Then the scanners judge the pushed range: workflows at the tip
+# (workflows.sh), dependencies at each lockfile change or the tip (deps.sh),
+# changed source files with static analysis at the tip (sast.sh), and the
+# complexity of the functions the push changes (complexity.sh). This
+# is the last check before code leaves the machine, and it also catches
+# commits that were made with hooks off or reworded later.
 # Reads git's pre-push ref lines on stdin; $1 is the remote name.
 # shellcheck disable=SC2034  # local_ref/remote_ref/remote_sha/url required by git hook protocol
 
 set -euo pipefail
 
+# shellcheck source-path=SCRIPTDIR source=../convention.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/../convention.sh"
+# shellcheck source-path=SCRIPTDIR source=../helpers.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/../helpers.sh"
+
 remote="$1"
-z40="0000000000000000000000000000000000000000"
+checks_dir="$(dirname -- "${BASH_SOURCE[0]}")"
 # Release pipelines are tag-triggered, so a tag is what ships: it must be a
 # signed annotated tag, the same trust bar as the commits it points to.
 tag_prefix="refs/tags/"
 
-commit_sha_for_ref() {
-    git rev-parse --verify --quiet "${1}^{commit}" 2>/dev/null
-}
-
-default_branch_sha() {
-    local remote_name="$1" branch="" sha=""
-
-    branch=$(git ls-remote --symref "$remote_name" HEAD 2>/dev/null \
-        | sed -n 's#^ref: refs/heads/\([^[:space:]]*\)[[:space:]]*HEAD$#\1#p' \
-        | head -n 1 || true)
-
-    if [ -n "$branch" ]; then
-        sha=$(git ls-remote "$remote_name" "refs/heads/$branch" 2>/dev/null \
-            | awk 'NR == 1 { print $1 }' || true)
-        if [ -n "$sha" ]; then
-            printf '%s\n' "$sha"
-            return 0
-        fi
-
-        for candidate in \
-            "refs/remotes/${remote_name}/${branch}" \
-            "refs/heads/${branch}"
-        do
-            if sha=$(commit_sha_for_ref "$candidate"); then
-                printf '%s\n' "$sha"
-                return 0
-            fi
-        done
-    fi
-
-    for candidate in \
-        "refs/remotes/${remote_name}/main" \
-        "refs/remotes/origin/main" \
-        "refs/heads/main" \
-        "refs/remotes/${remote_name}/HEAD" \
-        "refs/remotes/origin/HEAD"
-    do
-        if sha=$(commit_sha_for_ref "$candidate"); then
-            printf '%s\n' "$sha"
-            return 0
-        fi
-    done
-
-    return 0
-}
-
-base_sha=""
-base_sha_resolved=0
-
 while read -r local_ref local_sha remote_ref remote_sha; do
-    # Skip branch deletions
-    if [ "$local_sha" = "$z40" ]; then
+    # A deletion adds no commits. An all-zero ID of any length, so a SHA-256
+    # repository is handled too.
+    if is_null_oid "$local_sha"; then
         continue
     fi
 
@@ -81,22 +44,14 @@ while read -r local_ref local_sha remote_ref remote_sha; do
         ;;
     esac
 
-    # Sign-off validation only applies to commits made after the remote default branch tip.
-    if [ "$base_sha_resolved" -eq 0 ]; then
-        base_sha="$(default_branch_sha "$remote")"
-        base_sha_resolved=1
-    fi
-
-    # R5: fail closed. Use a known local base when there is one; otherwise
-    # check everything not already on any remote-tracking ref of this remote.
-    # If git cannot list the commits, reject instead of checking nothing.
-    if [ -n "$base_sha" ] && git cat-file -e "${base_sha}^{commit}" 2>/dev/null; then
-        rev_args=("${base_sha}..${local_sha}")
-    elif [ "$remote_sha" != "$z40" ] && git cat-file -e "${remote_sha}^{commit}" 2>/dev/null; then
-        rev_args=("${remote_sha}..${local_sha}")
-    else
-        rev_args=("$local_sha" --not "--remotes=$remote")
-    fi
+    # Only commits after the remote default-branch tip are judged (shared
+    # with pushed_shas in lib/helpers.sh). Fail closed: if git cannot list
+    # the commits, reject instead of checking nothing.
+    rev_args=()
+    range="$(push_range_args "$local_sha" "$remote_sha" "$remote")"
+    while IFS= read -r arg; do
+        rev_args+=("$arg")
+    done <<<"$range"
     if ! shas="$(git rev-list "${rev_args[@]}")"; then
         echo >&2 "❌ Push rejected: cannot list the commits to verify for $local_ref (try git fetch)"
         exit 1
@@ -104,9 +59,12 @@ while read -r local_ref local_sha remote_ref remote_sha; do
 
     while IFS= read -r sha && [ -n "$sha" ]; do
         msg=$(git log -n 1 --format=%B "$sha")
-        if ! echo "$msg" | grep -q '^Signed-off-by: '; then
-            echo >&2 "❌ Push rejected: commit ${sha:0:12} is missing Signed-off-by"
+        CONVENTION_FOUND=''
+        convention_dco "$msg"
+        if [ -n "$CONVENTION_FOUND" ]; then
+            echo >&2 "❌ Push rejected: commit ${sha:0:12} breaks the DCO sign-off rules"
             echo >&2 "   $(git log -n 1 --format='%s' "$sha")"
+            convention_report "$CONVENTION_FOUND"
             exit 1
         fi
         if ! git verify-commit "$sha" >/dev/null 2>&1; then
@@ -115,13 +73,36 @@ while read -r local_ref local_sha remote_ref remote_sha; do
             echo >&2 "   sign with git commit -S; verifying needs gpg.ssh.allowedSignersFile (or gpg) set up"
             exit 1
         fi
+        # git writes merge messages itself, so only authored commits are judged.
+        [ -z "$(git rev-list --no-walk --min-parents=2 "$sha")" ] || continue
+        convention_structure "$msg"
+        if ! violations="$(convention_violations "$msg" push)"; then
+            CONVENTION_FOUND+="$violations"$'\n'
+        fi
+        if [ -n "$CONVENTION_FOUND" ]; then
+            echo >&2 "❌ Push rejected: commit ${sha:0:12} breaks the commit convention"
+            echo >&2 "   $(git log -n 1 --format='%s' "$sha")"
+            convention_report "$CONVENTION_FOUND"
+            echo >&2 "   Reword it with git rebase -i <base>, then push again."
+            exit 1
+        fi
     done <<< "$shas"
 
     [ -n "$shas" ] || continue
-    if ! "$(dirname -- "${BASH_SOURCE[0]}")/secrets.sh" range "${rev_args[*]}"; then
+    # Scanners judge the tree the remote will hold, so they run at the tip,
+    # and repo relaxations are read from it; a tag push names the tag
+    # object, which is peeled to its commit.
+    tip="$(git rev-parse --verify "${local_sha}^{commit}")"
+    if ! "$checks_dir/secrets.sh" range "$tip" "${rev_args[@]}" </dev/null; then
         echo >&2 "❌ Push rejected: secret scan found leaks in $local_ref (see above)"
         exit 1
     fi
+
+    # stdin still holds the ref lines this loop reads; scanners must not eat them.
+    "$checks_dir/workflows.sh" "$tip" "${rev_args[@]}" </dev/null || exit 1
+    "$checks_dir/deps.sh" "$tip" "${rev_args[@]}" </dev/null || exit 1
+    "$checks_dir/sast.sh" "$tip" "${rev_args[@]}" </dev/null || exit 1
+    "$checks_dir/complexity.sh" "$tip" "${rev_args[@]}" </dev/null || exit 1
 done
 
 exit 0

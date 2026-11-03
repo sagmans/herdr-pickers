@@ -6,7 +6,8 @@
   // Reuse .gitignore so node_modules, coverage and local env files are never read.
   "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
   // An unknown file type is an error, so a new language cannot slip past unchecked.
-  "files": { "ignoreUnknown": false },
+  // The copied hook template (.githooks/lib) stays byte-identical to its source.
+  "files": { "ignoreUnknown": false, "includes": ["**", "!.githooks/lib"] },
   // Matches the existing two-space, double-quote style. 120 columns gave the
   // smallest reformat of the code base when the formatter was introduced.
   "formatter": { "enabled": true, "indentStyle": "space", "indentWidth": 2, "lineWidth": 120 },

@@ -1,0 +1,21 @@
+// Base markdownlint config for the generic pre-commit Markdown check
+// (lib/checks/markdown.sh). Copied from the shared hook template.
+// Every rule is on at its default; each relaxation below carries its reason.
+// A repository that needs more relaxations adds a root .markdownlint.jsonc
+// that extends this file and states a reason next to each rule it turns off:
+//   { "extends": ".githooks/lib/markdownlint.jsonc", "MD033": false }
+{
+  "default": true,
+  "MD013": {
+    // Prose wraps at 80, but a table row or a code line cannot wrap without
+    // breaking the table or the code it shows.
+    "line_length": 80,
+    "tables": false,
+    "code_blocks": false
+  },
+  "MD024": {
+    // Changelogs repeat the same section names (Added, Fixed) under each
+    // release; only headings under the same parent must differ.
+    "siblings_only": true
+  }
+}

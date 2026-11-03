@@ -1,0 +1,27 @@
+# Vendored rule for the generic pre-push SAST check (lib/checks/sast.sh).
+# Copied from the shared hook template. Own rules instead of the
+# Semgrep registry: the push gate needs no network, gives the same result on
+# every machine, and carries no third-party rule license. Each rule targets a
+# high-signal pattern and skips literal arguments to keep false positives low.
+# Covers: shell eval of variables, downloads piped to a shell.
+# Fixtures: tests/semgrep/ in the shared hook template repository.
+rules:
+  - id: shell-eval-variable
+    languages: [bash]
+    severity: ERROR
+    message: >-
+      eval of a variable runs its content as shell code, so input becomes
+      code. Use arrays, case statements or functions instead.
+    metadata:
+      cwe: "CWE-95"
+    pattern-regex: '(?<![A-Za-z0-9_.-])eval\s+["'']?\$\{?[A-Za-z_@*0-9]'
+  - id: shell-pipe-to-shell
+    languages: [bash]
+    severity: ERROR
+    message: >-
+      A download is piped straight into a shell, so whatever the server or a
+      man in the middle sends runs unchecked. Download to a file, verify a
+      checksum or signature, then run it.
+    metadata:
+      cwe: "CWE-494"
+    pattern-regex: '(?<![A-Za-z0-9_.-])(curl|wget)\b[^|\n]*\|\s*(sudo\s+(-\S+\s+)*)?(env\s+)?(/usr)?(/bin/)?(ba|z|da|k)?sh\b'

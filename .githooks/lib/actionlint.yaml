@@ -1,0 +1,6 @@
+# Base actionlint config for the generic pre-push workflow scan
+# (lib/checks/workflows.sh). Copied from the shared hook template.
+# Passed with -config-file, so a config in the working tree is never read.
+# Empty on purpose: actionlint's defaults, with no ignored errors. A
+# repository may replace it with a tracked .github/actionlint.yaml; each
+# entry under an ignore: list there needs a reason comment above it.
