@@ -14,6 +14,10 @@ const STALE_TOKEN = "stale-generation";
 const PRIVATE_EXECUTABLE_MODE = 0o700;
 const TEST_TIMEOUT_MS = 10_000;
 const PTY = join(import.meta.dir, "fixtures/picker-pane-pty.py");
+// Fixture environments omit PATH, so resolve the managed launcher before isolation.
+const UV_COMMAND = Bun.which("uv");
+if (!UV_COMMAND) throw new Error("The pane fixtures require uv on the parent PATH");
+const PYTHON_COMMAND = [UV_COMMAND, "run", "--no-project", "--python-preference", "only-managed", "python"] as const;
 const ENTRYPOINT = join(import.meta.dir, "../src/pane.ts");
 const FAKE_COMMAND = `#!${process.execPath}
 import { createConnection } from "node:net";
@@ -105,7 +109,7 @@ for (const scenario of ["setup-error", "protocol-error", "departure"] as const) 
         expect(await probe.exited).toBe(0);
         const token = await session.reserve("overlay", async () => false);
         session.request("workspaces", {});
-        process = Bun.spawn(["python3", PTY, Bun.which("bun")!, ENTRYPOINT], {
+        process = Bun.spawn([...PYTHON_COMMAND, PTY, Bun.which("bun")!, ENTRYPOINT], {
           env: { ...env, [PICKER_TOKEN_ENV]: token! },
           stdin: "ignore",
           stdout: "pipe",
@@ -170,7 +174,7 @@ test(
     };
     const session = new PickerSession(env);
     try {
-      const process = Bun.spawn(["python3", PTY, Bun.which("bun")!, ENTRYPOINT], {
+      const process = Bun.spawn([...PYTHON_COMMAND, PTY, Bun.which("bun")!, ENTRYPOINT], {
         env: { ...env, [PICKER_TOKEN_ENV]: STALE_TOKEN },
         stdin: "ignore",
         stdout: "pipe",

@@ -30,7 +30,8 @@ const PLUGIN_ROOT = join(import.meta.dir, "..");
 // Resolved from PATH on purpose: mise pins the Herdr version the smoke targets.
 const HERDR_COMMAND = "herdr";
 const GIT_COMMAND = "git";
-const PYTHON_COMMAND = "python3";
+// A minimal PATH must fail before the PTY bridge can select the system Python.
+const PYTHON_COMMAND = ["uv", "run", "--no-project", "--python-preference", "only-managed", "python"] as const;
 const PTY_BRIDGE_SCRIPT = "smoke-pty.py";
 const CLIENT_TERM = "xterm-256color";
 const XDG_CONFIG_DIR = "x";
@@ -646,7 +647,7 @@ function spawnServer(sessionName: string, logPath: string): Bun.Subprocess<"igno
 function spawnClient(sessionName: string, rawOutputPath: string): Bun.Subprocess<"pipe", number, "ignore"> {
   const rawOutput = openSync(rawOutputPath, "a");
   return Bun.spawn(
-    [PYTHON_COMMAND, join(import.meta.dir, PTY_BRIDGE_SCRIPT), HERDR_COMMAND, "--session", sessionName],
+    [...PYTHON_COMMAND, join(import.meta.dir, PTY_BRIDGE_SCRIPT), HERDR_COMMAND, "--session", sessionName],
     {
       env: { ...isolatedEnv(), HERDR_SESSION: sessionName, TERM: CLIENT_TERM },
       stdin: "pipe",

@@ -8,7 +8,7 @@
   "scripts": {
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "lint": "scripts/biome ci --error-on-warnings .",
+    "lint": "bun tools/python-policy.mjs && scripts/biome ci --error-on-warnings .",
     "format": "scripts/biome check --write .",
     "smoke": "bun scripts/smoke.ts"
   },

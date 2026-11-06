@@ -4,6 +4,8 @@
 bun = "1.4.4"
 fzf = "0.55.0"
 herdr = "0.9.1"
+# This backend cannot express a security minimum, so the lock names a patched release.
+uv = "0.13.6"
 
 # Checksummed mise.lock pins every tool download; CI installs in locked mode
 # so a tampered or re-tagged release cannot be swapped in silently.

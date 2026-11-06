@@ -24,6 +24,8 @@ jobs:
             mise_env: herdr-floor
     runs-on: ${{ matrix.os }}
     env:
+      # Fresh runners must not download an unpatched default Python release.
+      UV_PYTHON: "3.14.10"
       # Every mise install in this job, including the matrix Herdr, must match
       # a checksum recorded in a lockfile; an unlisted or re-tagged release fails.
       MISE_LOCKED: "1"

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --no-project --python-preference only-managed python
 # PTY bridge: runs a command in a real pseudo-terminal while forwarding
 # plain stdin/stdout. herdr's TUI needs a true tty (macOS `script` refuses
 # socket-backed stdin), and the smoke harness needs to inject keystrokes.
