@@ -67,45 +67,6 @@ version_ge() {
     return 0
 }
 
-# run_with_timeout <seconds> <cmd...>
-# Run a command that talks to the network and stop it when it hangs, so a
-# dead connection blocks the push with a clear message instead of freezing
-# it. Plain bash, because GNU timeout is not installed on stock macOS.
-# Returns the command's status, or 124 on timeout (as GNU timeout does).
-run_with_timeout() {
-    local seconds="$1" pid watcher rc=0 flag
-    shift
-    flag="$(mktemp "${TMPDIR:-/tmp}/hook-timeout.XXXXXX")" || return 1
-    "$@" &
-    pid=$!
-    # The watcher polls once a second, so after the command ends it lives at
-    # most one more second. It must not hold the caller's stdout or stderr
-    # open, or a caller that captures output would wait for it.
-    (
-        waited=0
-        while [ "$waited" -lt "$seconds" ]; do
-            sleep 1
-            kill -0 "$pid" 2>/dev/null || exit 0
-            waited=$((waited + 1))
-        done
-        echo timeout >"$flag"
-        kill -TERM "$pid" 2>/dev/null
-    ) </dev/null >/dev/null 2>&1 &
-    watcher=$!
-    wait "$pid" || rc=$?
-    kill "$watcher" 2>/dev/null || true
-    wait "$watcher" 2>/dev/null || true
-    # 143 is death by TERM; only that, with the flag, is our timeout.
-    if [ "$rc" -eq 143 ] && [ -s "$flag" ]; then
-        rc=124
-    fi
-    # Only the mktemp file this call created.
-    case "$flag" in
-        */hook-timeout.*) rm -f -- "$flag" ;;
-    esac
-    return "$rc"
-}
-
 # range_changed_paths <rev-list args...>
 # Print, NUL-separated and once each, every path that a commit in the range
 # adds, changes or deletes; readers skip the one empty entry that the blank

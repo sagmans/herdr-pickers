@@ -20,10 +20,15 @@ case "$COMMIT_SOURCE" in
         ;;
 esac
 
-# Skip fixup/squash prefix commits
-if head -1 "$COMMIT_MSG_FILE" | grep -qE '^(fixup!|squash!|amend!)'; then
-    exit 0
-fi
+# Skip fixup/squash prefix commits: autosquash folds them into a commit that
+# carries its own sign-off. The subject is read without a pipe, because under
+# pipefail an early-exiting reader can fail the pipeline and hide a match.
+# read fails on a file with no trailing newline yet still fills the variable.
+subject=''
+IFS= read -r subject <"$COMMIT_MSG_FILE" || true
+case "$subject" in
+    fixup!* | squash!* | amend!*) exit 0 ;;
+esac
 
 # Build the Signed-off-by line from git's author identity
 SOB=$(git var GIT_AUTHOR_IDENT | sed -n 's/^\(.*>\).*/Signed-off-by: \1/p')

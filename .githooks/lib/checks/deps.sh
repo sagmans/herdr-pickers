@@ -16,12 +16,18 @@
 # Each commit is scanned as a copy of its tracked regular files: osv-scanner
 # reads osv-scanner.toml next to each lockfile, so an untracked or ignored one
 # in the working tree could hide advisories without review.
+# Call analysis stays off. It passes a Go advisory when no scanned code calls
+# the affected function, yet that code can gain a caller at any time, and it
+# compiles the tree with whatever Go the host has, so one commit could pass on
+# one host and fail or report differently on another.
 
 set -euo pipefail
 
 lib_dir="$(cd "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 # shellcheck source-path=SCRIPTDIR source=../tools.sh
 . "$lib_dir/tools.sh"
+# shellcheck source-path=SCRIPTDIR source=../helpers.sh
+. "$lib_dir/helpers.sh"
 
 CHECK=dependency-scan
 SCANNER=osv-scanner
@@ -29,6 +35,8 @@ SCANNER_MIN_VERSION=2.3.0
 INSTALL_HINT='install osv-scanner (https://google.github.io/osv-scanner), e.g. mise use -g osv-scanner or brew install osv-scanner'
 # The scanner queries osv.dev; a dead connection must end the push, not hang it.
 SCANNER_TIMEOUT_SECONDS=120
+# Same result on every host, with no compile step on the pushed tree.
+SCANNER_FLAGS=(--no-call-analysis=all)
 # Lockfile names osv-scanner reads, matched at any depth.
 LOCKFILES=(
     package-lock.json npm-shrinkwrap.json yarn.lock pnpm-lock.yaml bun.lock
@@ -74,7 +82,7 @@ copy_tree() {
 
 # scan_copy <dir> -- run the scanner on the copy; a subshell keeps the cwd.
 scan_copy() {
-    (cd "$1" && run_with_timeout "$SCANNER_TIMEOUT_SECONDS" "$SCANNER" scan source -r .)
+    (cd "$1" && run_with_timeout "$SCANNER_TIMEOUT_SECONDS" "$SCANNER" scan source -r . "${SCANNER_FLAGS[@]}")
 }
 
 lock_globs=()
