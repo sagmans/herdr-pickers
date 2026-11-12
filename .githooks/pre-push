@@ -11,9 +11,8 @@ export HOOK_STDIN_FILE
 trap 'rm -f -- "$HOOK_STDIN_FILE"' EXIT
 cat >"$HOOK_STDIN_FILE"
 
-# Every check judges the same commits: the remote and its default-branch
-# base are resolved once here (one network round trip) for push.sh and for
-# pushed_shas in the repo checks.
+# Resolve the default-branch base once so generic and repo checks share
+# the same commit range without repeating the remote lookups.
 # shellcheck source-path=SCRIPTDIR source=lib/helpers.sh
 . "$HOOK_HELPERS"
 export HOOK_PUSH_REMOTE="$1"

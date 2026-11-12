@@ -10,8 +10,8 @@
 # range). Complex code the push does not touch never blocks, so a repo can
 # adopt the check before it pays off old debt. A push that only deletes lines
 # inside a function does not judge it.
-# Thresholds: MAX_CCN and MAX_LENGTH below; a repo may change them in a root
-# .lizard-thresholds file, with a written reason for each value (see README).
+# Root .lizard-thresholds may override MAX_CCN/MAX_LENGTH below with ccn/length;
+# each needs a matching <key>_reason so threshold changes remain reviewable.
 
 set -euo pipefail
 

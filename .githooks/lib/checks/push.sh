@@ -45,9 +45,10 @@ while read -r local_ref local_sha remote_ref remote_sha; do
         ;;
     esac
 
-    # Only commits after the remote default-branch tip are judged (shared
-    # with pushed_shas in lib/helpers.sh). Fail closed: if git cannot list
-    # the commits, reject instead of checking nothing.
+    # Share helpers.sh range selection with repo checks so both judge the same
+    # commits: use a locally available default-branch base, else the old remote tip,
+    # else exclude this remote's tracking refs. Reject an unreadable range rather
+    # than silently checking nothing.
     rev_args=()
     range="$(push_range_args "$local_sha" "$remote_sha" "$remote")"
     while IFS= read -r arg; do

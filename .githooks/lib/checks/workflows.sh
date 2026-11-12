@@ -38,8 +38,8 @@ ACTIONLINT_BASE_CONFIG="$lib_dir/actionlint.yaml"
 # A repo zizmor config replaces the base one, so it must keep a pinning
 # policy of its own (with its reason) rather than drop the base floor.
 ZIZMOR_REQUIRED_RULE=unpinned-uses
-# Files copied into the scan tree: what zizmor collects (workflows and
-# action definitions) and the files local actions use. Globs match "/<path>".
+# Keep scanner inputs scoped to .github and action definitions anywhere;
+# local-action sibling files outside .github are not copied. Globs match "/<path>".
 TREE_GLOBS=('/.github/*' '*/action.yml' '*/action.yaml')
 # The scan runs when the push changes a file it would read, so the triggers
 # come from the same lists: a change it skipped would reach the remote

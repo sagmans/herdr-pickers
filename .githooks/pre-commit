@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # pre-commit: generic secret scan, whitespace/conflict-marker check and
 # Markdown lint of the staged change, then the repo's .githooks/pre-commit.d/*.
-# Activated per clone by scripts/setup-hooks (core.hooksPath=.githooks).
+# Run scripts/setup-hooks per clone so checked-in hooks are explicitly enabled.
 set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=lib/run-local.sh
 . "$(dirname -- "${BASH_SOURCE[0]}")/lib/run-local.sh"

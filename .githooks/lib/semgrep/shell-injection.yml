@@ -1,8 +1,8 @@
 # Vendored rule for the generic pre-push SAST check (lib/checks/sast.sh).
 # Copied from the shared hook template. Own rules instead of the
 # Semgrep registry: the push gate needs no network, gives the same result on
-# every machine, and carries no third-party rule license. Each rule targets a
-# high-signal pattern and skips literal arguments to keep false positives low.
+# every machine, and carries no third-party rule license. High-signal patterns
+# keep false positives low; literal exclusions apply only where specified.
 # Covers: shell eval of variables, downloads piped to a shell.
 # Fixtures: tests/semgrep/ in the shared hook template repository.
 rules:

@@ -1,9 +1,9 @@
 # Base gitleaks config for the generic secret scan (lib/checks/secrets.sh).
 # Copied from the shared hook template.
 # Passed with --config on every scan, so a .gitleaks.toml in the working tree
-# or the repository cannot turn rules off or add allowlists. A repository
-# accepts a finding only in a tracked .gitleaksignore, one fingerprint per
-# entry with a reason comment above it (see the hooks README).
+# or the repository cannot turn rules off or add allowlists. Tracked
+# .gitleaksignore fingerprints need reason comments so exceptions can be reviewed.
+# Inline gitleaks:allow comments also bypass findings and need review.
 title = "githooks template base"
 
 [extend]

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Generic check: prepare-commit-msg. Copied from the shared hook template.
-# Auto-injects Signed-off-by trailer into every commit message.
-# This ensures -s behavior without requiring the flag.
+# Supply the DCO trailer without requiring -s on ordinary commits and replays.
+# Squash, real merges and autosquash placeholders keep their existing messages.
 
 set -euo pipefail
 
