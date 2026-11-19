@@ -5,9 +5,9 @@
 # Convention: a Conventional Commits subject. Structure, convention and the
 # DCO rules all live in
 # lib/convention.sh, shared with the pre-push re-check. Every
-# owned repository carries its own copy of this file, and the owner wants one
-# uniform convention across all of them, so the rules are fixed here rather
-# than chosen per repository. GIT_CONVENTION.md documents each rule.
+# repository that uses this template carries its own copy of this file, and
+# one uniform convention applies across all of them, so the rules are fixed
+# here rather than chosen per repository. GIT_CONVENTION.md documents each rule.
 # Safety net: the Signed-off-by trailer that prepare-commit-msg injects.
 # This file keeps only what is commit-time specific: comment stripping, the
 # exemptions for messages git writes or reuses, and the report.

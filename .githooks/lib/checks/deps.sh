@@ -80,9 +80,16 @@ copy_tree() {
         GIT_INDEX_FILE="$tmp/index" git checkout-index -z --stdin --prefix="$dir/"
 }
 
-# scan_copy <dir> -- run the scanner on the copy; a subshell keeps the cwd.
+# scan_copy <dir> -- run the scanner on the copy, given by its full path.
+# The scanner starts where require_tool checked its version, so a tool manager
+# shim (mise, asdf) resolves the same binary for both steps, also when the
+# scanner is pinned only for this project. It must not start inside the copy:
+# the shim would parse the pushed tree's own config or refuse it as untrusted,
+# and that refusal exits 1, which reads as a vulnerability finding.
+# osv-scanner takes osv-scanner.toml only from next to each lockfile, so an
+# untracked one in the working directory still cannot hide an advisory.
 scan_copy() {
-    (cd "$1" && run_with_timeout "$SCANNER_TIMEOUT_SECONDS" "$SCANNER" scan source -r . "${SCANNER_FLAGS[@]}")
+    run_with_timeout "$SCANNER_TIMEOUT_SECONDS" "$SCANNER" scan source -r "$1" "${SCANNER_FLAGS[@]}"
 }
 
 lock_globs=()

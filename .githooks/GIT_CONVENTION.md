@@ -2,7 +2,7 @@
 
 This file is the one source for the commit message rules that the hooks in
 `.githooks/` enforce. It is copied from the shared hook template with the
-hooks, so every owned repository uses the same rules.
+hooks, so every repository that uses them follows the same rules.
 
 - `commit-msg` checks each message when you commit.
 - `pre-push` checks each new commit again before it leaves the machine. This

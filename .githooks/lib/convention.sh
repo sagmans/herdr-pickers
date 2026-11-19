@@ -14,8 +14,8 @@
 
 # Where a contributor reads the rules; every rejection points here.
 CONVENTION_DOC='.githooks/GIT_CONVENTION.md'
-# The owner wants one convention across all owned repositories, so the list
-# is fixed here instead of per repository.
+# One convention applies across every repository that shares this template,
+# so the list is fixed here instead of per repository.
 CONVENTION_TYPES='feat fix docs style refactor perf test build ci chore revert'
 # Longer subjects are cut off by `git log --oneline`, hosting sites and mail.
 CONVENTION_SUBJECT_MAX=72
