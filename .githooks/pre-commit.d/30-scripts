@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# Format-check and lint staged repo-owned shell and Python scripts before
+# commit at the exact versions pinned in mise.toml. Reads staged blobs from the
+# commit index via staged_git so unstaged edits never mask or trigger errors.
+set -euo pipefail
+
+# shellcheck disable=SC1090,SC1091  # path exported by .githooks/lib/run-local.sh
+. "${HOOK_HELPERS:?run from .githooks (scripts/setup-hooks)}"
+
+readonly MISE_CONFIG='mise.toml'
+readonly LINT_SCRIPT='scripts/lint-scripts'
+
+top=$(cd -- "$(git rev-parse --show-toplevel)" && pwd -P)
+cd "$top"
+
+# No --diff-filter here: editing OR deleting mise.toml or scripts/lint-scripts
+# must trigger the full check and fail closed if removed or made non-regular.
+control_changed=0
+if ! staged_git diff --cached --quiet -- "$MISE_CONFIG" "$LINT_SCRIPT"; then
+	control_changed=1
+fi
+
+# Collect regular-file candidate paths (100644/100755 only; never symlinks).
+candidates=()
+if [ "$control_changed" -eq 1 ]; then
+	while IFS= read -r -d '' entry; do
+		mode=${entry%% *}
+		path=${entry#*	}
+		case "$mode" in
+		100644 | 100755) candidates+=("$path") ;;
+		esac
+	done < <(staged_git ls-files --stage -z)
+else
+	while IFS= read -r -d '' meta && IFS= read -r -d '' path; do
+		read -r _ mode _ <<<"$meta"
+		case "$mode" in
+		100644 | 100755) candidates+=("$path") ;;
+		esac
+	done < <(staged_git diff --cached --raw -z --no-renames --diff-filter=ACMR)
+fi
+
+[ "${#candidates[@]}" -gt 0 ] || [ "$control_changed" -eq 1 ] || exit 0
+
+# Verify control-file presence, regular-file mode (never symlink), and content
+# in one pass before exporting any staged files.
+case "$(staged_git ls-files -s -- "$MISE_CONFIG")" in
+100644\ * | 100755\ *) ;;
+*)
+	echo "pre-commit: $MISE_CONFIG must be a tracked regular file (mode 100644/100755) in the index" >&2
+	exit 1
+	;;
+esac
+
+case "$(staged_git ls-files -s -- "$LINT_SCRIPT")" in
+100755\ *) ;;
+*)
+	echo "pre-commit: $LINT_SCRIPT must be an executable regular file (mode 100755) in the index" >&2
+	exit 1
+	;;
+esac
+
+if [ "$(staged_git cat-file -s ":$MISE_CONFIG")" -eq 0 ]; then
+	echo "pre-commit: staged $MISE_CONFIG is empty" >&2
+	exit 1
+fi
+if [ "$(staged_git cat-file -s ":$LINT_SCRIPT")" -eq 0 ]; then
+	echo "pre-commit: staged $LINT_SCRIPT is empty" >&2
+	exit 1
+fi
+
+snapshot=$(mktemp -d "${TMPDIR:-/tmp}/herdr-scripts-staged.XXXXXX")
+cleanup() {
+	case "$snapshot" in
+	*/herdr-scripts-staged.*) rm -rf -- "$snapshot" ;;
+	esac
+}
+trap cleanup EXIT
+snapshot=$(cd -- "$snapshot" && pwd -P)
+
+# Checkout only scripts/lint-scripts first so non-script commits skip the full
+# tree export while still using the staged script as the single filter authority.
+staged_git checkout-index -f --prefix="$snapshot/" -- "$LINT_SCRIPT"
+
+files=()
+if [ "${#candidates[@]}" -gt 0 ]; then
+	while IFS= read -r -d '' path; do
+		files+=("$path")
+	done < <(printf '%s\0' "${candidates[@]}" | bash "$snapshot/$LINT_SCRIPT" --filter)
+fi
+
+[ "${#files[@]}" -gt 0 ] || exit 0
+
+# Export the whole staged tree only when script targets exist so shellcheck -x
+# resolves sourced helpers and scripts/lint-scripts reads the staged mise.toml.
+staged_git checkout-index -a -f --prefix="$snapshot/"
+
+echo "pre-commit: shell/python checks (${#files[@]} staged file(s))"
+(
+	cd "$snapshot"
+	bash "./$LINT_SCRIPT" -- "${files[@]}"
+)

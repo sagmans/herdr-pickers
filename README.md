@@ -87,7 +87,7 @@ command = "herdr plugin action invoke herdr-pickers.last-workspace"
 ## Actions
 
 | Action | Purpose |
-|---|---|
+| --- | --- |
 | `herdr-pickers.all` | Search projects, workspaces, and worktrees by repository. |
 | `herdr-pickers.projects` | Search tracked or configured repositories. |
 | `herdr-pickers.workspaces` | Search actionable non-bare workspaces. |
@@ -118,7 +118,7 @@ roots = ["~/projects", "~/work"]
 ## Picker controls
 
 | Input | Action |
-|---|---|
+| --- | --- |
 | typing | Fuzzy search visible repository, identity, relation, and detail text |
 | `Ctrl-n` / `↓` | Move selection down |
 | `Ctrl-p` / `↑` | Move selection up |
@@ -210,7 +210,8 @@ different binding there. Some terminals encode a physical Backspace as
 The top-right `✕` closes without dispatch. Cancellation is inert. Dispatch
 failures close the popup and surface as errors.
 
-All pickers render a loading message immediately and accept `Ctrl-C` during discovery, including after a mode replacement.
+All pickers render a loading message immediately and accept `Ctrl-C` during
+discovery, including after a mode replacement.
 Navigation catalogs load once per mode request and reload only on `Ctrl-r`.
 Agent catalogs refresh every second and also support `Ctrl-r`.
 Empty navigation catalogs remain open and reloadable.
@@ -275,8 +276,9 @@ Run the checks:
 ```sh
 bun test
 bun run typecheck
-bun run lint    # Biome format and lint check (bun run format fixes formatting)
-bun run smoke   # PTY smoke against a disposable isolated Herdr runtime
+bun run lint         # Biome format and lint check (bun run format fixes formatting)
+./scripts/lint-scripts  # Pinned shellcheck, shfmt, and ruff checks on repo scripts
+bun run smoke        # PTY smoke against a disposable isolated Herdr runtime
 ```
 
 The smoke automates dispatch, toggling, reload, all-mode replacement, concurrent
@@ -296,21 +298,31 @@ before it can reach your terminal.
 
 ## Troubleshooting
 
-- `HERDR_PLUGIN_ID is required` — invoke through Herdr, not by running the open entrypoint directly.
-- No `herdr-pickers.*` actions — reinstall or `herdr plugin link .` from a checkout.
-- No projects or worktrees — open a repository in Herdr or configure `[projects].roots`.
+- `HERDR_PLUGIN_ID is required` — invoke through Herdr, not by running the
+  open entrypoint directly.
+- No `herdr-pickers.*` actions — reinstall or `herdr plugin link .` from a
+  checkout.
+- No projects or worktrees — open a repository in Herdr or configure
+  `[projects].roots`.
 - No agents — open an agent pane first.
-- `Herdr command could not be started.` — check the Herdr executable and retry. A proven process-creation failure releases its unclaimed reservation.
-- `herdr plugin failed` — Herdr refused to open the picker pane. The refusal releases the unclaimed reservation, so retry after you fix the cause.
-- Focus observation failed — the picker closes safely and reports failure. Check that the affected Herdr session remains available.
-- `Picker request could not be delivered before the deadline. Reopen after the current picker closes.` — close the current picker, then retry.
-  Close active pickers before updating from a version without mode replacement.
-- `Picker startup is pending. Retry after the earlier picker opens, or after 10 seconds when its reservation expires.` — an earlier picker request was sent, but its picker did not start.
-  After that time, a new picker can take over the reservation.
-  A late picker from the earlier request then exits and does not show a duplicate surface.
-  Ownership uses `picker-sessions.sqlite` in the plugin state directory.
-  Do not delete this file while any picker is active.
-  If an unrelated process reuses a recorded PID, ownership fails closed; restart the affected session to recover.
+- `Herdr command could not be started.` — check the Herdr executable and
+  retry. A proven process-creation failure releases its unclaimed reservation.
+- `herdr plugin failed` — Herdr refused to open the picker pane. The refusal
+  releases the unclaimed reservation, so retry after you fix the cause.
+- Focus observation failed — the picker closes safely and reports failure.
+  Check that the affected Herdr session remains available.
+- `Picker request could not be delivered before the deadline. Reopen after the
+  current picker closes.` — close the current picker, then retry. Close active
+  pickers before updating from a version without mode replacement.
+- `Picker startup is pending. Retry after the earlier picker opens, or after 10
+  seconds when its reservation expires.` — an earlier picker request was sent,
+  but its picker did not start. Wait for it to open or for its 10-second
+  reservation to expire so a new picker can take over. A late picker from the
+  earlier request then exits and does not show a duplicate surface. Ownership
+  uses `picker-sessions.sqlite` in the plugin state directory. Do not delete
+  this file while any picker is active. If an unrelated process reuses a
+  recorded PID, ownership fails closed; restart the affected session to
+  recover.
 - Red fzf error — verify `fzf --version` is `>= 0.48`.
 
 ## License

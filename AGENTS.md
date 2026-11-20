@@ -60,11 +60,12 @@ Commit messages follow `.githooks/GIT_CONVENTION.md`, which `commit-msg` and
 lizard and markdownlint-cli2, plus actionlint and zizmor when a push changes
 workflow files. A missing tool blocks the hook.
 
-`pre-commit` runs the type check and Biome (format and lint) on the staged
-files; `pre-push` runs the full gate below on every pushed commit. Biome is a
-pinned devDependency; `scripts/biome` refuses a missing binary or one that
-differs from the `package.json` pin, so run `bun install --frozen-lockfile`
-first. Fix formatting with `bun run format`.
+`pre-commit` runs the type check, Biome (format and lint), and pinned shell and
+Python checks (`scripts/lint-scripts`: `shellcheck`, `shfmt`, and `ruff`) on
+the staged files; `pre-push` runs the full gate below on every pushed commit.
+Biome is a pinned devDependency; `scripts/biome` refuses a missing binary or
+one that differs from the `package.json` pin, so run
+`bun install --frozen-lockfile` first. Fix formatting with `bun run format`.
 
 The pre-push gate:
 
@@ -73,10 +74,12 @@ bun test
 bun run typecheck
 bun audit
 bun run lint
+./scripts/lint-scripts
 ```
 
-Lint and format rules live in `biome.jsonc`. Every relaxed rule there carries
-its reason; keep it that way.
+TypeScript lint and format rules live in `biome.jsonc` (every relaxed rule
+carries its reason); shell and Python script lint/format rules live in
+`scripts/lint-scripts` with tool versions pinned in `mise.toml`.
 
 Run `bun run smoke` for changes to plugin registration, Herdr commands or JSON,
 popup/TTY behavior, discovery, dispatch, events, or persisted workspace state.

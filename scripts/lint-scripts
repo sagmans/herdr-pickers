@@ -1,0 +1,235 @@
+#!/usr/bin/env bash
+# Format-check and lint repo-owned shell and Python scripts at the exact
+# versions pinned in mise.toml. Shared by pre-commit (staged snapshot),
+# pre-push (pushed commit via at_sha), and manual runs so target selection,
+# flags, and tool pins never drift.
+# Usage:
+#   scripts/lint-scripts [--] [paths...]   # check all tracked scripts or given paths
+#   scripts/lint-scripts --filter          # filter NUL-delimited repo-relative paths on stdin
+set -euo pipefail
+
+# Explicit isolated Ruff rule set so host user configs cannot alter hook results.
+readonly RUFF_SELECT='E,F,W,I,B,UP,EXE'
+readonly MISE_CONFIG_REL='mise.toml'
+
+# Single authority for repo-owned shell and Python script classification.
+# Uses positive rules so non-shell extensions (e.g. .ts, .mjs, .md) are never
+# misrouted to shellcheck/shfmt, and covers every .githooks/<hook>.d/ subdir.
+classify_rel_path() {
+	case "$1" in
+	scripts/setup-hooks | .githooks/lib/* | .githooks/pre-commit | .githooks/pre-merge-commit | .githooks/prepare-commit-msg | .githooks/commit-msg | .githooks/pre-push)
+		return 1
+		;;
+	*.[pP][yY])
+		printf 'python\n'
+		return 0
+		;;
+	*.[sS][hH] | *.[bB][aA][sS][hH])
+		printf 'shell\n'
+		return 0
+		;;
+	.githooks/*.d/* | scripts/*)
+		case "${1##*/}" in
+		*.*) return 1 ;;
+		*)
+			printf 'shell\n'
+			return 0
+			;;
+		esac
+		;;
+	*)
+		return 1
+		;;
+	esac
+}
+
+if [ "${1:-}" = "--filter" ]; then
+	if [ "$#" -ne 1 ]; then
+		echo "lint-scripts: --filter accepts no extra arguments" >&2
+		exit 2
+	fi
+	while IFS= read -r -d '' path; do
+		if classify_rel_path "$path" >/dev/null; then
+			printf '%s\0' "$path"
+		fi
+	done
+	exit 0
+fi
+
+if [ "${1:-}" = "--" ]; then
+	shift
+fi
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+repo_root=$(cd -- "$script_dir/.." && pwd -P)
+mise_config="$repo_root/$MISE_CONFIG_REL"
+
+parse_mise_pin() {
+	local tool="$1"
+	local pin
+	if [ ! -f "$mise_config" ]; then
+		echo "lint-scripts: missing $mise_config" >&2
+		exit 1
+	fi
+	# Scope pin lookup strictly to [tools] and strip trailing inline comments.
+	pin=$(awk -v key="$tool" '
+		/^\[/ { in_tools = ($0 ~ /^\[tools\][[:space:]]*(#.*)?$/); next }
+		in_tools {
+			line = $0
+			sub(/[[:space:]]*#.*/, "", line)
+			if (line ~ "^\"?" key "\"?[[:space:]]*=[[:space:]]*\"[0-9]+\\.[0-9]+\\.[0-9]+\"[[:space:]]*$") {
+				sub(/^[^=]*=[[:space:]]*"/, "", line)
+				sub(/".*$/, "", line)
+				val = line
+				count++
+			}
+		}
+		END { if (count == 1) print val }
+	' "$mise_config")
+	if [ -z "$pin" ]; then
+		echo "lint-scripts: no exact $tool pin found in [tools] of $mise_config" >&2
+		exit 1
+	fi
+	printf '%s\n' "$pin"
+}
+
+check_tool_version() {
+	local tool="$1"
+	local expected="$2"
+	local sed_expr="$3"
+	local out actual
+	if ! command -v "$tool" >/dev/null 2>&1; then
+		echo "lint-scripts: $tool not found (expected $expected; run: mise install)" >&2
+		exit 1
+	fi
+	if ! out=$("$tool" --version 2>&1); then
+		echo "lint-scripts: failed to run $tool --version (expected $expected):" >&2
+		printf '%s\n' "$out" >&2
+		exit 1
+	fi
+	actual=$(printf '%s\n' "$out" | sed -n "$sed_expr" | sed -n '1p')
+	if [ "$actual" != "$expected" ]; then
+		echo "lint-scripts: $tool version mismatch: expected $expected, got ${actual:-unknown} (run: mise install)" >&2
+		exit 1
+	fi
+}
+
+# Normalize any explicit path against $PWD so callers from subdirectories or
+# snapshot roots get consistent repo-relative paths, failing closed on missing
+# files, symlinks, or paths outside $repo_root.
+normalize_explicit_path() {
+	local raw="$1"
+	local dir base abs
+	if [ -L "$raw" ]; then
+		echo "lint-scripts: refusing symlink target: $raw" >&2
+		exit 1
+	fi
+	if [ ! -f "$raw" ]; then
+		echo "lint-scripts: target file not found: $raw" >&2
+		exit 1
+	fi
+	dir=$(dirname -- "$raw")
+	base=$(basename -- "$raw")
+	abs="$(cd -- "$dir" && pwd -P)/$base"
+	case "$abs" in
+	"$repo_root"/*)
+		printf '%s\n' "${abs#"$repo_root/"}"
+		;;
+	*)
+		echo "lint-scripts: path outside repository root ($repo_root): $raw" >&2
+		exit 1
+		;;
+	esac
+}
+
+shell_files=()
+python_files=()
+
+if [ "$#" -eq 0 ]; then
+	cd "$repo_root"
+	# Read all git index entries with modes so symlinks (120000), untracked
+	# hooks (e.g. 90-owner-dco), and copied template hooks are never checked,
+	# while classify_rel_path remains the single authority for path matching.
+	while IFS= read -r -d '' entry; do
+		mode=${entry%% *}
+		path=${entry#*	}
+		case "$mode" in
+		100644 | 100755) ;;
+		*) continue ;;
+		esac
+		[ -f "$path" ] && [ ! -L "$path" ] || continue
+		if kind=$(classify_rel_path "$path"); then
+			case "$kind" in
+			python) python_files+=("$path") ;;
+			shell) shell_files+=("$path") ;;
+			esac
+		fi
+	done < <(git -C "$repo_root" ls-files --stage -z)
+	if [ "${#shell_files[@]}" -eq 0 ] && [ "${#python_files[@]}" -eq 0 ]; then
+		echo "lint-scripts: no tracked repo shell or Python scripts found" >&2
+		exit 1
+	fi
+else
+	for arg in "$@"; do
+		rel=$(normalize_explicit_path "$arg")
+		if ! kind=$(classify_rel_path "$rel"); then
+			echo "lint-scripts: unsupported or excluded target path: $arg" >&2
+			exit 1
+		fi
+		case "$kind" in
+		python) python_files+=("$rel") ;;
+		shell) shell_files+=("$rel") ;;
+		esac
+	done
+	cd "$repo_root"
+fi
+
+# Resolve pinned tool directories once using explicit TOOL@VERSION overrides
+# parsed from $mise_config. Ignore $repo_root for mise itself so untrusted
+# temporary worktrees (at_sha / staged snapshots) never block mise bin-paths
+# or shims while $mise_config stays authoritative.
+pin_specs=()
+sc_pin=""
+shfmt_pin=""
+ruff_pin=""
+
+if [ "${#shell_files[@]}" -gt 0 ]; then
+	sc_pin=$(parse_mise_pin shellcheck)
+	shfmt_pin=$(parse_mise_pin shfmt)
+	pin_specs+=("shellcheck@$sc_pin" "shfmt@$shfmt_pin")
+fi
+if [ "${#python_files[@]}" -gt 0 ]; then
+	ruff_pin=$(parse_mise_pin ruff)
+	pin_specs+=("ruff@$ruff_pin")
+fi
+
+export MISE_IGNORED_CONFIG_PATHS="${MISE_IGNORED_CONFIG_PATHS:+$MISE_IGNORED_CONFIG_PATHS:}$repo_root"
+
+if command -v mise >/dev/null 2>&1 && [ "${#pin_specs[@]}" -gt 0 ]; then
+	# Prepend exact tool@version install dirs from / so mise-pinned binaries
+	# beat Homebrew or shims; check_tool_version below still fails closed.
+	if pinned_paths=$(cd / && mise bin-paths "${pin_specs[@]}" | paste -sd: -); then
+		if [ -n "$pinned_paths" ]; then
+			PATH="$pinned_paths:$PATH"
+			export PATH
+		fi
+	else
+		echo "lint-scripts: mise bin-paths failed for: ${pin_specs[*]} (run: mise install)" >&2
+		exit 1
+	fi
+fi
+
+if [ "${#shell_files[@]}" -gt 0 ]; then
+	check_tool_version shellcheck "$sc_pin" 's/^version: *//p'
+	check_tool_version shfmt "$shfmt_pin" '1s/^v//p'
+
+	shellcheck -x -- "${shell_files[@]}"
+	shfmt -d -- "${shell_files[@]}"
+fi
+
+if [ "${#python_files[@]}" -gt 0 ]; then
+	check_tool_version ruff "$ruff_pin" '1s/^ruff //p'
+
+	ruff format --isolated --no-cache --check --diff -- "${python_files[@]}"
+	ruff check --isolated --no-cache --select "$RUFF_SELECT" -- "${python_files[@]}"
+fi

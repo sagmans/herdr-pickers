@@ -46,8 +46,11 @@ echo "pre-commit: biome check (${#files[@]} staged file(s))"
 # The snapshot has no .git, so VCS integration is off; the file list is
 # already exactly the staged set. Unknown file types (Markdown, TOML) are
 # not Biome's to judge, so they are skipped instead of failing.
+# Ignore any staged mise.toml copied into the snapshot so node/bun mise shims
+# do not fail on an untrusted temp directory when mise.toml is part of the commit.
 cd "$snapshot"
-"$top/scripts/biome" check \
+MISE_IGNORED_CONFIG_PATHS="${MISE_IGNORED_CONFIG_PATHS:+$MISE_IGNORED_CONFIG_PATHS:}$snapshot" \
+	"$top/scripts/biome" check \
 	--config-path="$snapshot/$CONFIG_FILE" \
 	--vcs-enabled=false \
 	--files-ignore-unknown=true \

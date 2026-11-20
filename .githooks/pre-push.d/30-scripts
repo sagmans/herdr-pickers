@@ -1,0 +1,15 @@
+#!/bin/sh
+# Format-check and lint tracked repo shell and Python scripts on each pushed
+# commit, catching drift from commits made with hooks off.
+set -eu
+# shellcheck disable=SC1090,SC1091  # path exported by .githooks/lib/run-local.sh
+. "${HOOK_HELPERS:?run from .githooks (scripts/setup-hooks)}"
+
+# for loop, not `| while`: a failure must exit this script (fail closed).
+# pushed_shas already deduplicates while preserving oldest-first commit order.
+shas=$(pushed_shas <"$HOOK_STDIN_FILE") || exit 1
+# shellcheck disable=SC2086  # one SHA per word
+for sha in $shas; do
+	echo "pre-push: scripts/lint-scripts on $(git rev-parse --short "$sha")"
+	at_sha "$sha" ./scripts/lint-scripts || exit 1
+done

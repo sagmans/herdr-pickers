@@ -8,8 +8,8 @@ import pty
 import select
 import signal
 import struct
-import termios
 import sys
+import termios
 import time
 
 ROWS, COLS = 40, 120

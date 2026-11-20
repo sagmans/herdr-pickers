@@ -7,8 +7,10 @@ All notable user-facing changes to Herdr Pickers are recorded in this file.
 ### Changed
 
 - Bump `@types/bun` to 1.4.4 and TypeScript to 7.0.2 (native compiler).
-- Contributor git hooks now format-check and lint with Biome 2.5.15, a pinned
-  development dependency. The plugin still has no runtime dependency.
+- Contributor git hooks now format-check and lint TypeScript with Biome 2.5.15
+  (a pinned devDependency) and repo shell/Python scripts with `mise.toml`-pinned
+  `shellcheck`, `shfmt`, and `ruff` via `./scripts/lint-scripts`. The plugin
+  still has no runtime dependency.
 
 ### Security
 

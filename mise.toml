@@ -4,6 +4,9 @@
 bun = "1.4.4"
 fzf = "0.55.0"
 herdr = "0.9.1"
+ruff = "0.17.3"
+shellcheck = "0.11.0"
+shfmt = "3.14.1"
 # This backend cannot express a security minimum, so the lock names a patched release.
 uv = "0.13.6"
 
