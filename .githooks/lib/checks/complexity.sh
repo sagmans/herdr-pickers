@@ -28,6 +28,13 @@ MAX_CCN=15
 # Lines from the function's first to its last line, comments included.
 MAX_LENGTH=100
 OVERRIDE_FILE=.lizard-thresholds
+# The CSV field quote in a lizard report; it decides where a record ends.
+CSV_QUOTE='"'
+# Most physical lines one lizard record may span. Real multi-line names stay
+# near ten lines; a corrupt report must fail fast instead of being buffered.
+MAX_RECORD_LINES=200
+# Characters of an unreadable record an error shows; enough to locate it.
+MAX_ERROR_CHARS=300
 # Keys the override file may set; each needs a matching <key>_reason line.
 OVERRIDE_KEYS=' ccn length '
 # File types lizard parses; other files are skipped before blame runs.
@@ -147,15 +154,54 @@ if ! report="$("$SCANNER" --csv --no-gitignore "${lizard_inputs[@]}" 2>"$tmp/std
     exit 1
 fi
 
+# reject_record <reason> <text> -- stop the push on a report it cannot read.
+# A report the hook cannot read is never a pass; the text is cut short so a
+# corrupt report does not flood the terminal.
+reject_record() {
+    echo >&2 "❌ Push rejected: $1: ${2:0:$MAX_ERROR_CHARS}"
+    exit 1
+}
+
+# lizard_records -- print each record of the lizard report on stdin,
+# NUL-terminated.
+# A quoted long_name can span lines (multi-line JSX in a callback signature),
+# so one record may arrive as several physical lines. The CSV grammar, not the
+# record pattern, decides where a record ends: a line is held only while a
+# quote is open. Joining "until the pattern matches" would let a truncated
+# line swallow the next record and hide its finding. Lizard writes a quote
+# inside a name as ', so a quote character only opens or closes a field.
+# Parity is kept per line: rescanning the joined record on each line was
+# quadratic and stalled a push for minutes on bash 3.2. Runs in the main
+# shell (output to a file, not a pipe), so its reject stops the hook.
+lizard_records() {
+    local line quotes record='' record_lines=0 quote_open=0
+    while IFS= read -r line; do
+        if [ "$record_lines" -gt 0 ]; then
+            record="$record"$'\n'"$line"
+        else
+            [ -n "$line" ] || continue
+            record="$line"
+        fi
+        record_lines=$((record_lines + 1))
+        quotes="${line//[^$CSV_QUOTE]/}"
+        quote_open=$(((quote_open + ${#quotes}) % 2))
+        if [ "$quote_open" -ne 0 ]; then
+            [ "$record_lines" -lt "$MAX_RECORD_LINES" ] ||
+                reject_record "a $SCANNER report record spans over $MAX_RECORD_LINES lines" "$record"
+            continue
+        fi
+        printf '%s\0' "$record"
+        record_lines=0
+    done
+    [ "$record_lines" -eq 0 ] || reject_record "the $SCANNER report ends inside an open quote" "$record"
+}
+
+lizard_records <<<"$report" >"$tmp/records"
 # CSV: nloc,ccn,tokens,params,length,"location","file","function","long_name",start,end
 csv_re='^[0-9]+,([0-9]+),[0-9]+,[0-9]+,([0-9]+),"(.*)",([0-9]+),([0-9]+)$'
 findings=()
-while IFS= read -r row; do
-    [ -n "$row" ] || continue
-    if ! [[ "$row" =~ $csv_re ]]; then
-        echo >&2 "❌ Push rejected: cannot read a $SCANNER report line: $row"
-        exit 1
-    fi
+while IFS= read -r -d '' row; do
+    [[ "$row" =~ $csv_re ]] || reject_record "cannot read a $SCANNER report line" "$row"
     ccn="${BASH_REMATCH[1]}"
     length="${BASH_REMATCH[2]}"
     middle="${BASH_REMATCH[3]}"
@@ -173,7 +219,7 @@ while IFS= read -r row; do
         problems="${problems:+$problems, }length $length > $max_length lines"
     fi
     findings+=("${files[$i]}:$start: $function_name: $problems")
-done <<<"$report"
+done <"$tmp/records"
 
 if [ "${#findings[@]}" -gt 0 ]; then
     echo >&2 "❌ Push rejected: the push changes functions that are too complex at ${tip:0:12}:"
