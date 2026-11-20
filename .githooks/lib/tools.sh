@@ -55,11 +55,15 @@ lower_extension() {
 }
 
 # version_ge <a> <b> -- true when dotted version <a> >= <b>. Pure bash, because
-# `sort -V` is missing from some BSD and busybox builds.
+# `sort -V` is missing from some BSD and busybox builds. The dot separator is
+# scoped to each `read`, so it cannot change word splitting elsewhere. A
+# failed split (the here-string could not be set up) counts as too old: an
+# empty <b> would pass every version, and the callers must fail closed.
 version_ge() {
-    local IFS=. i
-    # shellcheck disable=SC2206  # split on dots on purpose
-    local -a a=($1) b=($2)
+    local i
+    local -a a b
+    IFS=. read -r -a a <<<"$1" || return 1
+    IFS=. read -r -a b <<<"$2" || return 1
     for ((i = 0; i < ${#a[@]} || i < ${#b[@]}; i++)); do
         if ((10#${a[i]:-0} > 10#${b[i]:-0})); then return 0; fi
         if ((10#${a[i]:-0} < 10#${b[i]:-0})); then return 1; fi
